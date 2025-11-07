@@ -1,0 +1,13 @@
+**/target/
+**/.git/
+**/.vscode/
+**/.bloop/
+**/.metals/
+**/.scala-build/
+dependency-reduced-pom.xml
+**/*.bak
+**/*.back
+**/*.txt
+**/*.sh
+**/*.erg
+**/backupSrc/
