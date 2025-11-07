@@ -1,4 +1,4 @@
-package io.netnotes.gui.core.input;
+package io.netnotes.gui.nvg.uiNode.input;
 import java.io.EOFException;
 import java.io.InputStream;
 import java.util.Objects;
@@ -9,7 +9,7 @@ import java.util.concurrent.Executor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.gui.core.input.events.InputRecord;
+import io.netnotes.gui.nvg.uiNode.input.events.InputRecord;
 
 public final class InputPacketReader {
 

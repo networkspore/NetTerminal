@@ -193,28 +193,33 @@ public class FontManager {
         buffer.flip();
         return buffer;
     }
-    
+
+    public static final String OCR_EXT = "ocr-ext";
+    public static final String SANS_EMOJI = "sansEmoji";
+    public static final String SANS = "sans";
+    public static final String SANS_BOLD = "sans-bold";
+    public static final String MONO = "mono";
     /**
      * Load common system fonts (convenience method)
      */
     public void init() {
         // Try to load common system fonts
         String os = System.getProperty("os.name").toLowerCase();
-        loadFont("ocr", ResourceRegistry.PRIMARY_FONT);
-        loadFont("sansEmoji", ResourceRegistry.EMOJI_FONT);
+        loadFont(OCR_EXT, ResourceRegistry.PRIMARY_FONT);
+        loadFont(SANS_EMOJI, ResourceRegistry.EMOJI_FONT);
       
         if (os.contains("win")) {
-            loadFont("sans", "C:/Windows/Fonts/arial.ttf");
-            loadFont("sans-bold", "C:/Windows/Fonts/arialbd.ttf");
-            loadFont("mono", "C:/Windows/Fonts/consola.ttf");
+            loadFont(SANS, "C:/Windows/Fonts/arial.ttf");
+            loadFont(SANS_BOLD, "C:/Windows/Fonts/arialbd.ttf");
+            loadFont(MONO, "C:/Windows/Fonts/consola.ttf");
         } else if (os.contains("mac")) {
-            loadFont("sans", "/System/Library/Fonts/Helvetica.ttc");
-            loadFont("sans-bold", "/System/Library/Fonts/Helvetica.ttc");
-            loadFont("mono", "/System/Library/Fonts/Monaco.ttf");
+            loadFont(SANS, "/System/Library/Fonts/Helvetica.ttc");
+            loadFont(SANS_BOLD, "/System/Library/Fonts/Helvetica.ttc");
+            loadFont(MONO, "/System/Library/Fonts/Monaco.ttf");
         } else if (os.contains("nux")) {
-            loadFont("sans", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
-            loadFont("sans-bold", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
-            loadFont("mono", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
+            loadFont(SANS, "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf");
+            loadFont(SANS_BOLD, "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf");
+            loadFont(MONO, "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf");
         }
 
             

@@ -1,4 +1,4 @@
-package io.netnotes.gui.core.input;
+package io.netnotes.gui.nvg.uiNode.input;
 
 /**
  * Describes what an input source can do.

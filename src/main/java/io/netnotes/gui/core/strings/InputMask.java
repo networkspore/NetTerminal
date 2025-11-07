@@ -1,11 +1,10 @@
-package io.netnotes.gui.core.input;
+package io.netnotes.gui.core.strings;
 
 import java.math.BigDecimal;
 import java.text.DecimalFormat;
 import java.util.function.Function;
 
 import io.netnotes.engine.noteBytes.processing.IntCounter;
-import io.netnotes.gui.core.strings.FormattingHelpers;
 
 /**
  * Enhanced input mask for formatted text entry.

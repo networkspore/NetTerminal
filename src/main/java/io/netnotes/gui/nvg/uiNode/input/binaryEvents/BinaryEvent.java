@@ -1,4 +1,4 @@
-package io.netnotes.gui.core.binaryEvents;
+package io.netnotes.gui.nvg.uiNode.input.binaryEvents;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;

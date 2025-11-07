@@ -1,10 +1,10 @@
-package io.netnotes.gui.core.input.events;
+package io.netnotes.gui.nvg.uiNode.input.events;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.AtomicSequence;
-import io.netnotes.gui.core.input.InputPacket;
+import io.netnotes.gui.nvg.uiNode.input.InputPacket;
 
 
 

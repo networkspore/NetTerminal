@@ -1,4 +1,4 @@
-package io.netnotes.gui.core.binaryEvents;
+package io.netnotes.gui.nvg.uiNode.input.binaryEvents;
 
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicInteger;

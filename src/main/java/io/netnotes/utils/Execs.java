@@ -1,4 +1,4 @@
-package io.netnotes.gui.core.executors;
+package io.netnotes.utils;
 
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
