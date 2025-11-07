@@ -6,10 +6,10 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.utils.LoggingHelpers;
-import io.netnotes.gui.fx.display.FxResourceFactory;
+import io.netnotes.gui.core.resources.ResourceRegistry;
 
 public class Log {
-    public static File logFile = FxResourceFactory.LOG_FILE;
+    public static File logFile = ResourceRegistry.LOG_FILE;
 
     public static void write(String scope, String msg){
         LoggingHelpers.writeLogMsg(logFile, scope, msg);

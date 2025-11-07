@@ -1,57 +1,14 @@
-package io.netnotes.gui.fx.uiNode.input;
+package io.netnotes.gui.core.strings;
 
-import java.math.BigDecimal;
-
-import javafx.animation.PauseTransition;
-
-import javafx.beans.binding.Binding;
-import javafx.beans.binding.Bindings;
-import javafx.beans.value.ChangeListener;
-import javafx.geometry.Point2D;
-
-import javafx.scene.Scene;
-import javafx.scene.control.Button;
-import javafx.scene.control.TextField;
-import javafx.scene.control.Tooltip;
-import javafx.scene.layout.HBox;
-import javafx.scene.layout.Region;
-import javafx.stage.Window;
-
-public class InputHelpers {
+public class FormattingHelpers {
     
     
-    public static int getIntFromField(TextField field){
-        return field == null ? 0 : isTextZero(field.getText()) ? 0 :  Integer.parseInt(formatStringToNumber(field.getText(), 0));
-    }
 
-    public static BigDecimal getBigDecimalFromField(TextField field, int decimals){
-        return field == null ? BigDecimal.ZERO : isTextZero(field.getText()) ? BigDecimal.ZERO :  new BigDecimal(formatStringToNumber(field.getText(), decimals));
-    }
 
     public static String formatStringLineLength(String str, int len){
         return str.replaceAll("(.{"+len+"})", "$1\n");
     }
 
-    public static Binding<String> createFormFieldIdBinding(TextField textField){
-        return Bindings.createObjectBinding(()-> textField != null ? (textField.textProperty().get().length() > 0 ? null : "formField") : null, textField.textProperty());
-    }
-
-    public static ChangeListener<String> createFieldEnterBtnAddListener(TextField textField, HBox textFieldBox, Button enterBtn){
-        ChangeListener<String> changeListener = (_, _, newval) ->{
-            if(textField != null && textFieldBox != null && enterBtn != null){
-                if(newval.length() > 0){
-                    if(!textFieldBox.getChildren().contains(enterBtn)){
-                        textFieldBox.getChildren().add(1, enterBtn);
-                    }
-                }else{
-                    if(textFieldBox.getChildren().contains(enterBtn)){
-                        textFieldBox.getChildren().remove(enterBtn);
-                    }
-                }
-            }
-        };
-        return changeListener;
-    }
 
 
     public static boolean onlyZero(String str) {
@@ -122,23 +79,6 @@ public class InputHelpers {
         number = leftSide + rightSide;
         return number;
 
-    }
-
-     public static void showTip(String msg, Region region, Tooltip tooltip, PauseTransition pt){
-    
-        Point2D p = region.localToScene(0.0, 0.0);
-        Scene scene = region.getScene();
-        Window window = scene.getWindow();
-
-        tooltip.setText(msg != null ? msg : "Error");
-        tooltip.show(region,
-                p.getX() + scene.getX()
-                        + window.getX()
-                        + region.getLayoutBounds().getWidth(),
-                (p.getY() + scene.getY()
-                        + window.getY()) - 30);
-        pt.setOnFinished(_->tooltip.hide());
-        pt.playFromStart();
     }
 
     public static String removeNonAlphaNumberic(String str)

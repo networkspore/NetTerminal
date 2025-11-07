@@ -1,4 +1,4 @@
-package io.netnotes.gui.fx.uiNode.binaryEvents;
+package io.netnotes.gui.core.binaryEvents;
 
 /**
  * Factory methods for creating specific binary events.

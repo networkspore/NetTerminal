@@ -9,19 +9,69 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.source>22</maven.compiler.source>
         <maven.compiler.target>22</maven.compiler.target>
+        <lwjgl.version>3.3.3</lwjgl.version>
+        <lwjgl.natives>natives-windows</lwjgl.natives>
+
         <exec.mainClass>io.netnotes.Main</exec.mainClass>
-        <javafx.version>24</javafx.version>
-        <javafx.platform>${os.detected.classifier}</javafx.platform>
+
     </properties>
+        <profiles>
+            <profile>
+                <id>lwjgl-natives-linux-amd64</id>
+                <activation>
+                    <os>
+                        <family>unix</family>
+                        <arch>amd64</arch>
+                    </os>
+                </activation>
+                <properties>
+                    <lwjgl.natives>natives-linux</lwjgl.natives>
+                </properties>
+            </profile>
+            <profile>
+                <id>lwjgl-natives-macos-x86_64</id>
+                <activation>
+                    <os>
+                        <family>mac</family>
+                        <arch>x86_64</arch>
+                    </os>
+                </activation>
+                <properties>
+                    <lwjgl.natives>natives-macos</lwjgl.natives>
+                </properties>
+            </profile>
+            <profile>
+                <id>lwjgl-natives-macos-aarch64</id>
+                <activation>
+                    <os>
+                        <family>mac</family>
+                        <arch>aarch64</arch>
+                    </os>
+                </activation>
+                <properties>
+                    <lwjgl.natives>natives-macos-arm64</lwjgl.natives>
+                </properties>
+            </profile>
+            <profile>
+                <id>lwjgl-natives-windows-amd64</id>
+                <activation>
+                    <os>
+                        <family>windows</family>
+                        <arch>amd64</arch>
+                    </os>
+                </activation>
+                <properties>
+                    <lwjgl.natives>natives-windows</lwjgl.natives>
+                </properties>
+            </profile>
+        </profiles>
 
     <dependencies> 
-
         <dependency>
             <groupId>io.netnotes</groupId>
             <artifactId>engine</artifactId>
             <version>0.1.0</version>
         </dependency>
-
 
         <dependency>
             <groupId>io.netnotes</groupId>
@@ -29,24 +79,75 @@
             <version>1.0.0</version>
         </dependency>
 
-        <
+        <!-- LWJGL Core -->
         <dependency>
             <groupId>org.lwjgl</groupId>
             <artifactId>lwjgl</artifactId>
-            <version>3.3.3</version>
+            <version>${lwjgl.version}</version>
         </dependency>
+        
+        <!-- GLFW (Windowing) -->
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-glfw</artifactId>
+            <version>${lwjgl.version}</version>
+        </dependency>
+        
+        <!-- OpenGL -->
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-opengl</artifactId>
+            <version>${lwjgl.version}</version>
+        </dependency>
+        
+        <!-- NanoVG -->
         <dependency>
             <groupId>org.lwjgl</groupId>
             <artifactId>lwjgl-nanovg</artifactId>
-            <version>3.3.3</version>
+            <version>${lwjgl.version}</version>
+        </dependency>
+        
+        <!-- STB (for image/font loading) -->
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-stb</artifactId>
+            <version>${lwjgl.version}</version>
+        </dependency>
+
+        <!-- Native libraries (platform-specific) -->
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl</artifactId>
+            <version>${lwjgl.version}</version>
+            <classifier>${lwjgl.natives}</classifier>
         </dependency>
         <dependency>
             <groupId>org.lwjgl</groupId>
             <artifactId>lwjgl-glfw</artifactId>
-            <version>3.3.3</version>
+            <version>${lwjgl.version}</version>
+            <classifier>${lwjgl.natives}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-opengl</artifactId>
+            <version>${lwjgl.version}</version>
+            <classifier>${lwjgl.natives}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-nanovg</artifactId>
+            <version>${lwjgl.version}</version>
+            <classifier>${lwjgl.natives}</classifier>
+        </dependency>
+        <dependency>
+            <groupId>org.lwjgl</groupId>
+            <artifactId>lwjgl-stb</artifactId>
+            <version>${lwjgl.version}</version>
+            <classifier>${lwjgl.natives}</classifier>
         </dependency>
 
-    </dependencies>
+        </dependencies>
+      
     
         <build>
             <extensions>
@@ -68,14 +169,6 @@
                     </configuration>
                 </plugin>
 
-                <plugin>
-                    <groupId>org.openjfx</groupId>
-                    <artifactId>javafx-maven-plugin</artifactId>
-                    <version>0.0.9</version>
-                    <configuration>
-                        <mainClass>io.netnotes.Main</mainClass>
-                    </configuration>
-                </plugin>
 
                 <plugin>
                     <groupId>org.apache.maven.plugins</groupId>

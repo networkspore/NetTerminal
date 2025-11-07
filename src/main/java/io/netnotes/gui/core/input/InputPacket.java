@@ -1,4 +1,4 @@
-package io.netnotes.gui.fx.uiNode.input;
+package io.netnotes.gui.core.input;
 
 import java.util.concurrent.CompletableFuture;
 
@@ -8,7 +8,7 @@ import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.noteBytes.NoteInteger;
 import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
 import io.netnotes.engine.utils.AtomicSequence;
-import io.netnotes.gui.fx.utils.TaskUtils;
+import io.netnotes.gui.core.executors.Execs;
 
 public class InputPacket {
      /**
@@ -129,7 +129,7 @@ public class InputPacket {
         }
 
          public CompletableFuture<byte[]> ofAsync(NoteBytesReadOnly type) {
-            return CompletableFuture.supplyAsync(()-> of(type, new NoteBytesReadOnly(AtomicSequence.getNextSequence())), TaskUtils.getVirtualExecutor());
+            return CompletableFuture.supplyAsync(()-> of(type, new NoteBytesReadOnly(AtomicSequence.getNextSequence())), Execs.getVirtualExecutor());
         }
 
     

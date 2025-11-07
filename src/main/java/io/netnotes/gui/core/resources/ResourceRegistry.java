@@ -1,44 +1,32 @@
-package io.netnotes.gui.fx.display;
+package io.netnotes.gui.core.resources;
 
 import java.io.BufferedInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.IOException;
-import java.io.InputStream;
 import java.net.URL;
-
-import io.netnotes.engine.utils.LoggingHelpers;
-import io.netnotes.gui.fx.display.javafxsvg.SvgImageLoaderFactory;
 
 import io.netnotes.engine.utils.Version;
 import io.netnotes.engine.utils.github.GitHubInfo;
 import io.netnotes.engine.utils.PomProperties;
 
-import javafx.scene.image.Image;
-import javafx.scene.input.KeyCode;
-import javafx.scene.input.KeyCodeCombination;
-import javafx.scene.input.KeyCombination;
-import javafx.scene.paint.Color;
-import javafx.scene.text.Font;
-import javafx.scene.text.FontWeight;
-import javafx.stage.FileChooser;
-import javafx.stage.FileChooser.ExtensionFilter;
 
-import java.awt.FontFormatException;
-import java.awt.GraphicsEnvironment;
-
-public class FxResourceFactory {
-    public static final KeyCombination KEY_COMB_CTL_Z = new KeyCodeCombination(KeyCode.Z, KeyCombination.SHORTCUT_DOWN);
-    public static final KeyCombination KEY_COMB_CTL_U = new KeyCodeCombination(KeyCode.U, KeyCombination.SHORTCUT_DOWN);
-
+public class ResourceRegistry {
+    
     public static int CURSOR_DELAY = 600;
 
-    public final static Font openSansTxt;
-    public final static Font openSansSmall;
-    public final static Font HeadingFont;
-    public final static Font txtFont;
-    public final static Font titleFont;
-    public final static Font smallFont;
+    public static final String POM_GROUP_ID = "io.netnotes";
+    public static final String POM_ARTIFACT_ID = "loader";
+    public static final Version POM_VERSION;
+
+
+    static{
+        PomProperties pomReader = PomProperties.create(POM_GROUP_ID, POM_ARTIFACT_ID);
+
+        POM_VERSION = pomReader.getVersion();
+    }
+    
+
 
     public final static File LOG_FILE = new File("netnotes-log.txt");
     public final static File STREAM_LOG_FILE = new File("netnotes-stream-log.txt");
@@ -46,10 +34,6 @@ public class FxResourceFactory {
     public final static String APP_NAME =  "Netnotes";
 
     public static final GitHubInfo GITHUB_PROJECT_INFO = new GitHubInfo("networkspore", "Netnotes-Widow");
-
-    public static final String POM_GROUP_ID = "io.netnotes";
-    public static final String POM_ARTIFACT_ID = "loader";
-    public static final Version POM_VERSION;
 
     public final static String ASSETS_DIRECTORY = "/assets";
     public final static String FONTS_DIRECTORY = "/fonts";
@@ -70,62 +54,6 @@ public class FxResourceFactory {
 
     public final static String WIDOW120 = ASSETS_DIRECTORY + "/widow-120.png";
     public final static String WIDOW256 = ASSETS_DIRECTORY + "/widow-256.png";
-
-    static{
-        SvgImageLoaderFactory.install();
-        initAwtFonts();
-        Font.loadFont(FxResourceFactory.class.getResource(PRIMARY_FONT).toExternalForm(),16);
-        Font.loadFont(FxResourceFactory.class.getResource(EMOJI_FONT).toExternalForm(),20);
-
-        PomProperties pomReader = PomProperties.create(POM_GROUP_ID, POM_ARTIFACT_ID);
-
-        POM_VERSION = pomReader.getVersion();
-
-        openSansTxt = Font.font(EMOJI_FONT_FAMILY, FontWeight.BOLD, 16);
-        openSansSmall = Font.font(EMOJI_FONT_FAMILY , FontWeight.BOLD, 12);
-        HeadingFont =  Font.font(PRIMARY_FONT_FAMILY, FontWeight.BOLD, 20);
-        txtFont = Font.font(PRIMARY_FONT_FAMILY, 18);
-        titleFont = Font.font(PRIMARY_FONT_FAMILY, FontWeight.BOLD, 16);
-        smallFont = Font.font(PRIMARY_FONT_FAMILY, 14);
-    }
-
-    public static void initAwtFonts(){
-        try( 
-            InputStream stream = FxResourceFactory.class.getResource(PRIMARY_FONT).openStream(); 
-        ) {
-            java.awt.Font ocrFont = java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, stream).deriveFont(48f);
-            GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
-            ge.registerFont(ocrFont);
-        } catch (FontFormatException | IOException e) {
-            LoggingHelpers.writeLogMsg(LOG_FILE, "Error registering font:", e);
-        }
-
-        try( 
-            InputStream stream = FxResourceFactory.class.getResource(EMOJI_FONT).openStream(); 
-        ) {
-            java.awt.Font ocrFont = java.awt.Font.createFont(java.awt.Font.TRUETYPE_FONT, stream).deriveFont(48f);
-            GraphicsEnvironment ge = GraphicsEnvironment.getLocalGraphicsEnvironment();
-            ge.registerFont(ocrFont);
-        } catch (FontFormatException | IOException e) {
-            LoggingHelpers.writeLogMsg(LOG_FILE, "Error registering font:", e);
-        }
-
-    }
-    
-  
-    public static Color txtColor = Color.web("#cdd4da");
-    public static Color altColor = Color.web("#777777");
-    public static Color formFieldColor = new Color(.8, .8, .8, .9);
-    
-
-    public static final String APP_LOGO_256 = ASSETS_DIRECTORY + "/logo-256.png";
-    public static final String APP_ICON_15 = ASSETS_DIRECTORY + "/icon15.png";
-
-    public static final String UNKNOWN_IMAGE_PATH = ASSETS_DIRECTORY + "/unknown-unit.png";
-
-    public final static ExtensionFilter JAR_EXT = new FileChooser.ExtensionFilter("application/x-java-archive", "*.jar");
-    public final static ExtensionFilter JSON_EXT = new FileChooser.ExtensionFilter("application/json", "*.json");
-
 
 
 
@@ -150,15 +78,15 @@ public class FxResourceFactory {
     public static final String TOGGLE_FRAME = ASSETS_DIRECTORY + "/expandFrame.png";
 
 
-    public static Image iconImage15 = new Image(APP_ICON_15);
-    public static Image logoImage256 = new Image(APP_LOGO_256);
-    public static Image closeImg = new Image(CLOSE_ICON);
-    public static Image minimizeImg = new Image(MINIMIZE_ICON);
-    public static Image maximizeImg = new Image(MAXIMIZE_ICON);
-    public static Image globeImg = new Image(NETWORK_ICON256);
-    public static Image globeImage30 = new Image(NETWORK_ICON);
-    public static Image settingsImg = new Image(SETTINGS_ICON_120);
-    public static Image unknownImg = new Image(UNKNOWN_IMAGE_PATH);
+    //public final static ExtensionFilter JAR_EXT = new FileChooser.ExtensionFilter("application/x-java-archive", "*.jar");
+    //public final static ExtensionFilter JSON_EXT = new FileChooser.ExtensionFilter("application/json", "*.json");
+
+
+    public static final String APP_LOGO_256 = ASSETS_DIRECTORY + "/logo-256.png";
+    public static final String APP_ICON_15 = ASSETS_DIRECTORY + "/icon15.png";
+
+    public static final String UNKNOWN_IMAGE_PATH = ASSETS_DIRECTORY + "/unknown-unit.png";
+
 
 
     public final static double STAGE_WIDTH = 450;
@@ -178,7 +106,7 @@ public class FxResourceFactory {
 
 
     public static String getStringFromResource(String resourceLocation) throws IOException{
-        URL location = resourceLocation != null ? FxResourceFactory.class.getResource(resourceLocation) : null;
+        URL location = resourceLocation != null ? ResourceRegistry.class.getResource(resourceLocation) : null;
         if(location != null){
             try(
                 ByteArrayOutputStream outStream = new ByteArrayOutputStream();

@@ -1,4 +1,4 @@
-package io.netnotes.gui.fx.uiNode.input;
+package io.netnotes.gui.core.input;
 import java.io.EOFException;
 import java.io.InputStream;
 import java.util.Objects;
@@ -7,18 +7,17 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.Executor;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.noteBytes.processing.NoteBytesReader;
-import io.netnotes.engine.utils.AtomicSequence;
+import io.netnotes.gui.core.input.events.InputRecord;
 
 public final class InputPacketReader {
 
     private final InputStream m_input;
-    private final BlockingQueue<RawEvent> m_eventQueue;
+    private final BlockingQueue<InputRecord> m_eventQueue;
     private final Executor m_decodeExecutor;
 
-    public InputPacketReader(InputStream input, BlockingQueue<RawEvent> eventQueue, Executor decodeExecutor) {
+    public InputPacketReader(InputStream input, BlockingQueue<InputRecord> eventQueue, Executor decodeExecutor) {
         this.m_input = Objects.requireNonNull(input);
         this.m_eventQueue = Objects.requireNonNull(eventQueue);
         this.m_decodeExecutor = Objects.requireNonNull(decodeExecutor);
@@ -48,7 +47,7 @@ public final class InputPacketReader {
                 NoteBytes type = body.get(InputPacket.Factory.TYPE_KEY);
                 if(type != null){
 
-                    RawEvent event = RawEvent.fromNoteBytes(body);
+                    InputRecord event = InputRecord.fromNoteBytes(body);
                     m_eventQueue.put(event);
                 }
             }

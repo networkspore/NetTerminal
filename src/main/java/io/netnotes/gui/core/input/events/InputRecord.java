@@ -1,17 +1,16 @@
-package io.netnotes.gui.fx.uiNode.input.events;
+package io.netnotes.gui.core.input.events;
 
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.AtomicSequence;
-import io.netnotes.gui.fx.uiNode.binaryEvents.BinaryEvent;
-import io.netnotes.gui.fx.uiNode.binaryEvents.BinaryEvents;
-import io.netnotes.gui.fx.uiNode.input.InputPacket;
+import io.netnotes.gui.core.input.InputPacket;
 
 
 
 
-    public record RawEvent(
+
+    public record InputRecord(
         int sourceId,
         short type,
         long atomicSequence,
@@ -20,7 +19,7 @@ import io.netnotes.gui.fx.uiNode.input.InputPacket;
         boolean aux1,
         NoteBytesArray payload
     ) {
-        public static RawEvent fromNoteBytes(NoteBytesMap body) {
+        public static InputRecord fromNoteBytes(NoteBytesMap body) {
             NoteBytes typeBytes = body.get(InputPacket.Factory.TYPE_KEY);
             NoteBytes seqBytes  = body.get(InputPacket.Factory.SEQUENCE_KEY);
 
@@ -45,7 +44,7 @@ import io.netnotes.gui.fx.uiNode.input.InputPacket;
             return switch (type) {
                // case BinaryEvent.Types.RAW_MOUSE_MOVED -> new MouseMoveEvent(seqLong, aux0, aux1, payload);
                // case BinaryEvent.Types.RAW_KEY_PRESSED -> new KeyPressEvent(seqLong, aux0, aux1, payload);
-                default -> new RawEvent(0, type, seqLong, flags, aux0, aux1, payload);
+                default -> new InputRecord(0, type, seqLong, flags, aux0, aux1, payload);
             };
         }
     }

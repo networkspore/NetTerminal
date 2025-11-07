@@ -1,11 +1,10 @@
-package io.netnotes.gui.fx.uiNode;
+package io.netnotes.gui.nvg.uiNode;
 
 import io.netnotes.engine.AppDataInterface;
 import io.netnotes.engine.INode;
 import io.netnotes.engine.NodeControllerInterface;
 import io.netnotes.engine.noteBytes.NoteBytesArray;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import javafx.stage.Stage;
 
 import java.io.IOException;
 import java.io.PipedOutputStream;
@@ -15,7 +14,7 @@ import java.util.concurrent.CompletableFuture;
  * UI Node - manages JavaFX display and input handling.
  * Implements INode to participate in the node messaging system.
  */
-public class FxUINode implements INode {
+public class NvgNode implements INode {
     
     private final NoteBytesReadOnly nodeId;
     private NodeControllerInterface controller;
@@ -23,7 +22,7 @@ public class FxUINode implements INode {
     
     private volatile boolean active = false;
     
-    public FxUINode(NoteBytesReadOnly nodeId) {
+    public NvgNode(NoteBytesReadOnly nodeId) {
         this.nodeId = nodeId;
     }
     
@@ -48,7 +47,7 @@ public class FxUINode implements INode {
     /**
      * Initialize with JavaFX primary stage (called after authentication)
      */
-    public void initializeWithStage(Stage primaryStage, PipedOutputStream inputOutputStream) {
+    public void initializeWithStage( PipedOutputStream inputOutputStream) {
         /*Platform.runLater(() -> {
             // Initialize JavaFX adapter
             JavaFxAdapter.initialize("primary", primaryStage, inputOutputStream);

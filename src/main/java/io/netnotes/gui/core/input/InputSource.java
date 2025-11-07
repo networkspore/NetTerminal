@@ -1,4 +1,4 @@
-package io.netnotes.gui.fx.uiNode.input;
+package io.netnotes.gui.core.input;
 
 /**
  * Input source with paired event parser.

@@ -1,10 +1,11 @@
-package io.netnotes.gui.fx.uiNode.input;
+package io.netnotes.gui.core.input;
 
 import java.math.BigDecimal;
 import java.text.DecimalFormat;
 import java.util.function.Function;
 
 import io.netnotes.engine.noteBytes.processing.IntCounter;
+import io.netnotes.gui.core.strings.FormattingHelpers;
 
 /**
  * Enhanced input mask for formatted text entry.
@@ -283,10 +284,10 @@ public class InputMask {
         
         // Decimal format (currency/decimal)
         if (m_decimalFormat != null) {
-            String cleaned = InputHelpers.formatStringToNumber(input, 
+            String cleaned = FormattingHelpers.formatStringToNumber(input, 
                 m_decimalPlaces >= 0 ? m_decimalPlaces : 10);
             
-            if (cleaned.isEmpty() || InputHelpers.isTextZero(cleaned)) {
+            if (cleaned.isEmpty() || FormattingHelpers.isTextZero(cleaned)) {
                 return "";
             }
             

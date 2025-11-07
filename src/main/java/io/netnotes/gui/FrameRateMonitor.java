@@ -1,4 +1,4 @@
-package io.netnotes.gui.fx.display;
+package io.netnotes.gui;
 
 import java.util.concurrent.atomic.AtomicReference;
 
