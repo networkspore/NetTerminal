@@ -1,9 +1,10 @@
 package io.netnotes.gui.nvg.core;
 
+import io.netnotes.engine.io.InputRecordReader;
+import io.netnotes.engine.io.RawEvent;
 import io.netnotes.gui.nvg.input.*;
 import io.netnotes.gui.nvg.resources.FontManager;
-import io.netnotes.security.SecureInputClient;
-import io.netnotes.security.SecureInputEvent;
+
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -38,11 +39,7 @@ public class CommandCenter extends Process {
     
     // Child processes spawned by this shell
     private final Map<Integer, ChildProcess> children = new ConcurrentHashMap<>();
-    
-    // Secure input for child processes
-    private SecureInputClient secureClient;
-    private ChildProcess secureInputTarget;
-    
+
     public CommandCenter(ProcessContainer container, long vg, FontManager fontManager) {
         this.container = container;
         this.vg = vg;
@@ -199,7 +196,7 @@ public class CommandCenter extends Process {
         
         // If child needs secure input, set it up
         if (child.getInputHandler().getInputMode() == InputMode.SECURE) {
-            setupSecureInputForChild(child);
+          //  setupSecureInputForChild(child);
         }
     }
     
@@ -263,10 +260,10 @@ public class CommandCenter extends Process {
         };
         */
     }
-    
+   /*
     /**
      * Set up secure input for a child process
-     */
+     
     private void setupSecureInputForChild(ChildProcess child) {
         if (!SecureInputClient.isAvailable()) {
             warning("NoteDaemon not available - child will use fallback");
@@ -326,23 +323,9 @@ public class CommandCenter extends Process {
         } catch (Exception e) {
             warning("Failed to activate secure input: " + e.getMessage());
         }
-    }
+    }*/
     
-    /**
-     * Tear down secure input
-     */
-    private void teardownSecureInput() {
-        if (secureClient != null) {
-            try {
-                secureClient.close();
-            } catch (Exception e) {
-                // Ignore cleanup errors
-            }
-            secureClient = null;
-            secureInputTarget = null;
-        }
-    }
-    
+
     /**
      * Kill foreground child process (Ctrl+C behavior)
      */
@@ -362,7 +345,6 @@ public class CommandCenter extends Process {
             child.kill();
         }
         children.clear();
-        teardownSecureInput();
     }
     
     /**

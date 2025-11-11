@@ -1,6 +1,6 @@
 package io.netnotes.gui.nvg.core;
 
-import io.netnotes.gui.nvg.input.RawEvent;
+import io.netnotes.engine.io.RawEvent;
 
 /**
  * Input handler interface for processes
@@ -14,7 +14,5 @@ interface ProcessInputHandler {
     
     /** Handle raw GLFW events - called if mode == RAW_EVENTS or DIRECT_GLFW */
     default void handleRawEvent(RawEvent event) {}
-    
-    /** Handle secure input from NoteDaemon - called if mode == SECURE */
-    default void handleSecureInput(SecureInputEvent event) {}
+
 }

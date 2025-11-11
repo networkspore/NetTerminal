@@ -1,7 +1,7 @@
 package io.netnotes.gui.nvg.core;
 
 import io.netnotes.engine.state.BitFlagStateMachine;
-import io.netnotes.gui.nvg.input.ContextPath;
+import io.netnotes.engine.io.ContextPath;
 import io.netnotes.gui.nvg.resources.FontManager;
 
 /**

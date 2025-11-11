@@ -9,8 +9,8 @@ import java.util.Set;
 import java.util.concurrent.BlockingQueue;
 import java.util.concurrent.CompletableFuture;
 
-import io.netnotes.gui.nvg.input.InputPacket.Factory;
-import io.netnotes.gui.nvg.input.InputPacket.StateFlags;
+import io.netnotes.engine.io.InputPacket.Factory;
+import io.netnotes.engine.messaging.EventBytes.StateFlags;
 import io.netnotes.utils.Execs;
 
 /**

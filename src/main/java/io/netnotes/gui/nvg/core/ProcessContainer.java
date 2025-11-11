@@ -1,9 +1,16 @@
 package io.netnotes.gui.nvg.core;
 
 import io.netnotes.gui.nvg.input.*;
-import io.netnotes.gui.nvg.input.events.InputRecord;
+import io.netnotes.engine.io.InputSourceRegistry;
+import io.netnotes.engine.io.RawEvent;
+import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.io.ContextPath;
+import io.netnotes.engine.io.IONetwork;
+import io.netnotes.engine.io.InputIONode;
+import io.netnotes.engine.io.InputRecord;
+import io.netnotes.engine.io.InputSourceCapabilities;
 
 import java.util.*;
 import java.util.concurrent.*;
@@ -25,8 +32,8 @@ public class ProcessContainer {
     private final ProcessInputRouter processInputRouter;
     private final BitFlagStateMachine stateMachine;
     private final InputSourceRegistry registry;
-    private final InputNode containerInputNode;
-    private final InputNetwork inputNetwork;
+    private final InputIONode containerInputNode;
+    private final IONetwork inputNetwork;
     
     // Context path for this container
     private final ContextPath rootPath;
@@ -35,12 +42,13 @@ public class ProcessContainer {
     private NoteBytesReadOnly primaryInputSourceId;
     private InputSourceManager primarySourceManager;
     private final String id;
+
     
     // Process tracking
     private final Map<Class<?>, Process> singletonProcesses = new ConcurrentHashMap<>();
     
     public ProcessContainer(String id, ContextPath rootPath, 
-                           InputNetwork inputNetwork, Executor executor) {
+                           IONetwork inputNetwork, Executor executor) {
         this.id = id;
         this.rootPath = rootPath;
         this.inputNetwork = inputNetwork;
@@ -73,12 +81,19 @@ public class ProcessContainer {
      */
     private void startEventProcessor() {
         Thread processor = new Thread(() -> {
-            BlockingQueue<InputRecord> queue = containerInputNode.getReadQueue();
+            BlockingQueue<RoutedPacket> queue = containerInputNode.getRoutedQueue();
             while (!Thread.currentThread().isInterrupted()) {
                 try {
-                    InputRecord record = queue.take();
-                    RawEvent event = new RawEvent(record);
-                    processInputRouter.routeInput(event, rootPath);
+                    io.netnotes.engine.io.RoutedPacket record = queue.take();
+                    int sourceId = record.getSourceId();
+                    //TODO: create threadsafe sourceId list 
+                    if(sourceId == 0){
+                        //TODO: process record
+                        if(record.isRecordProcessed()){
+                            RawEvent event = new RawEvent(record.getProcessedRecord());
+                            processInputRouter.routeInput(event, rootPath);
+                        }
+                    }
                 } catch (InterruptedException e) {
                     break;
                 } catch (Exception e) {
@@ -247,14 +262,14 @@ public class ProcessContainer {
     /**
      * Get the input network
      */
-    public InputNetwork getInputNetwork() {
+    public IONetwork getIONetwork() {
         return inputNetwork;
     }
     
     /**
      * Get the container's input node
      */
-    public InputNode getContainerInputNode() {
+    public InputIONode getContainerIONode() {
         return containerInputNode;
     }
     
