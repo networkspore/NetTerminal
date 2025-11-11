@@ -6,7 +6,8 @@ import com.google.gson.JsonObject;
 
 import io.netnotes.engine.noteBytes.NoteBytesObject;
 import io.netnotes.engine.utils.LoggingHelpers;
-import io.netnotes.gui.core.resources.ResourceRegistry;
+import io.netnotes.utils.ResourceRegistry;
+
 
 public class Log {
     public static File logFile = ResourceRegistry.LOG_FILE;

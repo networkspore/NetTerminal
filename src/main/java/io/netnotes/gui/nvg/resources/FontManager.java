@@ -2,7 +2,7 @@ package io.netnotes.gui.nvg.resources;
 
 import org.lwjgl.nanovg.NanoVG;
 
-import io.netnotes.gui.core.resources.ResourceRegistry;
+import io.netnotes.utils.ResourceRegistry;
 
 import java.io.IOException;
 import java.io.InputStream;

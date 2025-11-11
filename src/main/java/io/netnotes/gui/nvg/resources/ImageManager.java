@@ -17,7 +17,8 @@ import org.lwjgl.nanovg.NanoVG;
 import org.lwjgl.stb.STBImage;
 import org.lwjgl.system.MemoryStack;
 
-import io.netnotes.gui.core.resources.ResourceRegistry;
+import io.netnotes.utils.ResourceRegistry;
+
 
 /**
  * Manages image loading and registration for NanoVG.
@@ -30,7 +31,7 @@ import io.netnotes.gui.core.resources.ResourceRegistry;
  * - Image patterns for fills
  * - Automatic cleanup
  */
-class ImageManager {
+public class ImageManager {
     private static ImageManager INSTANCE = null;
     private final long vg;
     private final Map<String, Integer> imageHandles = new HashMap<>();
