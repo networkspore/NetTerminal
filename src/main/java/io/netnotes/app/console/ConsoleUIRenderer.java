@@ -1,12 +1,16 @@
 package io.netnotes.app.console;
 
 import io.netnotes.engine.core.system.control.containers.ContainerCommands;
+import io.netnotes.engine.core.system.control.containers.ContainerType;
 import io.netnotes.engine.core.system.control.containers.TerminalCommands;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.engine.noteBytes.NoteBytes;
 import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+
+import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
 import org.jline.utils.InfoCmp;
@@ -16,6 +20,7 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * ConsoleUIRenderer - Terminal/console implementation of UIRenderer
@@ -28,8 +33,11 @@ import java.util.Map;
  * - Clean command dispatch
  */
 public class ConsoleUIRenderer implements UIRenderer {
-    
+    private final String description = "JLine3 terminal renderer, utlizing UTF-8 encoding";
+
     private final Terminal terminal;
+    private final Attributes originalAttributes;
+
     private final Map<NoteBytes, ContainerBuffer> containers = new ConcurrentHashMap<>();
     private volatile NoteBytes focusedContainerId = null;
     private volatile boolean active = false;
@@ -39,6 +47,8 @@ public class ConsoleUIRenderer implements UIRenderer {
     private volatile int termWidth;
     private volatile int termHeight;
     private Map<NoteBytes,MessageExecutor> m_msgExecMap = new HashMap<>();
+    private Set<ContainerType> supportedTypes = Set.of(ContainerType.TERMINAL);
+    
     
     public ConsoleUIRenderer() throws IOException {
         this.terminal = TerminalBuilder.builder()
@@ -46,20 +56,62 @@ public class ConsoleUIRenderer implements UIRenderer {
             .encoding("UTF-8")
             .build();
         
-        // Get terminal size
+        // Save original attributes BEFORE any modifications
+        this.originalAttributes = terminal.getAttributes();
+        
         this.termWidth = terminal.getWidth();
         this.termHeight = terminal.getHeight();
-        setupExecMap();
-        // Enable raw mode (character-at-a-time input)
-        terminal.enterRawMode();
         
-        System.out.println("[ConsoleUIRenderer] Terminal initialized: " + 
-            termWidth + "x" + termHeight);
+        setupExecMap();
+        
+        Log.logMsg("[ConsoleUIRenderer] Terminal created: " + termWidth + "x" + termHeight);
+        Log.logMsg("[ConsoleUIRenderer] Original attributes: " + originalAttributes);
     }
-    
+
+   
     @Override
     public CompletableFuture<Void> initialize() {
+        // Make idempotent - safe to call multiple times
+        if (active) {
+            Log.logMsg("[ConsoleUIRenderer] Already initialized, skipping");
+            return CompletableFuture.completedFuture(null);
+        }
+        
         active = true;
+        
+        // CRITICAL: Manually force raw mode attributes
+        Log.logMsg("[ConsoleUIRenderer] Setting raw mode...");
+        
+        Attributes raw = new Attributes(originalAttributes);
+        
+        // Disable canonical mode (line buffering)
+        raw.setLocalFlag(Attributes.LocalFlag.ICANON, false);
+        
+        // Disable echo
+        raw.setLocalFlag(Attributes.LocalFlag.ECHO, false);
+        
+        // Disable signal generation
+        raw.setLocalFlag(Attributes.LocalFlag.ISIG, false);
+        
+        // Disable extended input processing
+        raw.setLocalFlag(Attributes.LocalFlag.IEXTEN, false);
+        
+        // Set minimum characters to read (0 = non-blocking)
+        raw.setControlChar(Attributes.ControlChar.VMIN, 0);
+        
+        // Set timeout in deciseconds (1 = 100ms)
+        raw.setControlChar(Attributes.ControlChar.VTIME, 1);
+        
+        // Apply the attributes
+        terminal.setAttributes(raw);
+        
+        // Verify it worked
+        Attributes current = terminal.getAttributes();
+        Log.logMsg("[ConsoleUIRenderer] After setting raw mode: " + current);
+        Log.logMsg("[ConsoleUIRenderer] ICANON disabled: " + 
+            !current.getLocalFlag(Attributes.LocalFlag.ICANON));
+        Log.logMsg("[ConsoleUIRenderer] ECHO disabled: " + 
+            !current.getLocalFlag(Attributes.LocalFlag.ECHO));
         
         // Clear screen on startup
         clearScreen();
@@ -68,7 +120,7 @@ public class ConsoleUIRenderer implements UIRenderer {
         terminal.puts(InfoCmp.Capability.cursor_invisible);
         terminal.flush();
         
-        System.out.println("[ConsoleUIRenderer] Initialized");
+        Log.logMsg("[ConsoleUIRenderer] Initialized in raw mode");
         return CompletableFuture.completedFuture(null);
     }
     
@@ -102,12 +154,29 @@ public class ConsoleUIRenderer implements UIRenderer {
     }
 
     @Override
+    public String getDescription() {
+        return description;
+    }
+
+    @Override
+    public Set<ContainerType> getSupportedTypes() {
+        return supportedTypes;
+    }
+
+    @Override
+    public boolean supports(ContainerType type) {
+        return supportedTypes.contains(type);
+    }
+
+    @Override
     public CompletableFuture<Void> render(NoteBytesMap command) {
         if (!active) {
             return CompletableFuture.failedFuture(
                 new IllegalStateException("Renderer not active")
             );
         }
+
+        //Log.logNoteBytes("[ConsoleUiRenderer.render]", command.toNoteBytes());
         
         try {
             NoteBytes cmd = command.get(Keys.CMD);
@@ -117,7 +186,7 @@ public class ConsoleUIRenderer implements UIRenderer {
             if(msgExec != null){
                 msgExec.execute(command);
             }else{
-                System.err.println("[ConsoleUIRenderer] Unknown command: " + cmd);
+                Log.logError("[ConsoleUIRenderer] Unknown command: " + cmd);
             }
         
             return CompletableFuture.completedFuture(null);
@@ -132,7 +201,7 @@ public class ConsoleUIRenderer implements UIRenderer {
     private void handleCreateContainer(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
         NoteBytes title = command.get(Keys.TITLE);
-        
+
         ContainerBuffer buffer = new ContainerBuffer(
             containerId, 
             title, 
@@ -142,7 +211,11 @@ public class ConsoleUIRenderer implements UIRenderer {
         
         containers.put(containerId, buffer);
         
-        System.out.println("[ConsoleUIRenderer] Container created: " + containerId);
+        focusedContainerId = containerId;
+        
+        renderContainer(buffer);
+
+        Log.logMsg("[ConsoleUIRenderer] Container created: " + containerId);
     }
     
     private void handleDestroyContainer(NoteBytesMap command) {
@@ -155,7 +228,7 @@ public class ConsoleUIRenderer implements UIRenderer {
             clearScreen();
         }
         
-        System.out.println("[ConsoleUIRenderer] Container destroyed: " + containerId);
+        Log.logMsg("[ConsoleUIRenderer] Container destroyed: " + containerId);
     }
     
     private void handleShowContainer(NoteBytesMap command) {
@@ -427,7 +500,6 @@ public class ConsoleUIRenderer implements UIRenderer {
         
         // Clear screen
         clearScreen();
-        
         // Render buffer contents
         for (int row = 0; row < buffer.rows; row++) {
             for (int col = 0; col < buffer.cols; col++) {
@@ -455,7 +527,8 @@ public class ConsoleUIRenderer implements UIRenderer {
     // ===== TERMINAL PRIMITIVES =====
     
     private void clearScreen() {
-        terminal.puts(InfoCmp.Capability.clear_screen);
+        // Clear screen + clear scrollback buffer
+        terminal.writer().print("\033[2J\033[3J\033[H");
         terminal.flush();
     }
     
@@ -558,13 +631,23 @@ public class ConsoleUIRenderer implements UIRenderer {
         active = false;
         
         try {
+            // Restore cursor
             terminal.puts(InfoCmp.Capability.cursor_visible);
+
+            // Clear screen and reset position
             clearScreen();
             moveCursor(0, 0);
+            
+            // Exit raw mode
+            terminal.setAttributes(originalAttributes);
+            
             terminal.flush();
             terminal.close();
-        } catch (IOException e) {
-            System.err.println("[ConsoleUIRenderer] Error closing terminal: " + e.getMessage());
+            
+            Log.logMsg("[ConsoleUIRenderer] Shutdown complete");
+        } catch (Exception e) {
+            // Even if logging fails, try to restore terminal
+            Log.logError("[ConsoleUIRenderer] Error during shutdown: " + e.getMessage());
         }
     }
     
@@ -748,4 +831,6 @@ public class ConsoleUIRenderer implements UIRenderer {
             return chars;
         }
     }
+
+ 
 }
