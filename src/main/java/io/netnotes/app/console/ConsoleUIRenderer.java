@@ -112,7 +112,9 @@ public class ConsoleUIRenderer implements UIRenderer {
             !current.getLocalFlag(Attributes.LocalFlag.ICANON));
         Log.logMsg("[ConsoleUIRenderer] ECHO disabled: " + 
             !current.getLocalFlag(Attributes.LocalFlag.ECHO));
-        
+
+        System.out.flush();
+        System.err.flush();
         // Clear screen on startup
         clearScreen();
         
@@ -236,6 +238,7 @@ public class ConsoleUIRenderer implements UIRenderer {
         ContainerBuffer buffer = containers.get(containerId);
         
         if (buffer != null) {
+            
             buffer.visible = true;
         }
     }
@@ -258,6 +261,8 @@ public class ConsoleUIRenderer implements UIRenderer {
         ContainerBuffer buffer = containers.get(containerId);
         
         if (buffer != null && buffer.visible) {
+            // log msg to use title
+            Log.logMsg("[ConsoleUiRenderer] + focusedContainer: " + buffer.title);
             focusedContainerId = containerId;
             renderContainer(buffer);
         }
