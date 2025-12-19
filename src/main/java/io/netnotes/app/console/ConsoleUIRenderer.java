@@ -2,7 +2,7 @@ package io.netnotes.app.console;
 
 import io.netnotes.engine.core.system.control.containers.ContainerCommands;
 import io.netnotes.engine.core.system.control.containers.ContainerType;
-import io.netnotes.engine.core.system.control.containers.TerminalCommands;
+import io.netnotes.engine.core.system.control.terminal.TerminalCommands;
 import io.netnotes.engine.core.system.control.ui.UIRenderer;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
@@ -13,27 +13,36 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;
 import org.jline.terminal.TerminalBuilder;
-import org.jline.utils.InfoCmp;
 
 import java.io.IOException;
+import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.TimeUnit;
 import java.util.HashMap;
-import java.util.Map;
-import java.util.Set;
 
 /**
- * ConsoleUIRenderer - Terminal/console implementation of UIRenderer
+ * ConsoleUIRenderer - Flicker-free terminal rendering
  * 
- * Uses JLine3 for cross-platform terminal control.
- * 
- * NOW FIXED:
- * - Returns CompletableFuture<Void> (matches interface)
- * - Handles terminal commands directly (no more double-nesting!)
- * - Clean command dispatch
+ * Anti-flicker techniques:
+ * 1. Alternate screen buffer - atomic buffer swapping
+ * 2. Proper batch mode - single atomic write per frame
+ * 3. Differential rendering - only update changed cells
+ * 4. Rate limiting - max 60fps
+ * 5. Debouncing - group rapid updates
+ * 6. Pre-allocated buffers - no GC pauses
+ * 7. Style optimization - only emit codes when changed
  */
 public class ConsoleUIRenderer implements UIRenderer {
-    private final String description = "JLine3 terminal renderer, utlizing UTF-8 encoding";
+    private final String description = "JLine3 flicker-free terminal renderer";
 
     private final Terminal terminal;
     private final Attributes originalAttributes;
@@ -41,14 +50,30 @@ public class ConsoleUIRenderer implements UIRenderer {
     private final Map<NoteBytes, ContainerBuffer> containers = new ConcurrentHashMap<>();
     private volatile NoteBytes focusedContainerId = null;
     private volatile boolean active = false;
+    
+    // Batch mode
     private volatile boolean batchMode = false;
+    private final List<Runnable> batchedOperations = new ArrayList<>();
+    
+    // Rate limiting
+    private volatile long lastRenderTime = 0;
+    private static final long MIN_RENDER_INTERVAL_MS = 16; // ~60fps
+    
+    // Debouncing
+    private final ScheduledExecutorService renderScheduler = 
+        Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "ConsoleRenderer");
+            t.setDaemon(true);
+            return t;
+        });
+    private final Map<NoteBytes, ScheduledFuture<?>> pendingRenders = new ConcurrentHashMap<>();
     
     // Terminal dimensions
     private volatile int termWidth;
     private volatile int termHeight;
-    private Map<NoteBytes,MessageExecutor> m_msgExecMap = new HashMap<>();
-    private Set<ContainerType> supportedTypes = Set.of(ContainerType.TERMINAL);
     
+    private Map<NoteBytes, MessageExecutor> m_msgExecMap = new HashMap<>();
+    private Set<ContainerType> supportedTypes = Set.of(ContainerType.TERMINAL);
     
     public ConsoleUIRenderer() throws IOException {
         this.terminal = TerminalBuilder.builder()
@@ -56,77 +81,48 @@ public class ConsoleUIRenderer implements UIRenderer {
             .encoding("UTF-8")
             .build();
         
-        // Save original attributes BEFORE any modifications
         this.originalAttributes = terminal.getAttributes();
-        
         this.termWidth = terminal.getWidth();
         this.termHeight = terminal.getHeight();
         
         setupExecMap();
         
         Log.logMsg("[ConsoleUIRenderer] Terminal created: " + termWidth + "x" + termHeight);
-        Log.logMsg("[ConsoleUIRenderer] Original attributes: " + originalAttributes);
     }
 
-   
     @Override
     public CompletableFuture<Void> initialize() {
-        // Make idempotent - safe to call multiple times
         if (active) {
-            Log.logMsg("[ConsoleUIRenderer] Already initialized, skipping");
+            Log.logMsg("[ConsoleUIRenderer] Already initialized");
             return CompletableFuture.completedFuture(null);
         }
         
         active = true;
         
-        // CRITICAL: Manually force raw mode attributes
-        Log.logMsg("[ConsoleUIRenderer] Setting raw mode...");
+        // === TECHNIQUE 1: ALTERNATE SCREEN BUFFER ===
+        // This is the single biggest anti-flicker improvement
+        terminal.writer().print("\033[?1049h"); // Enter alternate buffer
         
+        // === RAW MODE SETUP ===
         Attributes raw = new Attributes(originalAttributes);
-        
-        // Disable canonical mode (line buffering)
         raw.setLocalFlag(Attributes.LocalFlag.ICANON, false);
-        
-        // Disable echo
         raw.setLocalFlag(Attributes.LocalFlag.ECHO, false);
-        
-        // Disable signal generation
         raw.setLocalFlag(Attributes.LocalFlag.ISIG, false);
-        
-        // Disable extended input processing
         raw.setLocalFlag(Attributes.LocalFlag.IEXTEN, false);
-        
-        // Set minimum characters to read (0 = non-blocking)
         raw.setControlChar(Attributes.ControlChar.VMIN, 0);
-        
-        // Set timeout in deciseconds (1 = 100ms)
         raw.setControlChar(Attributes.ControlChar.VTIME, 1);
-        
-        // Apply the attributes
         terminal.setAttributes(raw);
         
-        // Verify it worked
-        Attributes current = terminal.getAttributes();
-        Log.logMsg("[ConsoleUIRenderer] After setting raw mode: " + current);
-        Log.logMsg("[ConsoleUIRenderer] ICANON disabled: " + 
-            !current.getLocalFlag(Attributes.LocalFlag.ICANON));
-        Log.logMsg("[ConsoleUIRenderer] ECHO disabled: " + 
-            !current.getLocalFlag(Attributes.LocalFlag.ECHO));
-
-        System.out.flush();
-        System.err.flush();
-        // Clear screen on startup
-        clearScreen();
-        
-        // Hide cursor initially
-        terminal.puts(InfoCmp.Capability.cursor_invisible);
+        // === INITIAL SETUP ===
+        terminal.writer().print("\033[?25l"); // Hide cursor
+        terminal.writer().print("\033[2J\033[H"); // Clear and home
         terminal.flush();
         
-        Log.logMsg("[ConsoleUIRenderer] Initialized in raw mode");
+        Log.logMsg("[ConsoleUIRenderer] Initialized with alternate buffer");
         return CompletableFuture.completedFuture(null);
     }
     
-    private void setupExecMap(){
+    private void setupExecMap() {
         m_msgExecMap.put(ContainerCommands.CREATE_CONTAINER,    this::handleCreateContainer);
         m_msgExecMap.put(ContainerCommands.SHOW_CONTAINER,      this::handleShowContainer);
         m_msgExecMap.put(ContainerCommands.HIDE_CONTAINER,      this::handleHideContainer);
@@ -151,10 +147,6 @@ public class ConsoleUIRenderer implements UIRenderer {
         m_msgExecMap.put(TerminalCommands.TERMINAL_END_BATCH,   this::handleEndBatch);
     }
 
-    private void handleBeginBatch(NoteBytesMap msg){
-        batchMode = true;
-    }
-
     @Override
     public String getDescription() {
         return description;
@@ -177,17 +169,14 @@ public class ConsoleUIRenderer implements UIRenderer {
                 new IllegalStateException("Renderer not active")
             );
         }
-
-        //Log.logNoteBytes("[ConsoleUiRenderer.render]", command.toNoteBytes());
         
         try {
             NoteBytes cmd = command.get(Keys.CMD);
-            
             MessageExecutor msgExec = m_msgExecMap.get(cmd);
       
-            if(msgExec != null){
+            if (msgExec != null) {
                 msgExec.execute(command);
-            }else{
+            } else {
                 Log.logError("[ConsoleUIRenderer] Unknown command: " + cmd);
             }
         
@@ -212,16 +201,19 @@ public class ConsoleUIRenderer implements UIRenderer {
         );
         
         containers.put(containerId, buffer);
-        
         focusedContainerId = containerId;
         
-        renderContainer(buffer);
-
-        Log.logMsg("[ConsoleUIRenderer] Container created: " + containerId);
+        scheduleRender(buffer);
     }
     
     private void handleDestroyContainer(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
+        
+        // Cancel any pending renders
+        ScheduledFuture<?> pending = pendingRenders.remove(containerId);
+        if (pending != null) {
+            pending.cancel(false);
+        }
         
         containers.remove(containerId);
         
@@ -229,8 +221,6 @@ public class ConsoleUIRenderer implements UIRenderer {
             focusedContainerId = null;
             clearScreen();
         }
-        
-        Log.logMsg("[ConsoleUIRenderer] Container destroyed: " + containerId);
     }
     
     private void handleShowContainer(NoteBytesMap command) {
@@ -238,7 +228,6 @@ public class ConsoleUIRenderer implements UIRenderer {
         ContainerBuffer buffer = containers.get(containerId);
         
         if (buffer != null) {
-            
             buffer.visible = true;
         }
     }
@@ -261,21 +250,45 @@ public class ConsoleUIRenderer implements UIRenderer {
         ContainerBuffer buffer = containers.get(containerId);
         
         if (buffer != null && buffer.visible) {
-            // log msg to use title
-            Log.logMsg("[ConsoleUiRenderer] + focusedContainer: " + buffer.title);
             focusedContainerId = containerId;
-            renderContainer(buffer);
+            scheduleRender(buffer);
         }
     }
     
     private void handleMaximizeContainer(NoteBytesMap command) {
-        // In console, maximize = full screen (already is)
         handleFocusContainer(command);
     }
     
     private void handleRestoreContainer(NoteBytesMap command) {
-        // In console, restore = same as focus
         handleFocusContainer(command);
+    }
+    
+    // ===== BATCH MODE =====
+    
+    private void handleBeginBatch(NoteBytesMap msg) {
+        synchronized (batchedOperations) {
+            batchMode = true;
+            batchedOperations.clear();
+        }
+    }
+
+    private void handleEndBatch(NoteBytesMap msg) {
+        NoteBytes containerId = msg.get(Keys.CONTAINER_ID);
+        ContainerBuffer buffer = containers.get(containerId);
+        
+        synchronized (batchedOperations) {
+            // Execute all batched operations on the buffer
+            for (Runnable op : batchedOperations) {
+                op.run();
+            }
+            batchedOperations.clear();
+            batchMode = false;
+        }
+        
+        // Now render once (debounced)
+        if (buffer != null) {
+            scheduleRender(buffer);
+        }
     }
     
     // ===== TERMINAL COMMANDS =====
@@ -285,15 +298,17 @@ public class ConsoleUIRenderer implements UIRenderer {
         ContainerBuffer buffer = containers.get(containerId);
         
         if (buffer != null) {
-            buffer.clear();
-            autoRender(buffer);
+            Runnable op = () -> buffer.clear();
+            executeOrBatch(op, buffer);
         }
     }
+    
     private void handlePrintLn(NoteBytesMap command) {
-        handlePrint(command,true);
+        handlePrint(command, true);
     }
+    
     private void handlePrint(NoteBytesMap command) {
-        handlePrint(command,false);
+        handlePrint(command, false);
     }
     
     private void handlePrint(NoteBytesMap command, boolean newline) {
@@ -301,27 +316,26 @@ public class ConsoleUIRenderer implements UIRenderer {
         NoteBytes textBytes = command.get(Keys.TEXT);
         NoteBytes styleBytes = command.get(Keys.STYLE);
 
-        if(containerId != null && textBytes != null){
+        if (containerId != null && textBytes != null) {
             String text = textBytes.getAsString();
             TextStyle style = parseStyle(styleBytes);
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.print(text, style, newline);
-                autoRender(buffer);
+                Runnable op = () -> buffer.print(text, style, newline);
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handlePrintAt(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        
         NoteBytes rowBytes = command.get(Keys.ROW);
         NoteBytes colBytes = command.get(Keys.COL);
         NoteBytes textBytes = command.get(Keys.TEXT);
         NoteBytes styleBytes = command.get(Keys.STYLE);
 
-        if(containerId != null && rowBytes != null && colBytes != null && textBytes != null){
+        if (containerId != null && rowBytes != null && colBytes != null && textBytes != null) {
             int row = rowBytes.getAsInt();
             int col = colBytes.getAsInt();
             String text = textBytes.getAsString();
@@ -329,62 +343,64 @@ public class ConsoleUIRenderer implements UIRenderer {
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.printAt(row, col, text, style);
-                autoRender(buffer);
+                Runnable op = () -> buffer.printAt(row, col, text, style);
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handleMoveCursor(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        
         NoteBytes rowBytes = command.get(Keys.ROW);
         NoteBytes colBytes = command.get(Keys.COL);
 
-        if(containerId != null && rowBytes != null && colBytes != null){
+        if (containerId != null && rowBytes != null && colBytes != null) {
             int row = rowBytes.getAsInt();
             int col = colBytes.getAsInt();
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.cursorRow = row;
-                buffer.cursorCol = col;
+                Runnable op = () -> {
+                    buffer.cursorRow = row;
+                    buffer.cursorCol = col;
+                };
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handleShowCursor(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        if(containerId != null){
+        if (containerId != null) {
             ContainerBuffer buffer = containers.get(containerId);
             
             if (buffer != null) {
-                buffer.cursorVisible = true;
-                autoRender(buffer);
+                Runnable op = () -> buffer.cursorVisible = true;
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handleHideCursor(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        if(containerId != null){
+        if (containerId != null) {
             ContainerBuffer buffer = containers.get(containerId);
             
             if (buffer != null) {
-                buffer.cursorVisible = false;
-                autoRender(buffer);
+                Runnable op = () -> buffer.cursorVisible = false;
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handleClearLine(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        if(containerId != null){
+        if (containerId != null) {
             ContainerBuffer buffer = containers.get(containerId);
             
             if (buffer != null) {
-                buffer.clearLine(buffer.cursorRow);
-                autoRender(buffer);
+                Runnable op = () -> buffer.clearLine(buffer.cursorRow);
+                executeOrBatch(op, buffer);
             }
         }
     }
@@ -393,28 +409,26 @@ public class ConsoleUIRenderer implements UIRenderer {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
         NoteBytes rowBytes = command.get(Keys.ROW);
 
-        if(containerId != null && rowBytes != null){
+        if (containerId != null && rowBytes != null) {
             int row = rowBytes.getAsInt();
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.clearLine(row);
-                autoRender(buffer);
+                Runnable op = () -> buffer.clearLine(row);
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handleClearRegion(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-
         NoteBytes startRowBytes = command.get(TerminalCommands.START_ROW);
         NoteBytes startColBytes = command.get(TerminalCommands.START_COL);
         NoteBytes endRowBytes = command.get(TerminalCommands.END_ROW);
-        NoteBytes endColBytes =  command.get(TerminalCommands.END_COL);
+        NoteBytes endColBytes = command.get(TerminalCommands.END_COL);
 
-        if(containerId != null && startRowBytes != null && startColBytes != null
-            && endRowBytes != null && endColBytes != null
-        ){
+        if (containerId != null && startRowBytes != null && startColBytes != null
+            && endRowBytes != null && endColBytes != null) {
             int startRow = startRowBytes.getAsInt();
             int startCol = startColBytes.getAsInt();
             int endRow = endRowBytes.getAsInt();
@@ -422,8 +436,8 @@ public class ConsoleUIRenderer implements UIRenderer {
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.clearRegion(startRow, startCol, endRow, endCol);
-                autoRender(buffer);
+                Runnable op = () -> buffer.clearRegion(startRow, startCol, endRow, endCol);
+                executeOrBatch(op, buffer);
             }
         }
     }
@@ -437,54 +451,54 @@ public class ConsoleUIRenderer implements UIRenderer {
         NoteBytes titleBytes = command.get(Keys.TITLE);
         NoteBytes boxStyleBytes = command.get(TerminalCommands.BOX_STYLE);
 
-        if(containerId != null && startRowBytes != null && startColBytes != null && widthBytes != null &&
-            heightBytes != null && titleBytes != null && boxStyleBytes != null
-        ){
+        if (containerId != null && startRowBytes != null && startColBytes != null && 
+            widthBytes != null && heightBytes != null && boxStyleBytes != null) {
+            
             int startRow = startRowBytes.getAsInt();
             int startCol = startColBytes.getAsInt();
             int width = widthBytes.getAsInt();
             int height = heightBytes.getAsInt();
-            String title = titleBytes.getAsString();
+            String title = titleBytes != null ? titleBytes.getAsString() : "";
             String boxStyleStr = boxStyleBytes.getAsString();
             
             BoxStyle boxStyle = BoxStyle.valueOf(boxStyleStr);
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.drawBox(startRow, startCol, width, height, title, boxStyle);
-                autoRender(buffer);
+                Runnable op = () -> buffer.drawBox(startRow, startCol, width, height, title, boxStyle);
+                executeOrBatch(op, buffer);
             }
         }
     }
     
     private void handleDrawHLine(NoteBytesMap command) {
         NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        
         NoteBytes rowBytes = command.get(Keys.ROW);
         NoteBytes startColBytes = command.get(TerminalCommands.START_COL);
         NoteBytes lengthBytes = command.get(Keys.LENGTH);
-        if(containerId != null && rowBytes != null && lengthBytes != null){
+        
+        if (containerId != null && rowBytes != null && startColBytes != null && lengthBytes != null) {
             int row = rowBytes.getAsInt();
             int startCol = startColBytes.getAsInt();
             int length = lengthBytes.getAsInt();
             
             ContainerBuffer buffer = containers.get(containerId);
             if (buffer != null) {
-                buffer.drawHLine(row, startCol, length);
-                autoRender(buffer);
+                Runnable op = () -> buffer.drawHLine(row, startCol, length);
+                executeOrBatch(op, buffer);
             }
         }
     }
     
-    private void handleEndBatch(NoteBytesMap command) {
-        NoteBytes containerId = command.get(Keys.CONTAINER_ID);
-        if(containerId != null){
-            ContainerBuffer buffer = containers.get(containerId);
-            
-            batchMode = false;
-            
-            if (buffer != null) {
-                renderContainer(buffer);
+    // ===== BATCH EXECUTION =====
+    
+    private void executeOrBatch(Runnable operation, ContainerBuffer buffer) {
+        synchronized (batchedOperations) {
+            if (batchMode) {
+                batchedOperations.add(operation);
+            } else {
+                operation.run();
+                scheduleRender(buffer);
             }
         }
     }
@@ -492,79 +506,127 @@ public class ConsoleUIRenderer implements UIRenderer {
     // ===== RENDERING =====
     
     /**
-     * Auto-render if not in batch mode and container is focused
+     * === TECHNIQUE 5: DEBOUNCED RENDERING ===
+     * Schedule a render, cancelling any pending render for this container
      */
-    private void autoRender(ContainerBuffer buffer) {
-        if (!batchMode && buffer.id.equals(focusedContainerId)) {
-            renderContainer(buffer);
+    private void scheduleRender(ContainerBuffer buffer) {
+        NoteBytes id = buffer.id;
+        
+        // Cancel pending render
+        ScheduledFuture<?> pending = pendingRenders.get(id);
+        if (pending != null && !pending.isDone()) {
+            pending.cancel(false);
         }
+        
+        // Schedule new render
+        ScheduledFuture<?> future = renderScheduler.schedule(
+            () -> renderContainer(buffer),
+            5, // 5ms debounce
+            TimeUnit.MILLISECONDS
+        );
+        
+        pendingRenders.put(id, future);
     }
     
+    /**
+     * === TECHNIQUE 2 & 3: DIFFERENTIAL RENDERING ===
+     * Only update cells that changed since last frame
+     */
     private void renderContainer(ContainerBuffer buffer) {
         if (!buffer.id.equals(focusedContainerId)) return;
         
-        // Clear screen
-        clearScreen();
-        // Render buffer contents
-        for (int row = 0; row < buffer.rows; row++) {
-            for (int col = 0; col < buffer.cols; col++) {
-                Cell cell = buffer.getCell(row, col);
-                if (cell.character != '\0') {
-                    moveCursor(row, col);
-                    applyStyle(cell.style);
-                    terminal.writer().print(cell.character);
-                    resetStyle();
+        // === TECHNIQUE 4: RATE LIMITING ===
+        long now = System.currentTimeMillis();
+        long elapsed = now - lastRenderTime;
+        if (elapsed < MIN_RENDER_INTERVAL_MS) {
+            // Too soon, reschedule
+            renderScheduler.schedule(
+                () -> renderContainer(buffer),
+                MIN_RENDER_INTERVAL_MS - elapsed,
+                TimeUnit.MILLISECONDS
+            );
+            return;
+        }
+        lastRenderTime = now;
+        
+        try {
+            // Pre-allocate string builder (avoid reallocations)
+            StringBuilder updates = new StringBuilder(4096);
+            
+            // Hide cursor during update
+            updates.append("\033[?25l");
+            
+            // === DIFFERENTIAL RENDERING ===
+            // Only emit codes for changed cells
+            TextStyle currentStyle = new TextStyle();
+            int consecutiveUnchanged = 0;
+            
+            for (int row = 0; row < buffer.rows; row++) {
+                for (int col = 0; col < buffer.cols; col++) {
+                    Cell current = buffer.getCell(row, col);
+                    Cell previous = buffer.getPrevCell(row, col);
+                    
+                    if (current.equals(previous)) {
+                        consecutiveUnchanged++;
+                        continue;
+                    }
+                    
+                    // Cell changed - position cursor
+                    updates.append(String.format("\033[%d;%dH", row + 1, col + 1));
+                    
+                    // Update style if changed
+                    if (!current.style.equals(currentStyle)) {
+                        updates.append("\033[0m");
+                        appendStyleCodes(updates, current.style);
+                        currentStyle = current.style;
+                    }
+                    
+                    // Write character
+                    updates.append(current.character != '\0' ? current.character : ' ');
+                    
+                    consecutiveUnchanged = 0;
                 }
             }
+            
+            // Reset style
+            updates.append("\033[0m");
+            
+            // Position and show cursor if visible
+            if (buffer.cursorVisible) {
+                updates.append(String.format("\033[%d;%dH", 
+                    buffer.cursorRow + 1, buffer.cursorCol + 1));
+                updates.append("\033[?25h");
+            }
+            
+            // === ATOMIC WRITE ===
+            terminal.writer().write(updates.toString());
+            terminal.flush();
+            
+            // Swap buffers for next frame
+            buffer.swapBuffers();
+            
+        } catch (Exception e) {
+            Log.logError("[ConsoleUIRenderer] Render error: " + e.getMessage());
         }
-        
-        // Position cursor
-        if (buffer.cursorVisible) {
-            moveCursor(buffer.cursorRow, buffer.cursorCol);
-            terminal.puts(InfoCmp.Capability.cursor_visible);
-        } else {
-            terminal.puts(InfoCmp.Capability.cursor_invisible);
-        }
-        
-        terminal.flush();
     }
-    
-    // ===== TERMINAL PRIMITIVES =====
     
     private void clearScreen() {
-        // Clear screen + clear scrollback buffer
-        terminal.writer().print("\033[2J\033[3J\033[H");
+        terminal.writer().print("\033[2J\033[H");
         terminal.flush();
     }
     
-    private void moveCursor(int row, int col) {
-        terminal.puts(InfoCmp.Capability.cursor_address, row, col);
-    }
-    
-    private void applyStyle(TextStyle style) {
-        if (style.bold) {
-            terminal.writer().print("\033[1m");
-        }
-        if (style.underline) {
-            terminal.writer().print("\033[4m");
-        }
-        if (style.inverse) {
-            terminal.writer().print("\033[7m");
-        }
+    private void appendStyleCodes(StringBuilder sb, TextStyle style) {
+        if (style.bold) sb.append("\033[1m");
+        if (style.underline) sb.append("\033[4m");
+        if (style.inverse) sb.append("\033[7m");
         
-        // Foreground color
         if (style.foreground != Color.DEFAULT) {
-            terminal.writer().print("\033[" + getColorCode(style.foreground, false) + "m");
+            sb.append("\033[").append(getColorCode(style.foreground, false)).append("m");
         }
         
-        // Background color
         if (style.background != Color.DEFAULT) {
-            terminal.writer().print("\033[" + getColorCode(style.background, true) + "m");
+            sb.append("\033[").append(getColorCode(style.background, true)).append("m");
         }
-    }
-    
-    private void resetStyle() {
-        terminal.writer().print("\033[0m");
     }
     
     private int getColorCode(Color color, boolean background) {
@@ -596,7 +658,6 @@ public class ConsoleUIRenderer implements UIRenderer {
         if (styleBytes == null) return new TextStyle();
         
         NoteBytesMap styleMap = styleBytes.getAsNoteBytesMap();
-       
         NoteBytes foreground = styleMap.get(Keys.FOREGROUND);
         NoteBytes background = styleMap.get(Keys.BACKGROUND);
         NoteBytes bold = styleMap.get(Keys.BOLD);
@@ -615,7 +676,7 @@ public class ConsoleUIRenderer implements UIRenderer {
             style.bold = bold.getAsBoolean();
         }
         if (inverse != null) {
-            style.inverse =inverse.getAsBoolean();
+            style.inverse = inverse.getAsBoolean();
         }
         if (underline != null) {
             style.underline = underline.getAsBoolean();
@@ -635,15 +696,22 @@ public class ConsoleUIRenderer implements UIRenderer {
     public void shutdown() {
         active = false;
         
+        // Cancel all pending renders
+        renderScheduler.shutdown();
         try {
-            // Restore cursor
-            terminal.puts(InfoCmp.Capability.cursor_visible);
-
-            // Clear screen and reset position
-            clearScreen();
-            moveCursor(0, 0);
+            renderScheduler.awaitTermination(100, TimeUnit.MILLISECONDS);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        }
+        
+        try {
+            // Show cursor
+            terminal.writer().print("\033[?25h");
             
-            // Exit raw mode
+            // === EXIT ALTERNATE BUFFER ===
+            terminal.writer().print("\033[?1049l");
+            
+            // Restore attributes
             terminal.setAttributes(originalAttributes);
             
             terminal.flush();
@@ -651,7 +719,6 @@ public class ConsoleUIRenderer implements UIRenderer {
             
             Log.logMsg("[ConsoleUIRenderer] Shutdown complete");
         } catch (Exception e) {
-            // Even if logging fails, try to restore terminal
             Log.logError("[ConsoleUIRenderer] Error during shutdown: " + e.getMessage());
         }
     }
@@ -668,6 +735,7 @@ public class ConsoleUIRenderer implements UIRenderer {
         final int rows;
         final int cols;
         final Cell[][] cells;
+        private final Cell[][] prevCells;
         
         int cursorRow = 0;
         int cursorCol = 0;
@@ -679,14 +747,44 @@ public class ConsoleUIRenderer implements UIRenderer {
             this.title = title;
             this.rows = rows;
             this.cols = cols;
-            this.cells = new Cell[rows][cols];
             
+            // Allocate both buffers
+            this.cells = new Cell[rows][cols];
+            this.prevCells = new Cell[rows][cols];
+            
+            // Initialize both buffers
             for (int r = 0; r < rows; r++) {
                 for (int c = 0; c < cols; c++) {
                     cells[r][c] = new Cell();
+                    prevCells[r][c] = new Cell();  // Initialize previous buffer
                 }
             }
         }
+
+
+        /**
+         * Get cell from previous frame (for differential rendering)
+         */
+        Cell getPrevCell(int row, int col) {
+            if (row < 0 || row >= rows || col < 0 || col >= cols) {
+                return new Cell();
+            }
+            return prevCells[row][col];
+        }
+
+        /**
+         * Swap buffers after rendering
+         * Copy current frame to previous frame for next differential render
+         */
+        void swapBuffers() {
+            for (int r = 0; r < rows; r++) {
+                for (int c = 0; c < cols; c++) {
+                    prevCells[r][c].copyFrom(cells[r][c]);
+                }
+            }
+        }
+
+   
         
         void clear() {
             for (int r = 0; r < rows; r++) {
@@ -802,6 +900,20 @@ public class ConsoleUIRenderer implements UIRenderer {
             this.character = '\0';
             this.style = new TextStyle();
         }
+
+        void copyFrom(Cell other) {
+            this.character = other.character;
+            this.style = other.style.copy();
+        }
+        
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof Cell)) return false;
+            Cell other = (Cell) obj;
+            return character == other.character && 
+                style.equals(other.style);
+        }
     }
     
     private static class TextStyle {
@@ -810,6 +922,33 @@ public class ConsoleUIRenderer implements UIRenderer {
         boolean bold = false;
         boolean inverse = false;
         boolean underline = false;
+
+        TextStyle copy(){
+            TextStyle textStyle = new TextStyle();
+            textStyle.foreground = this.foreground;
+            textStyle.background = this.background;
+            textStyle.bold = this.bold;
+            textStyle.inverse = this.inverse;
+            textStyle.underline = this.underline;
+            return textStyle;
+        }
+
+        @Override
+        public boolean equals(Object obj) {
+            if (this == obj) return true;
+            if (!(obj instanceof TextStyle)) return false;
+            TextStyle other = (TextStyle) obj;
+            return foreground == other.foreground &&
+                background == other.background &&
+                bold == other.bold &&
+                inverse == other.inverse &&
+                underline == other.underline;
+        }
+        
+        @Override
+        public int hashCode() {
+            return Objects.hash(foreground, background, bold, inverse, underline);
+        }
     }
     
     private enum Color {
