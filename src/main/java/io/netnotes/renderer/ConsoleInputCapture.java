@@ -2,7 +2,7 @@ package io.netnotes.renderer;
 
 
 import io.netnotes.engine.io.input.Keyboard.KeyCode;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.streams.StreamUtils;
 

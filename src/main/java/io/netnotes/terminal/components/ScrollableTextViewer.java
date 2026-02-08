@@ -6,9 +6,9 @@ import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.*;
 import io.netnotes.engine.io.input.events.*;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
-import io.netnotes.engine.noteBytes.KeyRunTable;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.noteBytes.KeyRunTable;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.ui.RenderableStates;
 
 import java.util.ArrayList;

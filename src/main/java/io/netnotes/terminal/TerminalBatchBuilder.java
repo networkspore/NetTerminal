@@ -1,8 +1,8 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.BoxStyle;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.ui.BatchBuilder;
 
 /**

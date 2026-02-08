@@ -6,8 +6,8 @@ import java.util.function.Consumer;
 import java.util.function.Function;
 
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.ui.UIProtocol;
 
 /**

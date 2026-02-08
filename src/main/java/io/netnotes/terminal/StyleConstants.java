@@ -1,6 +1,6 @@
 package io.netnotes.terminal;
 
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public class StyleConstants {
     public final static NoteBytesReadOnly FG_MODE = new NoteBytesReadOnly("fg_mode");

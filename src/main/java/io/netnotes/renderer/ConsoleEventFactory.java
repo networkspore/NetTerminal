@@ -3,10 +3,10 @@ package io.netnotes.renderer;
 import io.netnotes.engine.io.input.Keyboard.KeyCode;
 import io.netnotes.engine.io.input.events.EventBytes;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
 
 /**
  * ConsoleEventFactory - Convert JLine terminal input to HID keyboard events

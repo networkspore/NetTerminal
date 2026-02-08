@@ -1,10 +1,10 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.noteBytes.NoteBytesObject;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.NoteBytesObject;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
 
 /**
  * Terminal command factory methods

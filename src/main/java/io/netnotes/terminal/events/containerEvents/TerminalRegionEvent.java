@@ -2,7 +2,7 @@ package io.netnotes.terminal.events.containerEvents;
 
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.engine.io.ContextPath;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
 
 public class TerminalRegionEvent extends TerminalRoutedEvent {
     private final TerminalRectangle region;

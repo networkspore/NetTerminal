@@ -16,11 +16,11 @@ import io.netnotes.engine.io.input.events.keyboardEvents.KeyRepeatEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyUpEvent;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.noteBytes.processing.NoteBytesMetaData;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 public final class TerminalEventsFactory {

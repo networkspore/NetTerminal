@@ -10,11 +10,11 @@ import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyCharEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
-import io.netnotes.engine.noteBytes.KeyRunTable;
-import io.netnotes.engine.noteBytes.NoteBytes;
-import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
-import io.netnotes.engine.noteBytes.NoteIntegerArray;
-import io.netnotes.engine.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.noteBytes.KeyRunTable;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteIntegerArray;
+import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
 
 /**
  * TerminalTextInput - Damage-aware text input with cursor
