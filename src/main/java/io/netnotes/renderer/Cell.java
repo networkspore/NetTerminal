@@ -1,14 +1,14 @@
-package io.netnotes.app.console;
+package io.netnotes.renderer;
 
-import io.netnotes.engine.core.system.control.terminal.TerminalContainerHandle.TextStyle;
+import io.netnotes.terminal.TextStyle;
 
 public class Cell {
-    private char character = '\0';
-    private TextStyle style = new TextStyle();
+    char character = '\0';
+    TextStyle style = new TextStyle();
     
     public void set(char ch, TextStyle style) {
         this.character = ch;
-        this.style = style;
+        this.style = style != null ? style.copy() : new TextStyle();
     }
     
     public void clear() {
@@ -29,4 +29,7 @@ public class Cell {
         return character == other.character && 
             style.equals(other.style);
     }
+
+   
+        
 }

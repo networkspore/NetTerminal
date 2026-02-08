@@ -1,11 +1,12 @@
-package io.netnotes.app.console;
+package io.netnotes.renderer;
 
-import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.Keyboard.KeyCode;
-import io.netnotes.engine.io.input.events.KeyCharEvent;
-import io.netnotes.engine.io.input.events.KeyDownEvent;
-import io.netnotes.engine.io.input.events.KeyUpEvent;
+import io.netnotes.engine.io.input.events.EventBytes;
+import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.noteBytes.NoteBytes;
+import io.netnotes.engine.noteBytes.NoteBytesArrayReadOnly;
+import io.netnotes.engine.noteBytes.NoteBytesReadOnly;
+import io.netnotes.engine.noteBytes.collections.NoteBytesMap;
 
 /**
  * ConsoleEventFactory - Convert JLine terminal input to HID keyboard events
@@ -20,6 +21,8 @@ class ConsoleEventFactory {
     static final int MOD_CONTROL = 0x0002;
     static final int MOD_ALT = 0x0004;
     
+  
+ 
     // ===== ASCII TO HID MAPPING =====
     
     /**
@@ -173,92 +176,58 @@ class ConsoleEventFactory {
     /**
      * Create KeyDown event from HID keycode
      */
-    static KeyDownEvent createKeyDown(ContextPath sourcePath, int hidKeyCode, int modifiers) {
-        return new KeyDownEvent(
-            sourcePath,
+    static NoteBytesMap createKeyDown(int hidKeyCode, int modifiers) {
+        return createEvent(
+            EventBytes.EVENT_KEY_DOWN,
+            modifiers,
             new NoteBytes(hidKeyCode),
-            new NoteBytes(0), // scancode always 0 for console
-            modifiers
+            new NoteBytes(0) // scancode
         );
     }
     
     /**
      * Create KeyUp event from HID keycode
      */
-    static KeyUpEvent createKeyUp(ContextPath sourcePath, int hidKeyCode, int modifiers) {
-        return new KeyUpEvent(
-            sourcePath,
+    static NoteBytesMap createKeyUp(int hidKeyCode, int modifiers) {
+        return createEvent(
+            EventBytes.EVENT_KEY_UP,
+            modifiers,
             new NoteBytes(hidKeyCode),
-            new NoteBytes(0),
-            modifiers
+            new NoteBytes(0)
         );
     }
     
     /**
      * Create KeyChar event from Unicode codepoint
      */
-    static KeyCharEvent createKeyChar(ContextPath sourcePath, int codepoint, int modifiers) {
-        return new KeyCharEvent(
-            sourcePath,
-            new NoteBytes(codepoint),
-            modifiers
+    static NoteBytesMap createKeyChar(int codepoint, int modifiers) {
+        return createEvent(
+            EventBytes.EVENT_KEY_CHAR,
+            modifiers,
+            new NoteBytes(codepoint)
         );
     }
     
-    /**
-     * Create KeyDown + KeyUp pair for a key press
-     */
-    static void emitKeyPress(ContextPath sourcePath, int hidKeyCode, int modifiers, 
-                            java.util.function.Consumer<io.netnotes.engine.io.input.events.RoutedEvent> emitter) {
-        emitter.accept(createKeyDown(sourcePath, hidKeyCode, modifiers));
-        emitter.accept(createKeyUp(sourcePath, hidKeyCode, modifiers));
-    }
-    
-    /**
-     * Process printable ASCII and emit both KeyDown/Up + KeyChar
-     */
-    static void emitPrintableChar(ContextPath sourcePath, int ascii, 
-                                 java.util.function.Consumer<io.netnotes.engine.io.input.events.RoutedEvent> emitter) {
-        int[] hidMapping = asciiToHid(ascii);
-        int hidCode = hidMapping[0];
-        int modifiers = hidMapping[1];
-        
-        if (hidCode != KeyCode.NONE) {
-            // Emit key down/up
-            emitter.accept(createKeyDown(sourcePath, hidCode, modifiers));
-            emitter.accept(createKeyUp(sourcePath, hidCode, modifiers));
+
+    static NoteBytesMap createEvent(
+            NoteBytesReadOnly eventType,
+            int stateFlags,
+            NoteBytes... payload
+    ) {
+        NoteBytesMap event = new NoteBytesMap();
+
+        event.put(Keys.EVENT, eventType);
+        if (stateFlags != 0) {
+            event.put(Keys.STATE_FLAGS, new NoteBytes(stateFlags));
         }
-        
-        // Always emit char event for printable characters
-        emitter.accept(createKeyChar(sourcePath, ascii, modifiers));
-    }
-    
-    /**
-     * Process control character (Ctrl+A through Ctrl+Z)
-     */
-    static void emitControlChar(ContextPath sourcePath, int ctrlChar,
-                               java.util.function.Consumer<io.netnotes.engine.io.input.events.RoutedEvent> emitter) {
-        if (ctrlChar >= 1 && ctrlChar <= 26) {
-            int hidCode = KeyCode.A + (ctrlChar - 1);
-            emitKeyPress(sourcePath, hidCode, MOD_CONTROL, emitter);
+
+        if (payload != null && payload.length > 0) {
+            event.put(
+                Keys.PAYLOAD,
+                new NoteBytesArrayReadOnly(payload)
+            );
         }
-    }
-    
-    /**
-     * Process special keys (Enter, Backspace, Tab, Escape)
-     */
-    static void emitSpecialKey(ContextPath sourcePath, int ascii,
-                              java.util.function.Consumer<io.netnotes.engine.io.input.events.RoutedEvent> emitter) {
-        int hidCode = switch (ascii) {
-            case 13, 10 -> KeyCode.ENTER;
-            case 8, 127 -> KeyCode.BACKSPACE;
-            case 9 -> KeyCode.TAB;
-            case 27 -> KeyCode.ESCAPE;
-            default -> KeyCode.NONE;
-        };
-        
-        if (hidCode != KeyCode.NONE) {
-            emitKeyPress(sourcePath, hidCode, 0, emitter);
-        }
+
+        return event;
     }
 }
