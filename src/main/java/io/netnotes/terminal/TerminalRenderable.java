@@ -514,7 +514,7 @@ public abstract class TerminalRenderable extends Renderable<
 
      protected void clear(TerminalBatchBuilder batch) {
         // Convert to clearRegion to properly enforce bounds
-        clearRegion(batch, getX(), getY(), getWidth(), getHeight());
+        clearRegion(batch, 0, 0, getWidth(), getHeight());
     }
     
     /**
@@ -654,37 +654,39 @@ public abstract class TerminalRenderable extends Renderable<
     /**
      * Fill region with character (local coordinates)
      */
-    protected void fillRegion(TerminalBatchBuilder batch, int x, int y, int width, int height, char fillChar, TextStyle style) {
+    protected void fillRegion(TerminalBatchBuilder batch, int x, int y, int width, int height, 
+                         int fillChar, TextStyle style) {
         if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        int absX = toAbsoluteX(x);
+        int absY = toAbsoluteY(y);
         
-        int left = toAbsoluteX(Math.max(0, x));
-        int top = toAbsoluteY(Math.max(0, y));
-        int right = toAbsoluteX(Math.min(getWidth(), x + width));
-        int bottom = toAbsoluteY(Math.min(getHeight(), y + height));
+        TerminalRectangle fillRegion = regionPool.obtain();
+        fillRegion.set(absX, absY, width, height, 0, 0);
         
+        TerminalRectangle renderRegion = regionPool.obtain();
         TerminalRectangle clip = batch.getCurrentClipRegion();
+        
         if (clip != null) {
-            left = Math.max(left, clip.getX());
-            top = Math.max(top, clip.getY());
-            right = Math.min(right, clip.getX() + clip.getWidth());
-            bottom = Math.min(bottom, clip.getY() + clip.getHeight());
+            if (!fillRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(fillRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.fillRegion(fillRegion, renderRegion, fillChar, style);
+        } else {
+            batch.fillRegion(fillRegion, null, fillChar, style);
         }
         
-        if (right <= left || bottom <= top) return;
-        
-        TerminalRectangle region = regionPool.obtain();
-        region.set(left, top, right - left, bottom - top, 0, 0);
-        batch.fillRegion(region, fillChar, style);
-        regionPool.recycle(region);
+        regionPool.recycle(fillRegion);
+        regionPool.recycle(renderRegion);
     }
     
     /**
      * Fill region with character using TerminalRectangle (local coordinates)
      */
-    protected void fillRegion(TerminalBatchBuilder batch, TerminalRectangle region, 
-                             char fillChar, TextStyle style) {
-        fillRegion(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
-                  fillChar, style);
+    protected void fillRegion(TerminalBatchBuilder batch, TerminalRectangle region, int fillChar, TextStyle style) {
+        fillRegion(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(), fillChar, style);
     }
     
     /**

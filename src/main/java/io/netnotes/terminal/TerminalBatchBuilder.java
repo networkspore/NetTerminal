@@ -311,7 +311,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
      * Fill region with character - CHECKS CLIP REGION
      * TerminalRenderable will clamp region to its bounds.
      */
-    public void fillRegion(TerminalRectangle region, char fillChar, TextStyle style) {
+    public void fillRegion(TerminalRectangle region, String fillChar, TextStyle style) {
         TerminalRectangle clip = getCurrentClipRegion();
         
         if (clip != null) {
@@ -321,13 +321,13 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
             }
         }
         
-        addCommand(TerminalCommands.fillRegion(region, fillChar, style));
+        addCommand(TerminalCommands.fillRegion(region,null, fillChar, style));
     }
     
     /**
      * Fill region with character (code point version)
      */
-    public void fillRegion(TerminalRectangle region, int cp, TextStyle style) {
+    public void fillRegion(TerminalRectangle region, TerminalRectangle renderRegion, int cp, TextStyle style) {
         TerminalRectangle clip = getCurrentClipRegion();
         
         if (clip != null) {
@@ -337,15 +337,13 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
             }
         }
         
-        addCommand(TerminalCommands.fillRegion(region, cp, style));
+        addCommand(TerminalCommands.fillRegion(region, renderRegion, cp, style));
     }
-    
-    /**
-     * Fill region with character (code point convenience method)
-     */
-    public void fillRegion(int x, int y, int width, int height, int cp, TextStyle style) {
-        fillRegion(new TerminalRectangle(x, y, width, height), cp, style);
+
+    public void fillRegion(TerminalRectangle region, TerminalRectangle renderRegion, String character, TextStyle style) {
+        fillRegion(region, renderRegion, character.codePointAt(0), style);
     }
+ 
 
     public void drawBorderedText(TerminalRectangle region,TerminalRectangle renderRegion, String text, Position textPos, BoxStyle boxStyle, 
         TextStyle textStyle, TextStyle borderStyle

@@ -41,7 +41,9 @@ public class TerminalTextBox extends TerminalRenderable {
     // Styling
     private BoxStyle boxStyle = BoxStyle.SINGLE;
     private TextStyle textStyle = TextStyle.NORMAL;
-    private TextStyle titleStyle = TextStyle.BOLD;
+    private TextStyle borderStyleNormal = TextStyle.BORDER;
+    private TextStyle borderStyleFocused = TextStyle.BORDER_FOCUSED;
+    private TextStyle scrollIndicatorStyle = TextStyle.STATUS_INFO;
     
     // Title
     private String title = null;
@@ -49,14 +51,24 @@ public class TerminalTextBox extends TerminalRenderable {
     
     // Content
     private final List<String> lines = new ArrayList<>();
+    private final List<TextStyle> lineStyles = new ArrayList<>(); // Per-line styling
     private ContentAlignment alignment = ContentAlignment.LEFT;
     private int padding = 1;
+    
+    // Features
+    private boolean showLineNumbers = false;
+    private int lineNumberWidth = 4;
+    private TextStyle lineNumberStyle = TextStyle.BRIGHT_BLACK;
     
     // Scrolling
     private boolean scrollable = false;
     private int verticalScroll = 0;
     private int horizontalScroll = 0;
     private TextOverflow overflow = TextOverflow.TRUNCATE;
+    
+    // Search highlighting
+    private String searchTerm = null;
+    private TextStyle searchHighlightStyle = TextStyle.BLACK_ON_YELLOW;
     
     // ===== CONSTRUCTORS =====
     
@@ -69,17 +81,10 @@ public class TerminalTextBox extends TerminalRenderable {
         addLine(text);
     }
     
-    public TerminalTextBox(String name, int x, int y, int width, int height, BoxStyle boxStyle) {
-        this(name);
-        this.boxStyle = boxStyle;
-        setBounds(x, y, width, height);
-    }
-    
     private TerminalTextBox(Builder builder) {
         super(builder.name);
         this.boxStyle = builder.boxStyle;
         this.textStyle = builder.textStyle;
-        this.titleStyle = builder.titleStyle;
         this.title = builder.title;
         this.titlePlacement = builder.titlePlacement;
         this.lines.addAll(builder.lines);
@@ -87,6 +92,7 @@ public class TerminalTextBox extends TerminalRenderable {
         this.padding = builder.padding;
         this.scrollable = builder.scrollable;
         this.overflow = builder.overflow;
+        this.showLineNumbers = builder.showLineNumbers;
         setFocusable(scrollable);
         setBounds(builder.x, builder.y, builder.width, builder.height);
     }
@@ -95,31 +101,56 @@ public class TerminalTextBox extends TerminalRenderable {
     
     public void setText(String text) {
         lines.clear();
+        lineStyles.clear();
         lines.add(text);
+        lineStyles.add(textStyle);
         verticalScroll = 0;
         invalidate();
     }
     
     public void setLines(List<String> newLines) {
         lines.clear();
+        lineStyles.clear();
         lines.addAll(newLines);
+        // Fill with default styles
+        for (int i = 0; i < newLines.size(); i++) {
+            lineStyles.add(textStyle);
+        }
         verticalScroll = Math.min(verticalScroll, Math.max(0, lines.size() - getContentHeight()));
         invalidate();
     }
     
     public void addLine(String line) {
+        addLine(line, textStyle);
+    }
+    
+    public void addLine(String line, TextStyle style) {
         lines.add(line);
+        lineStyles.add(style != null ? style : textStyle);
         invalidateContent();
     }
     
+    public void setLineStyle(int index, TextStyle style) {
+        if (index >= 0 && index < lines.size()) {
+            lineStyles.set(index, style != null ? style : textStyle);
+            invalidateContent();
+        }
+    }
+    
     public void insertLine(int index, String line) {
+        insertLine(index, line, textStyle);
+    }
+    
+    public void insertLine(int index, String line, TextStyle style) {
         lines.add(Math.min(index, lines.size()), line);
+        lineStyles.add(Math.min(index, lineStyles.size()), style != null ? style : textStyle);
         invalidateContent();
     }
     
     public void removeLine(int index) {
         if (index >= 0 && index < lines.size()) {
             lines.remove(index);
+            lineStyles.remove(index);
             verticalScroll = Math.min(verticalScroll, Math.max(0, lines.size() - getContentHeight()));
             invalidateContent();
         }
@@ -128,6 +159,7 @@ public class TerminalTextBox extends TerminalRenderable {
     public void clear() {
         if (!lines.isEmpty()) {
             lines.clear();
+            lineStyles.clear();
             verticalScroll = 0;
             horizontalScroll = 0;
             invalidate();
@@ -145,12 +177,27 @@ public class TerminalTextBox extends TerminalRenderable {
     public void setScrollable(boolean scrollable) {
         if (this.scrollable != scrollable) {
             this.scrollable = scrollable;
-            setFocusable(scrollable);  // Can focus to scroll
+            setFocusable(scrollable);
             if (!scrollable) {
                 verticalScroll = 0;
                 horizontalScroll = 0;
             }
             invalidate();
+        }
+    }
+    
+    public void setShowLineNumbers(boolean show) {
+        if (this.showLineNumbers != show) {
+            this.showLineNumbers = show;
+            invalidate();
+        }
+    }
+    
+    public void setSearchTerm(String term) {
+        if ((this.searchTerm == null && term != null) || 
+            (this.searchTerm != null && !this.searchTerm.equals(term))) {
+            this.searchTerm = term;
+            invalidateContent();
         }
     }
     
@@ -239,7 +286,7 @@ public class TerminalTextBox extends TerminalRenderable {
     
     @Override
     public void onFocusGained() {
-        invalidate();  // Highlight border when focused
+        invalidate();
     }
     
     @Override
@@ -254,17 +301,16 @@ public class TerminalTextBox extends TerminalRenderable {
         int width = getWidth();
         int height = getHeight();
         if (width < 3 || height < 3) return;
-        batch.clear();
-        // Border (highlight if focused and scrollable)
-        BoxStyle renderStyle = (hasFocus() && scrollable) ? BoxStyle.DOUBLE : boxStyle;
-        TextStyle textStyle = hasFocus() ? (titleStyle != null ? titleStyle : TextStyle.NORMAL) : TextStyle.DIM;
+        
+        // Border (use focused style when has focus)
+        TextStyle borderStyle = hasFocus() ? borderStyleFocused : borderStyleNormal;
+        
         if (title != null && !title.isEmpty()) {
-            drawBox(batch, 0, 0, width, height, title, titlePlacement, renderStyle, textStyle);
+            drawBox(batch, 0, 0, width, height, title, titlePlacement, boxStyle, borderStyle);
         } else {
-            drawBox(batch, 0, 0, width, height, renderStyle);
+            drawBox(batch, 0, 0, width, height, boxStyle, borderStyle);
         }
         
-
         // Content
         if (!lines.isEmpty()) {
             renderContent(batch, width, height);
@@ -286,16 +332,58 @@ public class TerminalTextBox extends TerminalRenderable {
         
         for (int i = startLine; i < endLine; i++) {
             String line = lines.get(i);
-            String displayLine = processOverflow(line, contentWidth);
-            
+            TextStyle lineStyle = lineStyles.get(i);
             int row = contentStartRow + (i - startLine);
-            int col = switch (alignment) {
-                case CENTER -> padding + 1 + (contentWidth - displayLine.length()) / 2;
+            int col = padding + 1;
+            
+            // Line numbers
+            if (showLineNumbers) {
+                String lineNum = String.format("%" + lineNumberWidth + "d", i + 1);
+                printAt(batch, col, row, lineNum, lineNumberStyle);
+                col += lineNumberWidth + 1; // +1 for space
+            }
+            
+            // Process line content
+            String displayLine = processOverflow(line, contentWidth - (showLineNumbers ? lineNumberWidth + 1 : 0));
+            
+            // Apply alignment
+            int textCol = switch (alignment) {
+                case CENTER -> col + (contentWidth - displayLine.length()) / 2;
                 case RIGHT -> width - padding - 1 - displayLine.length();
-                default -> padding + 1;
+                default -> col;
             };
             
-            printAt(batch, col, row, displayLine, textStyle);  // Fixed: x, y order
+            // Render with search highlighting if needed
+            if (searchTerm != null && !searchTerm.isEmpty() && line.contains(searchTerm)) {
+                renderLineWithHighlight(batch, textCol, row, displayLine, line, lineStyle);
+            } else {
+                printAt(batch, textCol, row, displayLine, lineStyle);
+            }
+        }
+    }
+    
+    private void renderLineWithHighlight(TerminalBatchBuilder batch, int col, int row, 
+                                         String displayLine, String originalLine, TextStyle baseStyle) {
+        int searchIndex = originalLine.indexOf(searchTerm);
+        if (searchIndex == -1) {
+            printAt(batch, col, row, displayLine, baseStyle);
+            return;
+        }
+        
+        // Render in segments: before match, match (highlighted), after match
+        String before = originalLine.substring(0, searchIndex);
+        String match = originalLine.substring(searchIndex, searchIndex + searchTerm.length());
+        String after = originalLine.substring(searchIndex + searchTerm.length());
+        
+        int currentCol = col;
+        if (!before.isEmpty()) {
+            printAt(batch, currentCol, row, before, baseStyle);
+            currentCol += before.length();
+        }
+        printAt(batch, currentCol, row, match, searchHighlightStyle);
+        currentCol += match.length();
+        if (!after.isEmpty()) {
+            printAt(batch, currentCol, row, after, baseStyle);
         }
     }
     
@@ -306,24 +394,31 @@ public class TerminalTextBox extends TerminalRenderable {
         
         // Up indicator
         if (verticalScroll > 0) {
-            printAt(batch, indicatorCol, contentStartRow, "↑", TextStyle.INFO);  // Fixed: x, y order
+            printAt(batch, indicatorCol, contentStartRow, "▲", scrollIndicatorStyle);
         }
         
         // Down indicator
         if (verticalScroll + contentHeight < lines.size()) {
-            printAt(batch, indicatorCol, contentStartRow + contentHeight - 1, "↓", TextStyle.INFO);  // Fixed: x, y order
+            printAt(batch, indicatorCol, contentStartRow + contentHeight - 1, "▼", scrollIndicatorStyle);
+        }
+        
+        // Scroll position indicator (bar)
+        if (contentHeight > 2) {
+            float scrollPercent = (float) verticalScroll / Math.max(1, lines.size() - contentHeight);
+            int barPos = (int) (scrollPercent * (contentHeight - 2));
+            printAt(batch, indicatorCol, contentStartRow + 1 + barPos, "█", scrollIndicatorStyle);
         }
         
         // Horizontal indicators
         if (overflow == TextOverflow.SCROLL) {
             int midRow = contentStartRow + contentHeight / 2;
             if (horizontalScroll > 0) {
-                printAt(batch, 1, midRow, "◄", TextStyle.INFO);  // Fixed: x, y order
+                printAt(batch, 1, midRow, "◄", scrollIndicatorStyle);
             }
             
             int maxWidth = lines.stream().mapToInt(String::length).max().orElse(0);
             if (horizontalScroll + getContentWidth() < maxWidth) {
-                printAt(batch, width - 2, midRow, "►", TextStyle.INFO);  // Fixed: x, y order
+                printAt(batch, width - 2, midRow, "►", scrollIndicatorStyle);
             }
         }
     }
@@ -350,7 +445,7 @@ public class TerminalTextBox extends TerminalRenderable {
     }
     
     private int getContentHeight() {
-        int reserved = 2 + (2 * padding);  // Border + padding
+        int reserved = 2 + (2 * padding);
         return Math.max(1, getHeight() - reserved);
     }
     
@@ -361,21 +456,22 @@ public class TerminalTextBox extends TerminalRenderable {
     private void invalidateContent() {
         int contentStartRow = getContentStartRow();
         int contentHeight = getContentHeight();
-        invalidateRegion(contentStartRow, 1, contentHeight, getWidth() - 2);
+        invalidateRegion(1, contentStartRow, getWidth() - 2, contentHeight);
     }
     
     // ===== GETTERS =====
     
     public List<String> getLines() { return new ArrayList<>(lines); }
     public int getLineCount() { return lines.size(); }
-    public String getLine(int index) { return index >= 0 && index < lines.size() ? lines.get(index) : null; }
+    public String getLine(int index) { 
+        return index >= 0 && index < lines.size() ? lines.get(index) : null; 
+    }
     public int getVerticalScroll() { return verticalScroll; }
     public boolean isScrollable() { return scrollable; }
     
     // ===== ENUMS =====
     
     public enum TextOverflow { WRAP, TRUNCATE, SCROLL, TRUNCATE_START }
-
     public enum ContentAlignment { LEFT, CENTER, RIGHT }
     
     // ===== BUILDER =====
@@ -389,31 +485,35 @@ public class TerminalTextBox extends TerminalRenderable {
         private int x = 0, y = 0, width = 40, height = 10;
         private BoxStyle boxStyle = BoxStyle.SINGLE;
         private TextStyle textStyle = TextStyle.NORMAL;
-        private TextStyle titleStyle = TextStyle.BOLD;
         private String title = null;
         private Position titlePlacement = Position.TOP_CENTER;
         private List<String> lines = new ArrayList<>();
         private ContentAlignment alignment = ContentAlignment.LEFT;
         private int padding = 1;
         private boolean scrollable = false;
+        private boolean showLineNumbers = false;
         private TextOverflow overflow = TextOverflow.TRUNCATE;
         
         public Builder name(String name) { this.name = name; return this; }
         public Builder position(int x, int y) { this.x = x; this.y = y; return this; }
         public Builder size(int width, int height) { this.width = width; this.height = height; return this; }
         public Builder bounds(int x, int y, int width, int height) {
-            this.x = x; this.y = y; this.width = width; this.height = height; return this;
+            this.x = x; this.y = y; this.width = width; this.height = height;
+            return this;
         }
         public Builder boxStyle(BoxStyle style) { this.boxStyle = style; return this; }
         public Builder textStyle(TextStyle style) { this.textStyle = style; return this; }
-        public Builder titleStyle(TextStyle style) { this.titleStyle = style; return this; }
         public Builder title(String title) { this.title = title; return this; }
         public Builder titlePlacement(Position placement) { this.titlePlacement = placement; return this; }
-        public Builder content(String... lines) { this.lines.addAll(Arrays.asList(lines)); return this; }
+        public Builder content(String... lines) { 
+            this.lines.addAll(Arrays.asList(lines)); 
+            return this; 
+        }
         public Builder addLine(String line) { this.lines.add(line); return this; }
         public Builder alignment(ContentAlignment align) { this.alignment = align; return this; }
         public Builder padding(int padding) { this.padding = padding; return this; }
         public Builder scrollable(boolean scrollable) { this.scrollable = scrollable; return this; }
+        public Builder showLineNumbers(boolean show) { this.showLineNumbers = show; return this; }
         public Builder overflow(TextOverflow overflow) { this.overflow = overflow; return this; }
         
         public TerminalTextBox build() {

@@ -1,6 +1,7 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
@@ -101,22 +102,26 @@ public class TerminalCommands {
      * Print text at cursor position
      */
     public static NoteBytesObject print(String text, TextStyle style) {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, TERMINAL_PRINT),
-            new NoteBytesPair(Keys.TEXT, text),
-            new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
-        });
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, TERMINAL_PRINT);
+        map.put(Keys.TEXT, text);
+        if (style != null) {
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
     }
 
     /**
      * Print line (with newline) at cursor position
      */
     public static NoteBytesObject println(String text, TextStyle style) {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, TERMINAL_PRINTLN),
-            new NoteBytesPair(Keys.TEXT, text),
-            new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
-        });
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, TERMINAL_PRINTLN);
+        map.put(Keys.TEXT, text);
+        if (style != null) {
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
     }
 
     /**
@@ -269,13 +274,15 @@ public class TerminalCommands {
         if(renderRegion != null){
             map.put(RENDER_REGION, renderRegion.toNoteBytes());
         }
-        if(title != null && title.isEmpty()){
+        if(title != null && !title.isEmpty()){
             map.put(Keys.TITLE, title);
             if(titlePosition != null){
                 map.put(TITLE_POS, titlePosition.name());
             }
         }
-        map.put(BOX_STYLE, boxStyle.name());
+        if (boxStyle != null) {
+            map.put(BOX_STYLE, boxStyle.name());
+        }
         if(style != null){
             map.put(Keys.STYLE, style.toNoteBytes());
         }
@@ -290,21 +297,23 @@ public class TerminalCommands {
      * @param length line length
      * @param style text style
      */
-    public static NoteBytesObject drawHLine(int x, int y, int length, TextStyle style) {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, TERMINAL_DRAW_HLINE),
-            new NoteBytesPair(Keys.X, x),
-            new NoteBytesPair(Keys.Y, y),
-            new NoteBytesPair(Keys.LENGTH, length),
-            new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
-        });
+    public static NoteBytes drawHLine(int x, int y, int length, TextStyle style) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, TERMINAL_DRAW_HLINE);
+        map.put(Keys.X, x);
+        map.put(Keys.Y, y);
+        map.put(Keys.LENGTH, length);
+        if (style != null) {
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
     }
     
     /**
      * Draw horizontal line (default style)
      */
-    public static NoteBytesObject drawHLine(int x, int y, int length) {
-        return drawHLine(x, y, length, TextStyle.NORMAL);
+    public static NoteBytes drawHLine(int x, int y, int length) {
+        return drawHLine(x, y, length, null);
     }
 
     /**
@@ -314,21 +323,23 @@ public class TerminalCommands {
      * @param length line length
      * @param style text style
      */
-    public static NoteBytesObject drawVLine(int x, int y, int length, TextStyle style) {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, TERMINAL_DRAW_VLINE),
-            new NoteBytesPair(Keys.X, x),
-            new NoteBytesPair(Keys.Y, y),
-            new NoteBytesPair(Keys.LENGTH, length),
-            new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
-        });
+    public static NoteBytes drawVLine(int x, int y, int length, TextStyle style) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, TERMINAL_DRAW_VLINE);
+        map.put(Keys.X, x);
+        map.put(Keys.Y, y);
+        map.put(Keys.LENGTH, length);
+        if (style != null) {
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
     }
     
     /**
      * Draw vertical line (default style)
      */
-    public static NoteBytesObject drawVLine(int x, int y, int length) {
-        return drawVLine(x, y, length, TextStyle.NORMAL);
+    public static NoteBytes drawVLine(int x, int y, int length) {
+        return drawVLine(x, y, length, null);
     }
 
     // ===== FILL OPERATIONS =====
@@ -339,37 +350,32 @@ public class TerminalCommands {
      * @param cp Unicode code point to fill with
      * @param style text style
      */
-    public static NoteBytesObject fillRegion(TerminalRectangle region, int cp, TextStyle style) {
-        return new NoteBytesObject(new NoteBytesPair[]{
-            new NoteBytesPair(Keys.CMD, TERMINAL_FILL_REGION),
-            new NoteBytesPair(Keys.REGION, region.toNoteBytes()),
-            new NoteBytesPair(CODE_POINT, cp),
-            new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
-        });
+    public static NoteBytesObject fillRegion(TerminalRectangle region, TerminalRectangle renderRegion, int cp, TextStyle style) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, TERMINAL_FILL_REGION);
+        map.put(Keys.REGION, region.toNoteBytes());
+        if(renderRegion != null){
+            map.put(TerminalCommands.RENDER_REGION, renderRegion.toNoteBytes());
+        }
+        map.put(CODE_POINT, cp);
+        if(style != null){
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
+       
     }
 
-    public static NoteBytesObject fillRegion(TerminalRectangle region, String character, TextStyle style) {
-        return fillRegion(region, character.codePointAt(0), style);
+    public static NoteBytesObject fillRegion(TerminalRectangle region, TerminalRectangle renderRegion, String character, TextStyle style) {
+        return fillRegion(region, renderRegion, character.codePointAt(0), style);
     }
 
-
-    /**
-     * Fill rectangular region with character
-     * @param region the region to fill
-     * @param fillChar character to fill with
-     * @param style text style
-     */
-    public static NoteBytesObject fillRegion(TerminalRectangle region, char fillChar, TextStyle style) {
-        return fillRegion(region, (int) fillChar, style);
-    }
-    
     /**
      * Fill region with space (for background color)
      * @param region the region to fill
      * @param style text style (typically just background color)
      */
-    public static NoteBytesObject fillBackground(TerminalRectangle region, TextStyle style) {
-        return fillRegion(region, " ", style);
+    public static NoteBytesObject fillBackground(TerminalRectangle region,TerminalRectangle renderRegion, TextStyle style) {
+        return fillRegion(region, renderRegion, " ", style);
     }
 
     // ===== COMPONENT RENDERING HELPERS =====
@@ -411,7 +417,7 @@ public class TerminalCommands {
      * @param borderStyle style for border
      * @param fillStyle style for background
      */
-    public static NoteBytesObject drawPanel(
+    public static NoteBytes drawPanel(
         TerminalRectangle region,
         TerminalRectangle renderRegion,
         String title, 
@@ -423,22 +429,23 @@ public class TerminalCommands {
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.CMD, TERMINAL_DRAW_PANEL);
         map.put(Keys.REGION, region.toNoteBytes());
-        if(renderRegion != null){
+        
+        if (renderRegion != null) {
             map.put(RENDER_REGION, renderRegion.toNoteBytes());
         }
-        if(title != null && title.isEmpty()){
+        if (title != null && !title.isEmpty()) {  // FIXED: was title.isEmpty()
             map.put(Keys.TITLE, title);
-            if(titlePosition != null){
+            if (titlePosition != null) {
                 map.put(TITLE_POS, titlePosition.name());
             }
         }
-        if(boxStyle != null){
+        if (boxStyle != null) {
             map.put(BOX_STYLE, boxStyle.name());
         }
-        if(borderStyle != null){
+        if (borderStyle != null) {
             map.put(Keys.STYLE, borderStyle.toNoteBytes());
         }
-        if(fillStyle != null){
+        if (fillStyle != null) {
             map.put(StyleConstants.BG_STYLE, fillStyle.toNoteBytes());
         }
         return map.toNoteBytes();
@@ -452,22 +459,29 @@ public class TerminalCommands {
      * @param selected whether button is selected/focused
      * @param style button style
      */
-    public static NoteBytesObject drawButton(TerminalRectangle region, TerminalRectangle renderRegion, String label, Position labelPos,
-                                             boolean selected, TextStyle style) {
+    public static NoteBytes drawButton(
+        TerminalRectangle region, 
+        TerminalRectangle renderRegion, 
+        String label, 
+        Position labelPos,
+        boolean selected, 
+        TextStyle style
+    ) {
         NoteBytesMap map = new NoteBytesMap();
-        map.put(Keys.CMD, TERMINAL_DRAW_PANEL);
+        map.put(Keys.CMD, TERMINAL_DRAW_BUTTON);
         map.put(Keys.REGION, region.toNoteBytes());
-        if(renderRegion != null){
+        
+        if (renderRegion != null) {
             map.put(RENDER_REGION, renderRegion.toNoteBytes());
         }
-        if(label != null && label.isEmpty()){
+        if (label != null && !label.isEmpty()) {
             map.put(Keys.TEXT, label);
-            if(labelPos != null){
+            if (labelPos != null) {
                 map.put(TITLE_POS, labelPos.name());
             }
         }
         map.put(SELECTED, selected);
-        if(style != null){
+        if (style != null) {
             map.put(Keys.STYLE, style.toNoteBytes());
         }
         return map.toNoteBytes();

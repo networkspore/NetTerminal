@@ -55,7 +55,7 @@ public class ScrollableTextViewer extends TerminalRenderable {
         new NoteBytesRunnablePair(KeyCodeBytes.PAGE_UP, this::handlePageUp),
         new NoteBytesRunnablePair(KeyCodeBytes.PAGE_DOWN, this::handlePageDown),
         new NoteBytesRunnablePair(KeyCodeBytes.HOME, this::handleHome),
-        new NoteBytesRunnablePair(KeyCodeBytes.END, this::handleEnd),
+        new NoteBytesRunnablePair(KeyCodeBytes.END, this::handleEnd)
     });
     
     public ScrollableTextViewer(String name) {

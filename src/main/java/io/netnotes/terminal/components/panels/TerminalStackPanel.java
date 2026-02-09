@@ -193,6 +193,11 @@ public class TerminalStackPanel extends TerminalRenderable implements TerminalSi
         
         requestLayoutUpdate();
     }
+
+    @Override
+    public void removeChild(TerminalRenderable renderable){
+        removeFromStack(renderable);
+    }
     
     /**
      * Remove a renderable from the stack by reference.
@@ -204,21 +209,18 @@ public class TerminalStackPanel extends TerminalRenderable implements TerminalSi
         
         stack.remove(renderable);
         nameToRenderable.remove(renderable.getName());
-        removeChild(renderable);
+        super.removeChild(renderable);
         
         // Clear visibility policy
         renderable.setVisibilityPolicy(null);
         
-        // If we're removing the visible content, show the next one if available
         if (renderable == visibleContent) {
             visibleContent = null;
-            if (!stack.isEmpty()) {
-                setVisibleContent(stack.get(0));
-            }
         }
         
         requestLayoutUpdate();
     }
+
     
     /**
      * Remove a renderable from the stack by name.

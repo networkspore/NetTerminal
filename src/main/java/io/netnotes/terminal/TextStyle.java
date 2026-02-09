@@ -185,7 +185,115 @@ public class TextStyle {
     public static final TextStyle WARNING = new TextStyle().color(Color.YELLOW);
     public static final TextStyle INFO = new TextStyle().color(Color.CYAN);
     public static final TextStyle DEBUG = new TextStyle().color(Color.BRIGHT_BLACK);
-    
+    public static final TextStyle BLACK = new TextStyle().color(Color.BLACK);
+    public static final TextStyle RED = new TextStyle().color(Color.RED);
+    public static final TextStyle GREEN = new TextStyle().color(Color.GREEN);
+    public static final TextStyle YELLOW = new TextStyle().color(Color.YELLOW);
+    public static final TextStyle BLUE = new TextStyle().color(Color.BLUE);
+    public static final TextStyle MAGENTA = new TextStyle().color(Color.MAGENTA);
+    public static final TextStyle CYAN = new TextStyle().color(Color.CYAN);
+    public static final TextStyle WHITE = new TextStyle().color(Color.WHITE);
+
+    // Bright foreground colors
+    public static final TextStyle BRIGHT_BLACK = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle BRIGHT_RED = new TextStyle().color(Color.BRIGHT_RED);
+    public static final TextStyle BRIGHT_GREEN = new TextStyle().color(Color.BRIGHT_GREEN);
+    public static final TextStyle BRIGHT_YELLOW = new TextStyle().color(Color.BRIGHT_YELLOW);
+    public static final TextStyle BRIGHT_BLUE = new TextStyle().color(Color.BRIGHT_BLUE);
+    public static final TextStyle BRIGHT_MAGENTA = new TextStyle().color(Color.BRIGHT_MAGENTA);
+    public static final TextStyle BRIGHT_CYAN = new TextStyle().color(Color.BRIGHT_CYAN);
+    public static final TextStyle BRIGHT_WHITE = new TextStyle().color(Color.BRIGHT_WHITE);
+
+    public static final TextStyle HEADER = new TextStyle().color(Color.BRIGHT_WHITE).bold();
+    public static final TextStyle SUBHEADER = new TextStyle().color(Color.BRIGHT_CYAN);
+    public static final TextStyle TITLE = new TextStyle().color(Color.BRIGHT_YELLOW).bold();
+
+
+    // UI Component styles - Interactive
+    public static final TextStyle SELECTED = new TextStyle().inverse();
+    public static final TextStyle FOCUSED = new TextStyle().color(Color.BRIGHT_WHITE).bold();
+    public static final TextStyle DISABLED = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle ACTIVE = new TextStyle().color(Color.BRIGHT_GREEN);
+    public static final TextStyle INACTIVE = new TextStyle().color(Color.BRIGHT_BLACK);
+
+    // UI Component styles - Borders
+    public static final TextStyle BORDER = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle BORDER_FOCUSED = new TextStyle().color(Color.BRIGHT_CYAN);
+    public static final TextStyle BORDER_ERROR = new TextStyle().color(Color.RED);
+
+    // Status indicators
+    public static final TextStyle STATUS_OK = new TextStyle().color(Color.GREEN);
+    public static final TextStyle STATUS_WARN = new TextStyle().color(Color.YELLOW);
+    public static final TextStyle STATUS_ERROR = new TextStyle().color(Color.RED).bold();
+    public static final TextStyle STATUS_INFO = new TextStyle().color(Color.CYAN);
+
+    // Data display
+    public static final TextStyle LABEL = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle VALUE = new TextStyle().color(Color.BRIGHT_WHITE);
+    public static final TextStyle EMPHASIZED = new TextStyle().bold();
+    public static final TextStyle DEEMPHASIZED = new TextStyle().faint();
+
+    // Backgrounds - Common solid colors
+    public static final TextStyle BG_BLACK = new TextStyle().bgColor(Color.BLACK);
+    public static final TextStyle BG_RED = new TextStyle().bgColor(Color.RED);
+    public static final TextStyle BG_GREEN = new TextStyle().bgColor(Color.GREEN);
+    public static final TextStyle BG_YELLOW = new TextStyle().bgColor(Color.YELLOW);
+    public static final TextStyle BG_BLUE = new TextStyle().bgColor(Color.BLUE);
+    public static final TextStyle BG_MAGENTA = new TextStyle().bgColor(Color.MAGENTA);
+    public static final TextStyle BG_CYAN = new TextStyle().bgColor(Color.CYAN);
+    public static final TextStyle BG_WHITE = new TextStyle().bgColor(Color.WHITE);
+
+    // Common color combinations
+    public static final TextStyle WHITE_ON_BLUE = new TextStyle().color(Color.WHITE).bgColor(Color.BLUE);
+    public static final TextStyle WHITE_ON_RED = new TextStyle().color(Color.WHITE).bgColor(Color.RED);
+    public static final TextStyle WHITE_ON_GREEN = new TextStyle().color(Color.WHITE).bgColor(Color.GREEN);
+    public static final TextStyle BLACK_ON_WHITE = new TextStyle().color(Color.BLACK).bgColor(Color.WHITE);
+    public static final TextStyle BLACK_ON_YELLOW = new TextStyle().color(Color.BLACK).bgColor(Color.YELLOW);
+
+    // Menu and list styles
+    public static final TextStyle MENU_ITEM = new TextStyle().color(Color.WHITE);
+    public static final TextStyle MENU_SELECTED = new TextStyle().color(Color.BLACK).bgColor(Color.BRIGHT_CYAN);
+    public static final TextStyle MENU_DISABLED = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle MENU_HEADER = new TextStyle().color(Color.BRIGHT_YELLOW).bold();
+
+    // Form styles
+    public static final TextStyle INPUT = new TextStyle().color(Color.WHITE);
+    public static final TextStyle INPUT_FOCUSED = new TextStyle().color(Color.BRIGHT_WHITE).bold();
+    public static final TextStyle INPUT_ERROR = new TextStyle().color(Color.RED);
+    public static final TextStyle PLACEHOLDER = new TextStyle().color(Color.BRIGHT_BLACK).italic();
+
+    // Button styles
+    public static final TextStyle BUTTON = new TextStyle().color(Color.WHITE).bgColor(Color.BLUE);
+    public static final TextStyle BUTTON_FOCUSED = new TextStyle().color(Color.BLACK).bgColor(Color.BRIGHT_CYAN).bold();
+    public static final TextStyle BUTTON_DISABLED = new TextStyle().color(Color.BRIGHT_BLACK).bgColor(Color.BLACK);
+    public static final TextStyle BUTTON_PRIMARY = new TextStyle().color(Color.WHITE).bgColor(Color.BLUE).bold();
+    public static final TextStyle BUTTON_SUCCESS = new TextStyle().color(Color.WHITE).bgColor(Color.GREEN).bold();
+    public static final TextStyle BUTTON_DANGER = new TextStyle().color(Color.WHITE).bgColor(Color.RED).bold();
+
+    // Progress bar styles
+    public static final TextStyle PROGRESS_FILLED = new TextStyle().color(Color.GREEN).bgColor(Color.GREEN);
+    public static final TextStyle PROGRESS_EMPTY = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle PROGRESS_TEXT = new TextStyle().color(Color.WHITE).bold();
+
+    // Table styles
+    public static final TextStyle TABLE_HEADER = new TextStyle().color(Color.BRIGHT_WHITE).bold();
+    public static final TextStyle TABLE_ROW_EVEN = new TextStyle().color(Color.WHITE);
+    public static final TextStyle TABLE_ROW_ODD = new TextStyle().color(Color.BRIGHT_BLACK);
+    public static final TextStyle TABLE_SELECTED = new TextStyle().inverse();
+    public static final TextStyle TABLE_BORDER = new TextStyle().color(Color.BRIGHT_BLACK);
+
+    // Notification styles
+    public static final TextStyle NOTIFICATION_INFO = new TextStyle().color(Color.BLACK).bgColor(Color.CYAN);
+    public static final TextStyle NOTIFICATION_SUCCESS = new TextStyle().color(Color.BLACK).bgColor(Color.GREEN);
+    public static final TextStyle NOTIFICATION_WARNING = new TextStyle().color(Color.BLACK).bgColor(Color.YELLOW);
+    public static final TextStyle NOTIFICATION_ERROR = new TextStyle().color(Color.WHITE).bgColor(Color.RED).bold();
+
+    // Link/Reference styles
+    public static final TextStyle LINK = new TextStyle().color(Color.BRIGHT_BLUE).underline();
+    public static final TextStyle LINK_VISITED = new TextStyle().color(Color.MAGENTA).underline();
+    public static final TextStyle LINK_HOVER = new TextStyle().color(Color.BRIGHT_CYAN).underline().bold();
+
+
     // Color mode enum
     public enum ColorMode {
         NAMED,      // 16 named colors
@@ -412,6 +520,337 @@ public class TextStyle {
         return bgColor(background);
     }
 
+    /**
+     * Create a copy of a base style with modifications
+     * This allows for style reuse without modifying the original
+     */
+    public static TextStyle from(TextStyle base) {
+        return base.copy();
+    }
+
+    /**
+     * Quick style with just foreground color
+     */
+    public static TextStyle fg(Color color) {
+        return new TextStyle().color(color);
+    }
+
+    /**
+     * Quick style with just background color
+     */
+    public static TextStyle bg(Color color) {
+        return new TextStyle().bgColor(color);
+    }
+
+    /**
+     * Quick style with foreground and background
+     */
+    public static TextStyle colors(Color fg, Color bg) {
+        return new TextStyle().color(fg).bgColor(bg);
+    }
+
+
+    /**
+     * Create a style with only bold attribute
+     */
+    public static TextStyle bold(Color color) {
+        return new TextStyle().color(color).bold();
+    }
+
+    /**
+     * Create a style with only italic attribute
+     */
+    public static TextStyle italic(Color color) {
+        return new TextStyle().color(color).italic();
+    }
+
+    /**
+     * Create a style with only underline attribute
+     */
+    public static TextStyle underline(Color color) {
+        return new TextStyle().color(color).underline();
+    }
+
+    /**
+     * Create inverted style with specific color
+     */
+    public static TextStyle inverse(Color color) {
+        return new TextStyle().color(color).inverse();
+    }
+
+    /**
+     * Create grayscale style from indexed palette (232-255)
+     * @param level 0-23 (0=darkest, 23=lightest)
+     */
+    public static TextStyle grayscale(int level) {
+        if (level < 0 || level > 23) {
+            throw new IllegalArgumentException("Grayscale level must be 0-23");
+        }
+        return new TextStyle().fgIndexed(232 + level);
+    }
+
+    /**
+     * Create grayscale background from indexed palette
+     */
+    public static TextStyle grayscaleBg(int level) {
+        if (level < 0 || level > 23) {
+            throw new IllegalArgumentException("Grayscale level must be 0-23");
+        }
+        return new TextStyle().bgIndexed(232 + level);
+    }
+
+    /**
+     * Create style from 6x6x6 RGB cube (16-231 in 256-color palette)
+     * @param r 0-5 red level
+     * @param g 0-5 green level
+     * @param b 0-5 blue level
+     */
+    public static TextStyle cube(int r, int g, int b) {
+        if (r < 0 || r > 5 || g < 0 || g > 5 || b < 0 || b > 5) {
+            throw new IllegalArgumentException("Cube values must be 0-5");
+        }
+        int index = 16 + (r * 36) + (g * 6) + b;
+        return new TextStyle().fgIndexed(index);
+    }
+
+    /**
+     * Create background style from RGB cube
+     */
+    public static TextStyle cubeBg(int r, int g, int b) {
+        if (r < 0 || r > 5 || g < 0 || g > 5 || b < 0 || b > 5) {
+            throw new IllegalArgumentException("Cube values must be 0-5");
+        }
+        int index = 16 + (r * 36) + (g * 6) + b;
+        return new TextStyle().bgIndexed(index);
+    }
+
+    // ===== PART 3: ADD CHAINABLE MODIFIERS (add as new methods) =====
+
+    /**
+     * Create a new style by adding bold to this style
+     * Does not modify the original
+     */
+    public TextStyle withBold() {
+        return this.copy().bold();
+    }
+
+    /**
+     * Create a new style by adding italic to this style
+     */
+    public TextStyle withItalic() {
+        return this.copy().italic();
+    }
+
+    /**
+     * Create a new style by adding underline to this style
+     */
+    public TextStyle withUnderline() {
+        return this.copy().underline();
+    }
+
+    /**
+     * Create a new style by adding faint to this style
+     */
+    public TextStyle withFaint() {
+        return this.copy().faint();
+    }
+
+    /**
+     * Create a new style by adding inverse to this style
+     */
+    public TextStyle withInverse() {
+        return this.copy().inverse();
+    }
+
+    /**
+     * Create a new style by adding strikethrough to this style
+     */
+    public TextStyle withStrikethrough() {
+        return this.copy().strikethrough();
+    }
+
+    /**
+     * Create a new style by adding blink to this style
+     */
+    public TextStyle withBlink() {
+        return this.copy().blink();
+    }
+
+    /**
+     * Create a new style by adding hidden to this style
+     */
+    public TextStyle withHidden() {
+        return this.copy().hidden();
+    }
+
+    /**
+     * Create a new style with different foreground color
+     */
+    public TextStyle withColor(Color color) {
+        return this.copy().color(color);
+    }
+
+    /**
+     * Create a new style with different background color
+     */
+    public TextStyle withBgColor(Color bgColor) {
+        return this.copy().bgColor(bgColor);
+    }
+
+    /**
+     * Create a new style with both colors changed
+     */
+    public TextStyle withColors(Color fg, Color bg) {
+        return this.copy().color(fg).bgColor(bg);
+    }
+
+    /**
+     * Create a new style with RGB foreground
+     */
+    public TextStyle withFgRgb(int r, int g, int b) {
+        return this.copy().fgRgb(r, g, b);
+    }
+
+    /**
+     * Create a new style with RGB background
+     */
+    public TextStyle withBgRgb(int r, int g, int b) {
+        return this.copy().bgRgb(r, g, b);
+    }
+
+    /**
+     * Create a new style with indexed foreground
+     */
+    public TextStyle withFgIndexed(int index) {
+        return this.copy().fgIndexed(index);
+    }
+
+    /**
+     * Create a new style with indexed background
+     */
+    public TextStyle withBgIndexed(int index) {
+        return this.copy().bgIndexed(index);
+    }
+
+    // ===== PART 4: ADD UTILITY METHODS =====
+
+    /**
+     * Check if this style has any attributes set (not default/normal)
+     */
+    public boolean hasAttributes() {
+        return bold || faint || italic || underline || blink || 
+            inverse || hidden || strikethrough;
+    }
+
+    /**
+     * Check if this style has any color set (not default)
+     */
+    public boolean hasColor() {
+        return (fgMode == ColorMode.NAMED && foreground != Color.DEFAULT) ||
+            (fgMode == ColorMode.INDEXED && fgIndexed != -1) ||
+            (fgMode == ColorMode.RGB && fgRgb != -1) ||
+            (bgMode == ColorMode.NAMED && background != Color.DEFAULT) ||
+            (bgMode == ColorMode.INDEXED && bgIndexed != -1) ||
+            (bgMode == ColorMode.RGB && bgRgb != -1);
+    }
+
+    /**
+     * Check if this style has foreground color set
+     */
+    public boolean hasForeground() {
+        return (fgMode == ColorMode.NAMED && foreground != Color.DEFAULT) ||
+            (fgMode == ColorMode.INDEXED && fgIndexed != -1) ||
+            (fgMode == ColorMode.RGB && fgRgb != -1);
+    }
+
+    /**
+     * Check if this style has background color set
+     */
+    public boolean hasBackground() {
+        return (bgMode == ColorMode.NAMED && background != Color.DEFAULT) ||
+            (bgMode == ColorMode.INDEXED && bgIndexed != -1) ||
+            (bgMode == ColorMode.RGB && bgRgb != -1);
+    }
+
+    /**
+     * Check if this is the default style (no modifications)
+     */
+    public boolean isDefault() {
+        return !hasColor() && !hasAttributes();
+    }
+
+    /**
+     * Reset all attributes but keep colors
+     */
+    public TextStyle clearAttributes() {
+        this.bold = false;
+        this.faint = false;
+        this.italic = false;
+        this.underline = false;
+        this.blink = false;
+        this.inverse = false;
+        this.hidden = false;
+        this.strikethrough = false;
+        return this;
+    }
+
+    /**
+     * Reset colors but keep attributes
+     */
+    public TextStyle clearColors() {
+        this.fgMode = ColorMode.NAMED;
+        this.foreground = Color.DEFAULT;
+        this.fgIndexed = -1;
+        this.fgRgb = -1;
+        this.bgMode = ColorMode.NAMED;
+        this.background = Color.DEFAULT;
+        this.bgIndexed = -1;
+        this.bgRgb = -1;
+        return this;
+    }
+
+    /**
+     * Merge another style into this one
+     * Other style's non-default values override this style's values
+     */
+    public TextStyle merge(TextStyle other) {
+        if (other == null) return this;
+        
+        // Merge foreground
+        if (other.hasForeground()) {
+            this.fgMode = other.fgMode;
+            this.foreground = other.foreground;
+            this.fgIndexed = other.fgIndexed;
+            this.fgRgb = other.fgRgb;
+        }
+        
+        // Merge background
+        if (other.hasBackground()) {
+            this.bgMode = other.bgMode;
+            this.background = other.background;
+            this.bgIndexed = other.bgIndexed;
+            this.bgRgb = other.bgRgb;
+        }
+        
+        // Merge attributes (only if set in other)
+        if (other.bold) this.bold = true;
+        if (other.faint) this.faint = true;
+        if (other.italic) this.italic = true;
+        if (other.underline) this.underline = true;
+        if (other.blink) this.blink = true;
+        if (other.inverse) this.inverse = true;
+        if (other.hidden) this.hidden = true;
+        if (other.strikethrough) this.strikethrough = true;
+        
+        return this;
+    }
+
+    /**
+     * Create a merged style without modifying either original
+     */
+    public static TextStyle merged(TextStyle base, TextStyle overlay) {
+        return base.copy().merge(overlay);
+    }
     // ===== SETTERS =====
     
     public void setForeground(Color foreground) {
