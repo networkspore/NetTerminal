@@ -8,6 +8,7 @@ import java.util.Map;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -25,7 +26,7 @@ import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
  * Supports scroll offsets and content padding for use in scrollable containers.
  * Enforces unique renderable names within the stack.
  */
-public class TerminalStackPanel extends TerminalRenderable implements TerminalSizeable {
+public class TerminalStackPanel extends TerminalRegion {
     
     private final List<TerminalRenderable> stack = new ArrayList<>();
     private final Map<String, TerminalRenderable> nameToRenderable = new HashMap<>();
@@ -37,7 +38,7 @@ public class TerminalStackPanel extends TerminalRenderable implements TerminalSi
     
     // For scroll-aware sizing (content can be larger than viewport)
     private TerminalRectangle contentSize = null;
-    
+
     private final String layoutGroupId;
     private final String layoutCallbackId;
     private TerminalGroupCallbackEntry layoutCallbackEntry = null;
@@ -132,8 +133,20 @@ public class TerminalStackPanel extends TerminalRenderable implements TerminalSi
         }
     }
     
-    public TerminalInsets getContentPadding() {
+    public TerminalInsets getInsets() {
         return contentPadding;
+    }
+
+    @Override
+    public void setPercentWidth(float percent) {
+        super.setPercentWidth(percent);
+        requestLayoutUpdate();
+    }
+
+    @Override
+    public void setPercentHeight(float percent) {
+        super.setPercentHeight(percent);
+        requestLayoutUpdate();
     }
     
     /**

@@ -10,17 +10,17 @@ import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutable;
 import io.netnotes.terminal.layout.TerminalSizeable;
-import io.netnotes.terminal.layout.TerminalSizeable.SizePreference;
 import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.components.TerminalRegion;
 
 /**
  * A border layout panel with 5 regions: TOP, BOTTOM, LEFT, RIGHT, CENTER.
  * Each region uses a TerminalStackPanel internally to support multiple
  * renderables with only one visible at a time.
  */
-public class TerminalBorderPanel extends TerminalRenderable {
+public class TerminalBorderPanel extends TerminalRegion {
 
     public enum Panel {
         TOP,
@@ -32,6 +32,16 @@ public class TerminalBorderPanel extends TerminalRenderable {
     
     private final TerminalInsets padding = new TerminalInsets();
     private final EnumMap<Panel, TerminalStackPanel> regionStacks = new EnumMap<>(Panel.class);
+    
+    // Default sizes for regions when children don't specify (use -1 for "not set")
+    private int defaultTopHeight = -1;
+    private int defaultBottomHeight = -1;
+    private int defaultLeftWidth = -1;
+    private int defaultRightWidth = -1;
+
+
+    private SizePreference widthPreference = null;
+    private SizePreference heightPreference = null;
     
     private final String layoutGroupId;
     private final String layoutCallbackId;
@@ -103,13 +113,71 @@ public class TerminalBorderPanel extends TerminalRenderable {
         }
     }
     
-    public int getPadding() { 
-        return padding.getTop(); 
+    
+    public TerminalInsets getInsets() {
+        return padding;
+    }
+
+    @Override
+    public void setPercentWidth(float percent) {
+        super.setPercentWidth(percent);
+        requestLayoutUpdate();
+    }
+
+    @Override
+    public void setPercentHeight(float percent) {
+        super.setPercentHeight(percent);
+        requestLayoutUpdate();
     }
     
-    public TerminalInsets getPaddingInsets() { 
-        return padding; 
+    /**
+     * Set default height for TOP region when child doesn't specify size.
+     * Use -1 to disable (will calculate from child).
+     */
+    public void setDefaultTopHeight(int height) {
+        if (this.defaultTopHeight != height) {
+            this.defaultTopHeight = height;
+            requestLayoutUpdate();
+        }
     }
+    
+    /**
+     * Set default height for BOTTOM region when child doesn't specify size.
+     * Use -1 to disable (will calculate from child).
+     */
+    public void setDefaultBottomHeight(int height) {
+        if (this.defaultBottomHeight != height) {
+            this.defaultBottomHeight = height;
+            requestLayoutUpdate();
+        }
+    }
+    
+    /**
+     * Set default width for LEFT region when child doesn't specify size.
+     * Use -1 to disable (will calculate from child).
+     */
+    public void setDefaultLeftWidth(int width) {
+        if (this.defaultLeftWidth != width) {
+            this.defaultLeftWidth = width;
+            requestLayoutUpdate();
+        }
+    }
+    
+    /**
+     * Set default width for RIGHT region when child doesn't specify size.
+     * Use -1 to disable (will calculate from child).
+     */
+    public void setDefaultRightWidth(int width) {
+        if (this.defaultRightWidth != width) {
+            this.defaultRightWidth = width;
+            requestLayoutUpdate();
+        }
+    }
+    
+    public int getDefaultTopHeight() { return defaultTopHeight; }
+    public int getDefaultBottomHeight() { return defaultBottomHeight; }
+    public int getDefaultLeftWidth() { return defaultLeftWidth; }
+    public int getDefaultRightWidth() { return defaultRightWidth; }
     
     /**
      * Set a single child for a region, replacing any existing content.
@@ -265,14 +333,22 @@ public class TerminalBorderPanel extends TerminalRenderable {
         TerminalStackPanel topStack = regionStacks.get(Panel.TOP);
         TerminalRenderable topChild = topStack.getVisibleContent();
         if (topChild != null && shouldIncludeInLayout(topStack)) {
-            topHeight = calculatePreferredHeight(topChild, availableWidth);
+            if (defaultTopHeight > 0) {
+                topHeight = defaultTopHeight;
+            } else {
+                topHeight = calculatePreferredHeight(topChild, availableWidth);
+            }
             topHeight = Math.min(topHeight, availableHeight);
         }
         
         TerminalStackPanel bottomStack = regionStacks.get(Panel.BOTTOM);
         TerminalRenderable bottomChild = bottomStack.getVisibleContent();
         if (bottomChild != null && shouldIncludeInLayout(bottomStack)) {
-            bottomHeight = calculatePreferredHeight(bottomChild, availableWidth);
+            if (defaultBottomHeight > 0) {
+                bottomHeight = defaultBottomHeight;
+            } else {
+                bottomHeight = calculatePreferredHeight(bottomChild, availableWidth);
+            }
             int remainingHeight = availableHeight - topHeight;
             bottomHeight = Math.min(bottomHeight, remainingHeight);
         }
@@ -283,14 +359,22 @@ public class TerminalBorderPanel extends TerminalRenderable {
         TerminalStackPanel leftStack = regionStacks.get(Panel.LEFT);
         TerminalRenderable leftChild = leftStack.getVisibleContent();
         if (leftChild != null && shouldIncludeInLayout(leftStack)) {
-            leftWidth = calculatePreferredWidth(leftChild, middleHeight);
+            if (defaultLeftWidth > 0) {
+                leftWidth = defaultLeftWidth;
+            } else {
+                leftWidth = calculatePreferredWidth(leftChild, middleHeight);
+            }
             leftWidth = Math.min(leftWidth, availableWidth);
         }
         
         TerminalStackPanel rightStack = regionStacks.get(Panel.RIGHT);
         TerminalRenderable rightChild = rightStack.getVisibleContent();
         if (rightChild != null && shouldIncludeInLayout(rightStack)) {
-            rightWidth = calculatePreferredWidth(rightChild, middleHeight);
+            if (defaultRightWidth > 0) {
+                rightWidth = defaultRightWidth;
+            } else {
+                rightWidth = calculatePreferredWidth(rightChild, middleHeight);
+            }
             int remainingWidth = availableWidth - leftWidth;
             rightWidth = Math.min(rightWidth, remainingWidth);
         }
@@ -352,12 +436,20 @@ public class TerminalBorderPanel extends TerminalRenderable {
         
         if (child instanceof TerminalSizeable) {
             TerminalSizeable sizeable = (TerminalSizeable) child;
-            if (sizeable.getHeightPreference() == SizePreference.FILL) {
-                return 3;
+            SizePreference heightPref = sizeable.getHeightPreference();
+            
+            if (heightPref == SizePreference.FILL) {
+                // For FILL preference, use minimum height as the "preferred" size
+                // The actual fill will happen during layout
+                return sizeable.getMinHeight();
+            } else if (heightPref == SizePreference.FIT_CONTENT) {
+                // Use the child's preferred height
+                return sizeable.getPreferredHeight();
             }
         }
         
-        return 3;
+        // Fallback: use minimum sensible height
+        return 1;
     }
     
     private int calculatePreferredWidth(TerminalRenderable child, int availableHeight) {
@@ -367,12 +459,20 @@ public class TerminalBorderPanel extends TerminalRenderable {
         
         if (child instanceof TerminalSizeable) {
             TerminalSizeable sizeable = (TerminalSizeable) child;
-            if (sizeable.getWidthPreference() == SizePreference.FILL) {
-                return 20;
+            SizePreference widthPref = sizeable.getWidthPreference();
+            
+            if (widthPref == SizePreference.FILL) {
+                // For FILL preference, use minimum width as the "preferred" size
+                // The actual fill will happen during layout
+                return sizeable.getMinWidth();
+            } else if (widthPref == SizePreference.FIT_CONTENT) {
+                // Use the child's preferred width
+                return sizeable.getPreferredWidth();
             }
         }
         
-        return 20;
+        // Fallback: use minimum sensible width
+        return 1;
     }
 
     private boolean shouldIncludeInLayout(TerminalRenderable child) {
@@ -405,6 +505,152 @@ public class TerminalBorderPanel extends TerminalRenderable {
             y >= 0 &&
             x + width <= parentPanel.getWidth() &&
             y + height <= parentPanel.getHeight();
+    }
+
+    
+    
+    
+    // ===== TerminalSizeable implementation =====
+    
+    public void setWidthPreference(SizePreference widthPreference) {
+        this.widthPreference = widthPreference;
+        invalidate();
+    }
+
+    public void setHeightPreference(SizePreference heightPreference) {
+        this.heightPreference = heightPreference;
+        invalidate();
+    }
+
+    @Override
+    public SizePreference getWidthPreference() {
+        if(widthPreference != null){
+            return widthPreference;
+        }
+        TerminalStackPanel centerStack = regionStacks.get(Panel.CENTER);
+        if (centerStack != null) {
+            return centerStack.getWidthPreference();
+        }
+        return SizePreference.FIT_CONTENT;
+    }
+    
+    @Override
+    public SizePreference getHeightPreference() {
+        if(heightPreference != null){
+            return heightPreference;
+        }
+        TerminalStackPanel centerStack = regionStacks.get(Panel.CENTER);
+        if (centerStack != null) {
+            return centerStack.getHeightPreference();
+        }
+        return SizePreference.FIT_CONTENT;
+    }
+
+    private int minWidth = -1;
+    private int minHeight = -1;
+    
+    
+
+    public void setMinWidth(int minWidth) {
+        this.minWidth = minWidth;
+        invalidate();
+    }
+
+    public void setMinHeight(int minHeight) {
+        this.minHeight = minHeight;
+        invalidate();
+    }
+
+    @Override
+    public int getMinWidth() {
+        TerminalStackPanel centerStack = regionStacks.get(Panel.CENTER);
+        int centerMin = centerStack != null ? centerStack.getMinWidth() : -1;
+        return Math.max(1, Math.max(centerMin, minWidth)) + padding.getHorizontal();
+    }
+    
+    @Override
+    public int getMinHeight() {
+        TerminalStackPanel centerStack = regionStacks.get(Panel.CENTER);
+        int centerMin = centerStack != null ? centerStack.getMinHeight() : -1;
+        return Math.max(1, Math.max(centerMin, minHeight)) + padding.getVertical();
+    }
+    
+    @Override
+    public int getPreferredWidth() {
+        if (widthPreference == SizePreference.STATIC) {
+            return region.getWidth();
+        }
+        if (widthPreference == SizePreference.PERCENT) {
+            return getMinWidth();
+        }
+        TerminalStackPanel centerStack = regionStacks.get(Panel.CENTER);
+        if (centerStack != null) {
+            int centerPref = centerStack.getPreferredWidth();
+            // Add padding and side panels
+            int leftWidth = 0;
+            int rightWidth = 0;
+            
+            // Check if we have explicit defaults
+            if (defaultLeftWidth > 0) {
+                leftWidth = defaultLeftWidth;
+            } else {
+                TerminalRenderable leftChild = regionStacks.get(Panel.LEFT).getVisibleContent();
+                if (leftChild != null && leftChild instanceof TerminalSizeable) {
+                    leftWidth = ((TerminalSizeable) leftChild).getPreferredWidth();
+                }
+            }
+            
+            if (defaultRightWidth > 0) {
+                rightWidth = defaultRightWidth;
+            } else {
+                TerminalRenderable rightChild = regionStacks.get(Panel.RIGHT).getVisibleContent();
+                if (rightChild != null && rightChild instanceof TerminalSizeable) {
+                    rightWidth = ((TerminalSizeable) rightChild).getPreferredWidth();
+                }
+            }
+            
+            return centerPref + leftWidth + rightWidth + padding.getHorizontal();
+        }
+        return getMinWidth();
+    }
+    
+    @Override
+    public int getPreferredHeight() {
+        if (heightPreference == SizePreference.STATIC) {
+            return region.getHeight();
+        }
+        if (heightPreference == SizePreference.PERCENT) {
+            return getMinHeight();
+        }
+        TerminalStackPanel centerStack = regionStacks.get(Panel.CENTER);
+        if (centerStack != null) {
+            int centerPref = centerStack.getPreferredHeight();
+            // Add padding and top/bottom panels
+            int topHeight = 0;
+            int bottomHeight = 0;
+            
+            // Check if we have explicit defaults
+            if (defaultTopHeight > 0) {
+                topHeight = defaultTopHeight;
+            } else {
+                TerminalRenderable topChild = regionStacks.get(Panel.TOP).getVisibleContent();
+                if (topChild != null && topChild instanceof TerminalSizeable) {
+                    topHeight = ((TerminalSizeable) topChild).getPreferredHeight();
+                }
+            }
+            
+            if (defaultBottomHeight > 0) {
+                bottomHeight = defaultBottomHeight;
+            } else {
+                TerminalRenderable bottomChild = regionStacks.get(Panel.BOTTOM).getVisibleContent();
+                if (bottomChild != null && bottomChild instanceof TerminalSizeable) {
+                    bottomHeight = ((TerminalSizeable) bottomChild).getPreferredHeight();
+                }
+            }
+            
+            return centerPref + topHeight + bottomHeight + padding.getVertical();
+        }
+        return getMinHeight();
     }
     
     @Override

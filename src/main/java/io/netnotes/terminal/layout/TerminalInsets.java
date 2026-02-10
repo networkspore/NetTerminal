@@ -36,10 +36,7 @@ public class TerminalInsets {
      * Full constructor - top, right, bottom, left
      */
     public TerminalInsets(int top, int right, int bottom, int left) {
-        this.top = top;
-        this.right = right;
-        this.bottom = bottom;
-        this.left = left;
+        set(top, right, bottom, left);
     }
 
     public int getTop() {
@@ -59,26 +56,26 @@ public class TerminalInsets {
     }
 
     public void setTop(int top) {
-        this.top = top;
+        this.top = Math.max(0, top);
     }
 
     public void setRight(int right) {
-        this.right = right;
+        this.right = Math.max(0, right);
     }
 
     public void setBottom(int bottom) {
-        this.bottom = bottom;
+        this.bottom = Math.max(0,bottom);
     }
 
     public void setLeft(int left) {
-        this.left = left;
+        this.left = Math.max(0,left);
     }
 
     public void set(int top, int right, int bottom, int left) {
-        this.top = top;
-        this.right = right;
-        this.bottom = bottom;
-        this.left = left;
+        this.top = Math.max(0, top);
+        this.right = Math.max(0, right);
+        this.bottom = Math.max(0,bottom);
+        this.left = Math.max(0,left);
     }
 
     public void setAll(int all) {

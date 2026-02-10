@@ -2,7 +2,6 @@ package io.netnotes.terminal.components;
 
 import io.netnotes.terminal.Position;
 import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
@@ -10,7 +9,7 @@ import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import java.util.function.Consumer;
 
-public class TerminalButton extends TerminalRenderable {
+public class TerminalButton extends TerminalRegion {
     
     // Button type determines default styling
     public enum ButtonType {
@@ -223,6 +222,18 @@ public class TerminalButton extends TerminalRenderable {
     public ButtonType getType() { return type; }
     public boolean isEnabled() { return enabled; }
     public boolean isShowBorder() { return showBorder; }
+
+    @Override
+    public int getPreferredWidth() {
+        int textLen = text != null ? text.length() : 0;
+        int borderExtra = showBorder ? 4 : 0;
+        return Math.max(getMinWidth(), textLen + borderExtra);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        return Math.max(getMinHeight(), 1);
+    }
     
     // ===== BUILDER =====
     

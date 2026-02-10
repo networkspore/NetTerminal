@@ -1,6 +1,8 @@
 package io.netnotes.terminal.components;
 
 import io.netnotes.terminal.*;
+import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutable;
 /**
  * TerminalProgressBar - Enhanced progress bar with color support
  * 
@@ -10,8 +12,8 @@ import io.netnotes.terminal.*;
  * - Optional label and percentage display
  * - Vertical or horizontal orientation
  */
-public class TerminalProgressBar extends TerminalRenderable {
-    
+public class TerminalProgressBar extends TerminalRegion implements TerminalLayoutable {
+    public final static int MIN_WIDTH = 8;
     public enum Style {
         CLASSIC,    // |25%|=====-----|
         BLOCKS,     // [█████░░░░░] 25%
@@ -24,6 +26,7 @@ public class TerminalProgressBar extends TerminalRenderable {
         HORIZONTAL,
         VERTICAL
     }
+    private final TerminalInsets insets = new TerminalInsets();
     
     private double currentPercent = 0;
     private String label = null;
@@ -35,7 +38,9 @@ public class TerminalProgressBar extends TerminalRenderable {
     private TextStyle filledStyle = TextStyle.PROGRESS_FILLED;
     private TextStyle emptyStyle = TextStyle.PROGRESS_EMPTY;
     private TextStyle textStyle = TextStyle.PROGRESS_TEXT;
-    
+
+    private boolean isHiddenManaged = true;
+
     public TerminalProgressBar(String name) {
         this(name, Style.SMOOTH, Orientation.HORIZONTAL);
     }
@@ -48,6 +53,20 @@ public class TerminalProgressBar extends TerminalRenderable {
         super(name);
         this.style = style;
         this.orientation = orientation;
+        setMinWidth(MIN_WIDTH);
+        setMinHeight(1);
+        setWidthPreference(SizePreference.STATIC);
+        setHeightPreference(SizePreference.STATIC);
+    }
+
+    public TerminalProgressBar(Builder builder){
+        this(builder.name, builder.style, builder.orientation);
+        this.label = builder.label;
+        this.showPercentage = builder.showPercentage;
+        setMinWidth(builder.minWidth);
+        setMinHeight(builder.minHeight);
+        setBounds(builder.x, builder.y, builder.width, builder.height);
+        updatePercent(builder.initialPercent);
     }
     
     // ===== CONFIGURATION =====
@@ -82,17 +101,21 @@ public class TerminalProgressBar extends TerminalRenderable {
         invalidate();
     }
     
-    // ===== RENDERING =====
+    
     
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
         int width = getWidth();
         int height = getHeight();
         if (width <= 0 || height <= 0) return;
-        
+        int drawWidth = Math.max (getMinWidth() - insets.getHorizontal(), width - insets.getHorizontal());
+        int drawHeight = Math.max (getMinHeight() - insets.getVertical(), height - insets.getVertical());
+
         if (style == Style.SMOOTH) {
-            // Use the drawProgressBar command for best quality
-            drawProgressBar(batch, 0, 0, width, height, 
+            
+          
+
+            drawProgressBar(batch, insets.getLeft(), insets.getTop(),drawWidth , drawHeight, 
                 currentPercent / 100.0, filledStyle, emptyStyle);
             
             // Overlay label/percentage if needed
@@ -103,9 +126,9 @@ public class TerminalProgressBar extends TerminalRenderable {
                 printAt(batch, x, y, text, textStyle);
             }
         } else if (orientation == Orientation.HORIZONTAL) {
-            renderHorizontal(batch, width, height);
+            renderHorizontal(batch, drawWidth, drawHeight);
         } else {
-            renderVertical(batch, width, height);
+            renderVertical(batch, drawWidth, drawHeight);
         }
     }
     
@@ -221,6 +244,35 @@ public class TerminalProgressBar extends TerminalRenderable {
     public boolean isComplete() { return currentPercent >= 100; }
     public double getFraction() { return currentPercent / 100.0; }
     
+
+    
+    @Override
+    public void setMinWidth(int minWidth) {
+        super.setMinWidth(Math.max(minWidth, MIN_WIDTH));
+    }
+
+    @Override
+    public void setMinHeight(int minHeight) {
+        super.setMinHeight(Math.max(1, minHeight));
+    }
+
+
+    @Override
+    public TerminalInsets getInsets() {
+       return insets;
+    }
+
+    @Override
+    public boolean isHiddenManaged() {
+        return isHiddenManaged;
+    }
+
+    public void setIsHiddenManaged(boolean ishiddenManaged){
+        this.isHiddenManaged = ishiddenManaged;
+    }
+
+
+
     // ===== BUILDER =====
     
     public static Builder builder() {
@@ -228,13 +280,15 @@ public class TerminalProgressBar extends TerminalRenderable {
     }
     
     public static class Builder {
-        private String name = "progressbar";
-        private Style style = Style.SMOOTH;
-        private Orientation orientation = Orientation.HORIZONTAL;
-        private double initialPercent = 0;
-        private String label = null;
-        private boolean showPercentage = true;
-        private int x = 0, y = 0, width = 20, height = 1;
+        protected String name = "progressbar";
+        protected Style style = Style.SMOOTH;
+        protected Orientation orientation = Orientation.HORIZONTAL;
+        protected double initialPercent = 0;
+        protected String label = null;
+        protected boolean showPercentage = true;
+        protected int x = 0, y = 0, width = 20, height = 1;
+        protected int minWidth = MIN_WIDTH;
+        protected int minHeight = 1;
         
         public Builder name(String name) { this.name = name; return this; }
         public Builder style(Style style) { this.style = style; return this; }
@@ -248,14 +302,11 @@ public class TerminalProgressBar extends TerminalRenderable {
             this.x = x; this.y = y; this.width = width; this.height = height;
             return this;
         }
-        
+        public Builder minWidth(int minWidth) { this.minWidth = Math.max(minWidth, MIN_WIDTH); return this; }
+        public Builder minHeight(int minHeight) { this.minHeight = Math.max(1, minHeight); return this; }
         public TerminalProgressBar build() {
-            TerminalProgressBar bar = new TerminalProgressBar(name, style, orientation);
-            bar.setBounds(x, y, width, height);
-            bar.setLabel(label);
-            bar.setShowPercentage(showPercentage);
-            bar.updatePercent(initialPercent);
-            return bar;
+            return new TerminalProgressBar(this);
         }
     }
+
 }

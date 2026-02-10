@@ -131,8 +131,12 @@ public final class TerminalLayoutData extends LayoutData<
         public TerminalLayoutDataBuilder setBounds(int x, int y, int width, int height) {
             return setX(x).setY(y).setWidth(width).setHeight(height);
         }
+
+        public TerminalLayoutDataBuilder setBounds(TerminalRectangle rectangle) {
+            return setRegion(rectangle);
+        }
         
-        public TerminalLayoutDataBuilder region(TerminalRectangle region) {
+        public TerminalLayoutDataBuilder setRegion(TerminalRectangle region) {
             if (region != null) {
                 return setBounds(region.getX(), region.getY(), 
                                region.getWidth(), region.getHeight());

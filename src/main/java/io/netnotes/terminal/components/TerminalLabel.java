@@ -2,7 +2,6 @@ package io.netnotes.terminal.components;
 
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalCommands;
-import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 
 /**
@@ -14,7 +13,7 @@ import io.netnotes.terminal.TextStyle;
  * - Truncation with ellipsis
  * - Multi-line support
  */
-public class TerminalLabel extends TerminalRenderable {
+public class TerminalLabel extends TerminalRegion {
     
     public enum Truncation {
         NONE,           // No truncation (may overflow)
@@ -130,6 +129,28 @@ public class TerminalLabel extends TerminalRenderable {
     public TerminalCommands.Alignment getAlignment() { return alignment; }
     public Truncation getTruncation() { return truncation; }
     public boolean isWordWrap() { return wordWrap; }
+
+    @Override
+    public int getPreferredWidth() {
+        if (text == null || text.isEmpty()) {
+            return getMinWidth();
+        }
+        String[] lines = text.split("\\R", -1);
+        int maxLen = 0;
+        for (String line : lines) {
+            maxLen = Math.max(maxLen, line.length());
+        }
+        return Math.max(getMinWidth(), maxLen);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        if (text == null || text.isEmpty()) {
+            return getMinHeight();
+        }
+        int lines = text.split("\\R", -1).length;
+        return Math.max(getMinHeight(), Math.max(1, lines));
+    }
     
     // ===== BUILDER =====
     

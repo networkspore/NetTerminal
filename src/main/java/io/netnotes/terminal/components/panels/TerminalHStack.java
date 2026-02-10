@@ -10,10 +10,10 @@ import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutable;
 import io.netnotes.terminal.layout.TerminalSizeable;
-import io.netnotes.terminal.layout.TerminalSizeable.SizePreference;
 import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.components.TerminalRegion;
 
 /**
  * TerminalHStack - Horizontal stack layout container
@@ -33,7 +33,7 @@ import io.netnotes.terminal.TerminalRectangle;
  * stack.addChild(new TerminalButton("btn1", "Save"));
  * stack.addChild(new TerminalButton("btn2", "Load"));
  */
-public class TerminalHStack extends TerminalRenderable {
+public class TerminalHStack extends TerminalRegion {
         
     public enum HAlignment {
         LEFT,
@@ -42,7 +42,7 @@ public class TerminalHStack extends TerminalRenderable {
     }
 
     private int spacing = 1;  // Columns between children
-    private final TerminalInsets padding = new TerminalInsets();  // Padding around all children
+    private final TerminalInsets insets = new TerminalInsets();  // Padding around all children
     private HAlignment alignment = HAlignment.LEFT;
     
     // Default sizing preferences for children that don't specify
@@ -52,6 +52,8 @@ public class TerminalHStack extends TerminalRenderable {
     private final String layoutGroupId;
     private final String layoutCallbackId;
     private TerminalGroupCallbackEntry layoutCallbackEntry = null;
+    private int minWidth = 0;
+    private int minHeight = 0;
     
     public TerminalHStack(String name) {
         super(name);
@@ -91,26 +93,26 @@ public class TerminalHStack extends TerminalRenderable {
     
     public void setPadding(int padding) {
         int clamped = Math.max(0, padding);
-        if (this.padding.getTop() != clamped ||
-            this.padding.getRight() != clamped ||
-            this.padding.getBottom() != clamped ||
-            this.padding.getLeft() != clamped) {
-            this.padding.setAll(clamped);
+        if (this.insets.getTop() != clamped ||
+            this.insets.getRight() != clamped ||
+            this.insets.getBottom() != clamped ||
+            this.insets.getLeft() != clamped) {
+            this.insets.setAll(clamped);
             requestLayoutUpdate();
         }
     }
 
     public void setInsets(TerminalInsets padding) {
         if (padding == null) {
-            if (!this.padding.isZero()) {
-                this.padding.clear();
+            if (!this.insets.isZero()) {
+                this.insets.clear();
                 requestLayoutUpdate();
             }
             return;
         }
 
-        if (!this.padding.equals(padding)) {
-            this.padding.copyFrom(padding);
+        if (!this.insets.equals(padding)) {
+            this.insets.copyFrom(padding);
             requestLayoutUpdate();
         }
     }
@@ -137,8 +139,20 @@ public class TerminalHStack extends TerminalRenderable {
     }
     
     public int getSpacing() { return spacing; }
-    public int getPadding() { return padding.getTop(); }
-    public TerminalInsets getPaddingInsets() { return padding; }
+
+    @Override
+    public void setPercentWidth(float percent) {
+        super.setPercentWidth(percent);
+        requestLayoutUpdate();
+    }
+
+    @Override
+    public void setPercentHeight(float percent) {
+        super.setPercentHeight(percent);
+        requestLayoutUpdate();
+    }
+
+    public TerminalInsets getInsets() { return insets; }
     public HAlignment getAlignment() { return alignment; }
     public SizePreference getDefaultWidthPreference() { return defaultWidthPreference; }
     public SizePreference getDefaultHeightPreference() { return defaultHeightPreference; }
@@ -162,8 +176,8 @@ public class TerminalHStack extends TerminalRenderable {
         TerminalRectangle parentRegion = contexts[0].getParentRegion();
         if (parentRegion == null) return; // Parent is hidden
         
-        int horizontalPadding = padding.getHorizontal();
-        int verticalPadding = padding.getVertical();
+        int horizontalPadding = insets.getHorizontal();
+        int verticalPadding = insets.getVertical();
 
         int availableWidth = parentRegion.getWidth() - horizontalPadding;
         int availableHeight = parentRegion.getHeight() - verticalPadding;
@@ -200,10 +214,18 @@ public class TerminalHStack extends TerminalRenderable {
             heightPrefs[i] = resolvePreference(child, false);
             
             heights[i] = calculateHeight(child, heightPrefs[i], availableHeight);
-            
+
             if (widthPrefs[i] == SizePreference.FILL) {
                 widths[i] = -1; // Mark for later calculation
                 fillWidthCount++;
+            } else if (widthPrefs[i] == SizePreference.PERCENT) {
+                if (child instanceof TerminalSizeable s) {
+                    int percentW = (int) (availableWidth * s.getPercentWidth() / 100.0f);
+                    widths[i] = Math.max(s.getMinWidth(), percentW);
+                } else {
+                    widths[i] = calculateFitWidth(child, heights[i]);
+                }
+                totalFitWidth += widths[i];
             } else {
                 widths[i] = calculateFitWidth(child, heights[i]);
                 totalFitWidth += widths[i];
@@ -228,9 +250,9 @@ public class TerminalHStack extends TerminalRenderable {
         
         // Determine starting X based on horizontal alignment
         int startX = switch (alignment) {
-            case LEFT -> padding.getLeft();
-            case CENTER -> padding.getLeft() + Math.max(0, (availableWidth - totalWidth) / 2);
-            case RIGHT -> padding.getLeft() + Math.max(0, availableWidth - totalWidth);
+            case LEFT -> insets.getLeft();
+            case CENTER -> insets.getLeft() + Math.max(0, (availableWidth - totalWidth) / 2);
+            case RIGHT -> insets.getLeft() + Math.max(0, availableWidth - totalWidth);
         };
         
         // Second pass: assign positions using pooled builders
@@ -240,8 +262,8 @@ public class TerminalHStack extends TerminalRenderable {
             TerminalRenderable r = contexts[contextIndex].getRenderable();
             String renderableName = r.getName();
             int y = heightPrefs[i] == SizePreference.FILL 
-                ? padding.getTop()
-                : padding.getTop() + Math.max(0, (availableHeight - heights[i]) / 2);
+                ? insets.getTop()
+                : insets.getTop() + Math.max(0, (availableHeight - heights[i]) / 2);
 
             boolean inBounds = isWithinParentBounds(
                 currentX, y, widths[i], heights[i], parentRegion
@@ -359,6 +381,94 @@ public class TerminalHStack extends TerminalRenderable {
         return 10;  // Default to reasonable width for buttons/labels
     }
     
+    public void setMinWidth(int minWidth) {
+        this.minWidth = minWidth;
+        invalidate();
+    }
+
+    public void setMinHeight(int minHeight) {
+        this.minHeight = minHeight;
+        invalidate();
+    }
+
+    @Override
+    public int getMinWidth() {
+        return Math.max(minWidth, 1)+ insets.getHorizontal();
+    }
+    
+    @Override
+    public int getMinHeight() {
+        return Math.max(minHeight, 1) + insets.getVertical();
+    }
+    
+    @Override
+    public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        if (pref == SizePreference.STATIC) {
+            return region.getWidth();
+        }
+        if(pref == SizePreference.PERCENT){
+            return getMinWidth();
+        }
+        int totalWidth = 0;
+        int count = 0;
+        if(pref == SizePreference.FIT_CONTENT){
+            for (TerminalRenderable child : getChildren()) {
+                if (!shouldIncludeInLayout(child)) continue;
+                
+                if (child instanceof TerminalSizeable) {
+                    totalWidth += ((TerminalSizeable) child).getPreferredWidth();
+                } else if (child.getRequestedRegion() != null) {
+                    totalWidth += child.getRequestedRegion().getWidth();
+                } else {
+                    totalWidth += child.getRegion().getWidth(); 
+                }
+                count++;
+            }
+            
+            if (count > 0) {
+                totalWidth += (count - 1) * spacing; // Add spacing
+            }
+        }
+        return Math.max(getMinWidth(), totalWidth + insets.getHorizontal()) ;
+    }
+    
+    @Override
+    public int getPreferredHeight() {
+        SizePreference pref = getHeightPreference();
+        if (pref == SizePreference.STATIC) {
+            return region.getHeight();
+        }
+        if(pref == SizePreference.PERCENT){
+            return getMinHeight();
+        }
+        int maxPrefHeight = 0;
+        if(pref == SizePreference.FIT_CONTENT){
+            for (TerminalRenderable child : getChildren()) {
+                if (!shouldIncludeInLayout(child)) continue;
+                
+                if (child instanceof TerminalSizeable) {
+                    maxPrefHeight = Math.max(maxPrefHeight, ((TerminalSizeable) child).getPreferredHeight());
+                } else if (child.getRequestedRegion() != null) {
+                    maxPrefHeight = Math.max(maxPrefHeight, child.getRequestedRegion().getHeight());
+                }
+            }
+        }
+        return Math.max(getMinHeight(), maxPrefHeight + insets.getVertical());
+    }
+
+    
+    
+    public void setWidthPreference(SizePreference widthPreference) {
+        super.setWidthPreference(widthPreference);
+        requestLayoutUpdate();
+    }
+
+    public void setHeightPreference(SizePreference heightPreference) {
+        super.setHeightPreference(heightPreference);
+        requestLayoutUpdate();
+    }
+
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
         // HStack is a pure layout container - no rendering

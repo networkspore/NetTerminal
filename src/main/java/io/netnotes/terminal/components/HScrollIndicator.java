@@ -6,7 +6,7 @@ import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.engine.ui.ScrollIndicator;
 
-public class HScrollIndicator extends TerminalRenderable implements ScrollIndicator<TerminalRenderable> {
+public class HScrollIndicator extends TerminalRegion implements ScrollIndicator<TerminalRenderable> {
     
     public enum Style {
         SIMPLE,     // Just a moving block
@@ -50,6 +50,21 @@ public class HScrollIndicator extends TerminalRenderable implements ScrollIndica
     @Override
     public int getPreferredSize() {
         return 1;
+    }
+
+    @Override
+    public int getPreferredWidth() {
+        return Math.max(getMinWidth(), 1);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        return Math.max(getMinHeight(), 1);
+    }
+
+    @Override
+    public int getMinHeight() {
+        return Math.max(super.getMinHeight(), 1);
     }
     
     public void setStyle(Style style) {

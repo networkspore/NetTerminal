@@ -3,7 +3,6 @@ package io.netnotes.terminal.components;
 import io.netnotes.terminal.Position;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalCommands;
-import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 
@@ -20,7 +19,7 @@ import io.netnotes.terminal.TextStyle.BoxStyle;
  * box.setFooter("Press any key to continue...");
  * box.setBorderStyle(BoxStyle.DOUBLE);
  */
-public class TerminalMessageBox extends TerminalRenderable {
+public class TerminalMessageBox extends TerminalRegion {
     
     public enum MessageType {
         INFO,       // Blue/Cyan - informational
@@ -315,6 +314,7 @@ public class TerminalMessageBox extends TerminalRenderable {
         return borders + paddingRows + messageRows + spacingRows + footerRows;
     }
     
+    @Override
     public int getPreferredWidth() {
         int maxLength = 0;
         
@@ -332,7 +332,25 @@ public class TerminalMessageBox extends TerminalRenderable {
             maxLength = Math.max(maxLength, footer.length());
         }
         
-        return maxLength + (2 * padding) + 2;
+        int preferred = maxLength + (2 * padding) + 2;
+        return Math.max(getMinWidth(), preferred);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        return Math.max(getMinHeight(), getMinimumHeight());
+    }
+
+    @Override
+    public int getMinWidth() {
+        int paddedMin = (2 * padding) + 2;
+        return Math.max(super.getMinWidth(), Math.max(3, paddedMin));
+    }
+
+    @Override
+    public int getMinHeight() {
+        int paddedMin = (2 * padding) + 2;
+        return Math.max(super.getMinHeight(), Math.max(3, paddedMin));
     }
     
     // ===== GETTERS =====

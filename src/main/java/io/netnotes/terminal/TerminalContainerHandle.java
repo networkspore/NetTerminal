@@ -51,10 +51,8 @@ public class TerminalContainerHandle extends ContainerHandle<
         return new TerminalFloatingLayoutManager("layer-manager:" + getName(),  TerminalRectanglePool.getInstance());
     }
 
-    @Override
-    protected void setupStateTransitions() {
-        
-    }
+
+    protected void setupStateTransitions() {}
 
     @Override
     protected TerminalRectangle extractRegionFromResponse(NoteBytesMap responseMap) {
@@ -76,9 +74,7 @@ public class TerminalContainerHandle extends ContainerHandle<
     }
 
     @Override
-    protected void setupRoutedMessageMap() {
-        
-    }
+    protected void setupRoutedMessageMap() { }
 
 
     @Override
@@ -99,8 +95,7 @@ public class TerminalContainerHandle extends ContainerHandle<
         if (!regionsEqual(oldRegion, newRegion)) {
             allocatedRegion = newRegion;
             
-            Log.logMsg(String.format("[TerminalContainer:%s] Resized: %s -> %s",
-                getName(), oldRegion, newRegion));
+            Log.logMsg(String.format("[TerminalContainer:%s] Resized: %s -> %s",getName(), oldRegion, newRegion));
             
             if (notifyOnResize != null) {
                 notifyOnResize.accept(self());
@@ -156,10 +151,9 @@ public class TerminalContainerHandle extends ContainerHandle<
 
     public static class TerminalBuilder extends ContainerHandle.Builder<
         TerminalContainerHandle,
+        TerminalRectangle,
         TerminalBuilder
-    >
-
-    {
+    > {
 
         protected TerminalBuilder(String name,ContextPath rendererPath, NoteBytesReadOnly rendererId) {
             super(name, rendererPath, rendererId);

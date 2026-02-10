@@ -30,9 +30,8 @@ import io.netnotes.engine.ui.ScrollIndicator;
  * - FIT_TO_VIEWPORT: Content resizes to fit viewport, respects minimum size, shows scrollbars when viewport < min
  * - FIXED_SIZE: Content stays at preferred size, shows scrollbars when viewport < content
  * 
- * Implements TerminalSizeable to delegate sizing to the CENTER region stack.
  */
-public class TerminalScrollPanel extends TerminalBorderPanel implements TerminalSizeable {
+public class TerminalScrollPanel extends TerminalBorderPanel {
     
     public static final int STATE_INACTIVE = 10;
     public static final int STATE_ACTIVE = 11;
@@ -63,7 +62,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel implements Terminal
     private ScrollIndicator<TerminalRenderable> hScrollIndicator;
     private VScrollPosition vScrollPosition = VScrollPosition.RIGHT;
     private HScrollPosition hScrollPosition = HScrollPosition.BOTTOM;
-    
+
     private int lineScrollAmount = 1;
     private int pageScrollAmount = 0;
     
@@ -618,59 +617,5 @@ public class TerminalScrollPanel extends TerminalBorderPanel implements Terminal
         centerStack.setContentSize(contentSize);
     }
     
-    // TerminalSizeable implementation - delegate to CENTER region stack
-    
-    @Override
-    public SizePreference getWidthPreference() {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
-        if (centerStack != null) {
-            return centerStack.getWidthPreference();
-        }
-        return SizePreference.FIT_CONTENT;
-    }
-    
-    @Override
-    public SizePreference getHeightPreference() {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
-        if (centerStack != null) {
-            return centerStack.getHeightPreference();
-        }
-        return SizePreference.FIT_CONTENT;
-    }
-    
-    @Override
-    public int getMinWidth() {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
-        if (centerStack != null) {
-            return centerStack.getMinWidth();
-        }
-        return 1;
-    }
-    
-    @Override
-    public int getMinHeight() {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
-        if (centerStack != null) {
-            return centerStack.getMinHeight();
-        }
-        return 1;
-    }
-    
-    @Override
-    public int getPreferredWidth() {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
-        if (centerStack != null) {
-            return centerStack.getPreferredWidth();
-        }
-        return getMinWidth();
-    }
-    
-    @Override
-    public int getPreferredHeight() {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
-        if (centerStack != null) {
-            return centerStack.getPreferredHeight();
-        }
-        return getMinHeight();
-    }
+    // TerminalSizeable implementation is inherited from TerminalBorderPanel.
 }

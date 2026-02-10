@@ -13,7 +13,7 @@ import io.netnotes.engine.ui.ScrollIndicator;
  * - Color customization
  * - Track and thumb distinction
  */
-public class VScrollIndicator extends TerminalRenderable implements ScrollIndicator<TerminalRenderable> {
+public class VScrollIndicator extends TerminalRegion implements ScrollIndicator<TerminalRenderable> {
     
     public enum Style {
         SIMPLE,     // Just a moving block
@@ -58,6 +58,21 @@ public class VScrollIndicator extends TerminalRenderable implements ScrollIndica
     @Override
     public int getPreferredSize() {
         return 1;
+    }
+
+    @Override
+    public int getPreferredWidth() {
+        return Math.max(getMinWidth(), 1);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        return Math.max(getMinHeight(), 1);
+    }
+
+    @Override
+    public int getMinWidth() {
+        return Math.max(super.getMinWidth(), 1);
     }
     
     public void setStyle(Style style) {

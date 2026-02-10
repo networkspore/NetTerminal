@@ -6,7 +6,6 @@ import java.util.List;
 
 import io.netnotes.terminal.Position;
 import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
@@ -36,7 +35,7 @@ import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
  *     .scrollable(true)
  *     .build();
  */
-public class TerminalTextBox extends TerminalRenderable {
+public class TerminalTextBox extends TerminalRegion {
     
     // Styling
     private BoxStyle boxStyle = BoxStyle.SINGLE;
@@ -468,6 +467,40 @@ public class TerminalTextBox extends TerminalRenderable {
     }
     public int getVerticalScroll() { return verticalScroll; }
     public boolean isScrollable() { return scrollable; }
+
+    @Override
+    public int getPreferredWidth() {
+        int maxLine = lines.stream().mapToInt(String::length).max().orElse(0);
+        if (showLineNumbers) {
+            maxLine += lineNumberWidth + 1;
+        }
+
+        if (title != null) {
+            maxLine = Math.max(maxLine, title.length());
+        }
+
+        int preferred = maxLine + (2 * padding) + 2;
+        return Math.max(getMinWidth(), preferred);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        int contentLines = Math.max(1, lines.size());
+        int preferred = contentLines + (2 * padding) + 2;
+        return Math.max(getMinHeight(), preferred);
+    }
+
+    @Override
+    public int getMinWidth() {
+        int paddedMin = (2 * padding) + 2;
+        return Math.max(super.getMinWidth(), Math.max(3, paddedMin));
+    }
+
+    @Override
+    public int getMinHeight() {
+        int paddedMin = (2 * padding) + 2;
+        return Math.max(super.getMinHeight(), Math.max(3, paddedMin));
+    }
     
     // ===== ENUMS =====
     

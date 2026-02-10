@@ -35,7 +35,7 @@ import java.util.List;
  * - Home: Jump to top
  * - End: Jump to bottom (auto-scroll mode)
  */
-public class ScrollableTextViewer extends TerminalRenderable {
+public class ScrollableTextViewer extends TerminalRegion {
     
     private final List<String> lines = Collections.synchronizedList(new ArrayList<>());
     private volatile int maxLines = 1000;
@@ -211,6 +211,43 @@ public class ScrollableTextViewer extends TerminalRenderable {
             scrollOffset++;
             // No invalidation needed - view doesn't change
         }
+    }
+
+    @Override
+    public int getPreferredWidth() {
+        int maxLine = 0;
+        synchronized (lines) {
+            for (String line : lines) {
+                if (line != null) {
+                    maxLine = Math.max(maxLine, line.length());
+                }
+            }
+        }
+        if (title != null) {
+            maxLine = Math.max(maxLine, title.length());
+        }
+        int borderExtra = showBorder ? 4 : 2;
+        return Math.max(getMinWidth(), maxLine + borderExtra);
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        int lineCount;
+        synchronized (lines) {
+            lineCount = Math.max(1, lines.size());
+        }
+        int borderExtra = showBorder ? 2 : 0;
+        return Math.max(getMinHeight(), lineCount + borderExtra);
+    }
+
+    @Override
+    public int getMinWidth() {
+        return Math.max(super.getMinWidth(), showBorder ? 4 : 2);
+    }
+
+    @Override
+    public int getMinHeight() {
+        return Math.max(super.getMinHeight(), showBorder ? 2 : 1);
     }
     
     public void addLines(String... newLines) {
