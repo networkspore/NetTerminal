@@ -6,12 +6,13 @@ import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerConfig;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.terminal.Position;
 import io.netnotes.terminal.StyleConstants;
 import io.netnotes.terminal.TerminalCommands;
 import io.netnotes.terminal.TerminalRectangle;
@@ -836,7 +837,7 @@ private void executeDrawTextBlockInternal(NoteBytesMap cmd) {
     
     String text = cmd.getAsString(Keys.TEXT, "");
     String alignName = cmd.getAsString(TerminalCommands.ALIGN, "LEFT");
-    TerminalCommands.Alignment align = TerminalCommands.Alignment.valueOf(alignName);
+    TextAlignment align = TextAlignment.valueOf(alignName);
     TextStyle style = parseStyle(cmd.get(Keys.STYLE));
     
     if(renderRegion == null){
@@ -1070,7 +1071,7 @@ private void drawProgressBarInternal(TerminalRectangle region, TerminalRectangle
 }
 
 private void drawTextBlockInternal(TerminalRectangle region, String text, 
-                                  TerminalCommands.Alignment align, TextStyle style) {
+                                  TextAlignment align, TextStyle style) {
     if (text == null || text.isEmpty()) return;
     
     // Simple word wrapping implementation
@@ -1087,9 +1088,9 @@ private void drawTextBlockInternal(TerminalRectangle region, String text,
         int x = region.getX();
         
         // Apply alignment
-        if (align == TerminalCommands.Alignment.CENTER) {
+        if (align == TextAlignment.CENTER) {
             x = region.getX() + (region.getWidth() - line.length()) / 2;
-        } else if (align == TerminalCommands.Alignment.RIGHT) {
+        } else if (align == TextAlignment.RIGHT) {
             x = region.getX() + region.getWidth() - line.length();
         }
         
@@ -1101,7 +1102,7 @@ private void drawTextBlockInternal(TerminalRectangle region, String text,
 }
 
 private void drawTextBlockInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                                  String text, TerminalCommands.Alignment align, TextStyle style) {
+                                  String text, TextAlignment align, TextStyle style) {
     if (text == null || text.isEmpty()) return;
     
     String[] lines = wrapText(text, region.getWidth());
@@ -1117,9 +1118,9 @@ private void drawTextBlockInternal(TerminalRectangle region, TerminalRectangle r
         if (y >= visTop && y < visBottom) {
             int x = region.getX();
             
-            if (align == TerminalCommands.Alignment.CENTER) {
+            if (align == TextAlignment.CENTER) {
                 x = region.getX() + (region.getWidth() - line.length()) / 2;
-            } else if (align == TerminalCommands.Alignment.RIGHT) {
+            } else if (align == TextAlignment.RIGHT) {
                 x = region.getX() + region.getWidth() - line.length();
             }
             

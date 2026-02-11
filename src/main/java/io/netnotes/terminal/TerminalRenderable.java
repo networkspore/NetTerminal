@@ -7,8 +7,10 @@ import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroup;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.engine.ui.Point2D;
+import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.Renderable;
 import io.netnotes.engine.ui.SpatialRegionPool;
+import io.netnotes.engine.ui.TextAlignment;
 
 /**
  * TerminalRenderable - Abstract base class for terminal renderables
@@ -926,7 +928,7 @@ public abstract class TerminalRenderable extends Renderable<
      * Draw text block with word wrapping (local coordinates)
      */
     protected void drawTextBlock(TerminalBatchBuilder batch, int x, int y, int width, int height,
-        String text, TerminalCommands.Alignment align, TextStyle style
+        String text, TextAlignment align, TextStyle style
     ) {
         if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
         
@@ -955,18 +957,18 @@ public abstract class TerminalRenderable extends Renderable<
     }
 
     protected void drawTextBlock(TerminalBatchBuilder batch, TerminalRectangle region, String text,
-                                TerminalCommands.Alignment align, TextStyle style) {
+                               TextAlignment align, TextStyle style) {
         drawTextBlock(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(),
                     text, align, style);
     }
 
     protected void drawTextBlock(TerminalBatchBuilder batch, TerminalRectangle region, String text,
-                                TerminalCommands.Alignment align) {
+                                TextAlignment align) {
         drawTextBlock(batch, region, text, align, TextStyle.NORMAL);
     }
 
     protected void drawTextBlock(TerminalBatchBuilder batch, TerminalRectangle region, String text) {
-        drawTextBlock(batch, region, text, TerminalCommands.Alignment.LEFT, TextStyle.NORMAL);
+        drawTextBlock(batch, region, text, TextAlignment.LEFT, TextStyle.NORMAL);
     }
 
     /**

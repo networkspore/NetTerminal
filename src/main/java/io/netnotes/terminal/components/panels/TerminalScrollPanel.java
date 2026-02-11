@@ -18,6 +18,7 @@ import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.engine.ui.BorderPanel;
 import io.netnotes.engine.ui.ScrollIndicator;
 
 /**
@@ -136,7 +137,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
             this.contentPadding.setAll(clamped);
             
             // Update the CENTER stack panel's padding
-            TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+            TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
             if (centerStack != null) {
                 centerStack.setContentPadding(contentPadding);
             }
@@ -151,7 +152,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
                 this.contentPadding.clear();
                 
                 // Update the CENTER stack panel's padding
-                TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+                TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
                 if (centerStack != null) {
                     centerStack.setContentPadding(this.contentPadding);
                 }
@@ -165,7 +166,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
             this.contentPadding.copyFrom(padding);
             
             // Update the CENTER stack panel's padding
-            TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+            TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
             if (centerStack != null) {
                 centerStack.setContentPadding(this.contentPadding);
             }
@@ -234,7 +235,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     
     public void setVScrollIndicator(ScrollIndicator<TerminalRenderable> indicator) {
         if (vScrollIndicator != null) {
-            Panel position = vScrollPosition == VScrollPosition.LEFT ? Panel.LEFT : Panel.RIGHT;
+            BorderPanel position = vScrollPosition == VScrollPosition.LEFT ? BorderPanel.LEFT : BorderPanel.RIGHT;
             clearPanel(position);
         }
         this.vScrollIndicator = indicator;
@@ -243,7 +244,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     
     public void setHScrollIndicator(ScrollIndicator<TerminalRenderable> indicator) {
         if (hScrollIndicator != null) {
-            Panel position = hScrollPosition == HScrollPosition.TOP ? Panel.TOP : Panel.BOTTOM;
+            BorderPanel position = hScrollPosition == HScrollPosition.TOP ? BorderPanel.TOP : BorderPanel.BOTTOM;
             clearPanel(position);
         }
         this.hScrollIndicator = indicator;
@@ -253,7 +254,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     public void setVScrollPosition(VScrollPosition position) {
         if (this.vScrollPosition != position) {
             if (vScrollIndicator != null) {
-                Panel oldPosition = vScrollPosition == VScrollPosition.LEFT ? Panel.LEFT : Panel.RIGHT;
+                BorderPanel oldPosition = vScrollPosition == VScrollPosition.LEFT ? BorderPanel.LEFT : BorderPanel.RIGHT;
                 clearPanel(oldPosition);
             }
             this.vScrollPosition = position;
@@ -264,7 +265,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     public void setHScrollPosition(HScrollPosition position) {
         if (this.hScrollPosition != position) {
             if (hScrollIndicator != null) {
-                Panel oldPosition = hScrollPosition == HScrollPosition.TOP ? Panel.TOP : Panel.BOTTOM;
+                BorderPanel oldPosition = hScrollPosition == HScrollPosition.TOP ? BorderPanel.TOP : BorderPanel.BOTTOM;
                 clearPanel(oldPosition);
             }
             this.hScrollPosition = position;
@@ -282,12 +283,12 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     
     private void updateScrollIndicatorPositions() {
         if (vScrollIndicator != null && verticalScrollEnabled) {
-            Panel position = vScrollPosition == VScrollPosition.LEFT ? Panel.LEFT : Panel.RIGHT;
+            BorderPanel position = vScrollPosition == VScrollPosition.LEFT ? BorderPanel.LEFT : BorderPanel.RIGHT;
             setPanel(position, vScrollIndicator.getRenderable());
         }
         
         if (hScrollIndicator != null && horizontalScrollEnabled) {
-            Panel position = hScrollPosition == HScrollPosition.TOP ? Panel.TOP : Panel.BOTTOM;
+            BorderPanel position = hScrollPosition == HScrollPosition.TOP ? BorderPanel.TOP : BorderPanel.BOTTOM;
             setPanel(position, hScrollIndicator.getRenderable());
         }
     }
@@ -298,9 +299,9 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
      */
     public void setContent(TerminalRenderable content) {
         if (content == null) {
-            clearPanel(Panel.CENTER);
+            clearPanel(BorderPanel.CENTER);
         } else {
-            setPanel(Panel.CENTER, content);
+            setPanel(BorderPanel.CENTER, content);
         }
         requestLayoutUpdate();
     }
@@ -313,7 +314,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         if (newContent == null) {
             return;
         }
-        swapPanel(Panel.CENTER, newContent);
+        swapPanel(BorderPanel.CENTER, newContent);
         
         // Reset scroll position when swapping content
         scrollX = 0;
@@ -326,7 +327,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
      * Swap to different content by name.
      */
     public void swapContent(String contentName) {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (centerStack != null) {
             centerStack.setVisibleContent(contentName);
             
@@ -346,7 +347,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         if (content == null) {
             return;
         }
-        addToPanel(Panel.CENTER, content);
+        addToPanel(BorderPanel.CENTER, content);
     }
     
     /**
@@ -356,14 +357,14 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         if (content == null) {
             return;
         }
-        removeFromPanel(Panel.CENTER, content);
+        removeFromPanel(BorderPanel.CENTER, content);
     }
     
     /**
      * Remove content from the CENTER region by name.
      */
     public void removeContent(String contentName) {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (centerStack != null) {
             centerStack.removeFromStack(contentName);
         }
@@ -373,14 +374,14 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
      * Get the currently visible content in the CENTER region.
      */
     public TerminalRenderable getContent() {
-        return getPanel(Panel.CENTER);
+        return getPanel(BorderPanel.CENTER);
     }
     
     /**
      * Get content from the CENTER stack by name.
      */
     public TerminalRenderable getContent(String contentName) {
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (centerStack != null) {
             return centerStack.getContent(contentName);
         }
@@ -391,7 +392,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
      * Clear all content from the CENTER region.
      */
     public void clearContent() {
-        clearPanel(Panel.CENTER);
+        clearPanel(BorderPanel.CENTER);
     }
     
     public void scrollTo(int x, int y) {
@@ -489,7 +490,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     
     private TerminalRectangle getCenterRegion() {
         // Get the stack panel for the center region
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (centerStack != null && centerStack.getEffectiveRegion() != null) {
             return centerStack.getEffectiveRegion();
         }
@@ -551,7 +552,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         super.layoutAllPanels(contexts, dataInterfaces);
         
         // Get the CENTER stack panel
-        TerminalStackPanel centerStack = getRegionStack(Panel.CENTER);
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (centerStack == null) return;
         
         // Get the visible content

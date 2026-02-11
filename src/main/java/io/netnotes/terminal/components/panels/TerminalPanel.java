@@ -2,8 +2,8 @@ package io.netnotes.terminal.components.panels;
 
 import java.util.Map;
 
+import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
-import io.netnotes.terminal.Position;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;

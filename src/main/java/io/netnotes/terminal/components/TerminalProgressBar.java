@@ -1,5 +1,6 @@
 package io.netnotes.terminal.components;
 
+import io.netnotes.engine.ui.Orientation;
 import io.netnotes.terminal.*;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutable;
@@ -22,10 +23,7 @@ public class TerminalProgressBar extends TerminalRegion implements TerminalLayou
         SMOOTH      // Uses drawProgressBar command (sub-character resolution)
     }
     
-    public enum Orientation {
-        HORIZONTAL,
-        VERTICAL
-    }
+    
     private final TerminalInsets insets = new TerminalInsets();
     
     private double currentPercent = 0;

@@ -1,8 +1,10 @@
-package io.netnotes.terminal.components;
+package io.netnotes.terminal.components.text;
 
+import io.netnotes.engine.ui.LabelTruncation;
+import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalCommands;
 import io.netnotes.terminal.TextStyle;
+import io.netnotes.terminal.components.TerminalRegion;
 
 /**
  * TerminalLabel - Enhanced text label with alignment and wrapping
@@ -15,17 +17,12 @@ import io.netnotes.terminal.TextStyle;
  */
 public class TerminalLabel extends TerminalRegion {
     
-    public enum Truncation {
-        NONE,           // No truncation (may overflow)
-        END,            // "This is a long tex..."
-        START,          // "...is a long text"
-        MIDDLE          // "This is...ng text"
-    }
+
     
     private String text;
     private TextStyle style = TextStyle.NORMAL;
-    private TerminalCommands.Alignment alignment = TerminalCommands.Alignment.LEFT;
-    private Truncation truncation = Truncation.END;
+    private TextAlignment alignment = TextAlignment.LEFT;
+    private LabelTruncation truncation = LabelTruncation.END;
     private boolean wordWrap = false;
     
     public TerminalLabel(String name, String text) {
@@ -56,14 +53,14 @@ public class TerminalLabel extends TerminalRegion {
         }
     }
     
-    public void setAlignment(TerminalCommands.Alignment alignment) {
+    public void setAlignment(TextAlignment alignment) {
         if (this.alignment != alignment) {
             this.alignment = alignment;
             invalidate();
         }
     }
     
-    public void setTruncation(Truncation truncation) {
+    public void setTruncation(LabelTruncation truncation) {
         if (this.truncation != truncation) {
             this.truncation = truncation;
             invalidate();
@@ -105,7 +102,7 @@ public class TerminalLabel extends TerminalRegion {
     }
     
     private String truncateText(String text, int maxWidth) {
-        if (text.length() <= maxWidth || truncation == Truncation.NONE) {
+        if (text.length() <= maxWidth || truncation == LabelTruncation.NONE) {
             return text;
         }
         
@@ -126,8 +123,8 @@ public class TerminalLabel extends TerminalRegion {
     
     public String getText() { return text; }
     public TextStyle getStyle() { return style; }
-    public TerminalCommands.Alignment getAlignment() { return alignment; }
-    public Truncation getTruncation() { return truncation; }
+    public TextAlignment getAlignment() { return alignment; }
+    public LabelTruncation getTruncation() { return truncation; }
     public boolean isWordWrap() { return wordWrap; }
 
     @Override
@@ -162,16 +159,16 @@ public class TerminalLabel extends TerminalRegion {
         private String name = "label";
         private String text = "";
         private TextStyle style = TextStyle.NORMAL;
-        private TerminalCommands.Alignment alignment = TerminalCommands.Alignment.LEFT;
-        private Truncation truncation = Truncation.END;
+        private TextAlignment alignment = TextAlignment.LEFT;
+        private LabelTruncation truncation = LabelTruncation.END;
         private boolean wordWrap = false;
         private int x = 0, y = 0, width = 10, height = 1;
         
         public Builder name(String name) { this.name = name; return this; }
         public Builder text(String text) { this.text = text; return this; }
         public Builder style(TextStyle style) { this.style = style; return this; }
-        public Builder alignment(TerminalCommands.Alignment align) { this.alignment = align; return this; }
-        public Builder truncation(Truncation trunc) { this.truncation = trunc; return this; }
+        public Builder alignment(TextAlignment align) { this.alignment = align; return this; }
+        public Builder truncation(LabelTruncation trunc) { this.truncation = trunc; return this; }
         public Builder wordWrap(boolean wrap) { this.wordWrap = wrap; return this; }
         public Builder position(int x, int y) { this.x = x; this.y = y; return this; }
         public Builder size(int width, int height) { this.width = width; this.height = height; return this; }

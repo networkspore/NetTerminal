@@ -156,7 +156,7 @@ public class TerminalTextInput extends TerminalRenderable {
     }
     
     private void handleEphemeralChar(EphemeralKeyCharEvent event) {
-        NoteBytes codepointBytes = event.getCodepointBytes();
+        NoteBytes codepointBytes = event.getCodePointBytes();
         if (codepointBytes != null) {
             int codepoint = codepointBytes.getAsInt();
             insertCodePoint(codepoint);

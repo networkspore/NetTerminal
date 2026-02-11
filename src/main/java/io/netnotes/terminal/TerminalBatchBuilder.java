@@ -4,6 +4,8 @@ import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.ui.BatchBuilder;
+import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.TextAlignment;
 
 /**
  * TerminalBatchBuilder - Build atomic batches of terminal commands with clip region support
@@ -413,7 +415,8 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
      * Draw text block with word wrapping - CHECKS CLIP REGION
      */
     public void drawTextBlock(TerminalRectangle region, TerminalRectangle renderRegion, String text, 
-                            TerminalCommands.Alignment align, TextStyle style) {
+        TextAlignment align, TextStyle style
+    ) {
         TerminalRectangle clip = getCurrentClipRegion();
         
         if (clip != null) {

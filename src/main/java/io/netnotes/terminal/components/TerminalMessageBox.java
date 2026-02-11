@@ -1,8 +1,8 @@
 package io.netnotes.terminal.components;
 
-import io.netnotes.terminal.Position;
+import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalCommands;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 
@@ -37,7 +37,7 @@ public class TerminalMessageBox extends TerminalRegion {
     private boolean showIcon = true;
     private int messageSpacing = 1;
     private int padding = 1;
-    private TerminalCommands.Alignment messageAlignment = TerminalCommands.Alignment.LEFT;
+    private TextAlignment messageAlignment = TextAlignment.LEFT;
     
     // Style overrides (null = use defaults based on type)
     private TextStyle titleStyle = null;
@@ -117,7 +117,7 @@ public class TerminalMessageBox extends TerminalRegion {
         }
     }
     
-    public void setMessageAlignment(TerminalCommands.Alignment alignment) {
+    public void setMessageAlignment(TextAlignment alignment) {
         if (this.messageAlignment != alignment) {
             this.messageAlignment = alignment;
             invalidate();

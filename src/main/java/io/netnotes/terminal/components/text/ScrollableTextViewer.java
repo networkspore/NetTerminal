@@ -1,7 +1,8 @@
-package io.netnotes.terminal.components;
+package io.netnotes.terminal.components.text;
 
 import io.netnotes.terminal.*;
 import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.*;
 import io.netnotes.engine.io.input.events.*;
@@ -9,6 +10,7 @@ import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
+import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.RenderableStates;
 
 import java.util.ArrayList;

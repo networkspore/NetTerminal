@@ -1,10 +1,10 @@
 package io.netnotes.terminal.components;
 
-import io.netnotes.terminal.Position;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
+import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import java.util.function.Consumer;

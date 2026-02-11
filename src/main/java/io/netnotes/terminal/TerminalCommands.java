@@ -1,6 +1,8 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
+import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
@@ -143,9 +145,7 @@ public class TerminalCommands {
 
     // ===== TEXT ALIGNMENT HELPERS =====
     
-    public enum Alignment {
-        LEFT, CENTER, RIGHT
-    }
+    
     
     /**
      * Print text centered vertically within a region
@@ -543,7 +543,7 @@ public class TerminalCommands {
         TerminalRectangle region,
         TerminalRectangle renderRegion,
         String text, 
-        Alignment align, 
+        TextAlignment align, 
         TextStyle style
     ) {
         NoteBytesMap map = new NoteBytesMap();
