@@ -88,6 +88,7 @@ public class TerminalPasswordField extends TerminalRegion {
     private TextPosition textPosition = TextPosition.LEFT;
     private DisplayMode displayMode = DisplayMode.MASKED;
     private char maskChar = '*';
+    private boolean fixedCursor = false;
     
     // Styling
     private TextStyle baseStyle = TextStyle.NORMAL;
@@ -197,6 +198,17 @@ public class TerminalPasswordField extends TerminalRegion {
             if (displayMode == DisplayMode.MASKED) {
                 invalidate();
             }
+        }
+        return this;
+    }
+
+    public TerminalPasswordField withFixedCursor(boolean fixedCursor) {
+        if (this.fixedCursor != fixedCursor) {
+            this.fixedCursor = fixedCursor;
+            if (fixedCursor) {
+                scrollOffset = 0;
+            }
+            invalidate();
         }
         return this;
     }
@@ -315,6 +327,10 @@ public class TerminalPasswordField extends TerminalRegion {
     // ===== SCROLLING LOGIC =====
     
     private void ensureCursorVisible() {
+        if (fixedCursor) {
+            scrollOffset = 0;
+            return;
+        }
         int visibleWidth = getWidth();
         if (visibleWidth <= 0) return;
         
@@ -405,7 +421,7 @@ public class TerminalPasswordField extends TerminalRegion {
         }
         
         // Calculate cursor position and drawing offset
-        int visualCursorPos = keystrokeCount - scrollOffset;
+        int visualCursorPos = fixedCursor ? 0 : keystrokeCount - scrollOffset;
         
         int drawOffset = 0;
         int displayLength = displayMode == DisplayMode.INVISIBLE ? 0 : 

@@ -25,6 +25,14 @@ public class TerminalLabel extends TerminalRegion {
     private LabelTruncation truncation = LabelTruncation.END;
     private boolean wordWrap = false;
     
+    public TerminalLabel(String name){
+        this(name, "");
+    }
+
+    public TerminalLabel(String name, TextStyle style){
+        this(name, "");
+        this.style = style;
+    }
     public TerminalLabel(String name, String text) {
         super(name);
         this.text = text;
@@ -46,21 +54,21 @@ public class TerminalLabel extends TerminalRegion {
         }
     }
     
-    public void setStyle(TextStyle style) {
+    public void setTextStyle(TextStyle style) {
         if (this.style != style) {
             this.style = style != null ? style : TextStyle.NORMAL;
             invalidate();
         }
     }
     
-    public void setAlignment(TextAlignment alignment) {
+    public void setTextAlignment(TextAlignment alignment) {
         if (this.alignment != alignment) {
             this.alignment = alignment;
             invalidate();
         }
     }
     
-    public void setTruncation(LabelTruncation truncation) {
+    public void setTextTruncation(LabelTruncation truncation) {
         if (this.truncation != truncation) {
             this.truncation = truncation;
             invalidate();
@@ -107,12 +115,12 @@ public class TerminalLabel extends TerminalRegion {
         }
         
         return switch (truncation) {
-            case END -> text.substring(0, Math.max(0, maxWidth - 3)) + "...";
-            case START -> "..." + text.substring(Math.max(0, text.length() - maxWidth + 3));
+            case END -> text.substring(0, Math.max(0, maxWidth - 3)) + "…";
+            case START -> "…" + text.substring(Math.max(0, text.length() - maxWidth + 3));
             case MIDDLE -> {
                 if (maxWidth < 5) yield text.substring(0, maxWidth);
                 int half = (maxWidth - 3) / 2;
-                yield text.substring(0, half) + "..." + 
+                yield text.substring(0, half) + "…" + 
                       text.substring(text.length() - (maxWidth - 3 - half));
             }
             default -> text.substring(0, maxWidth);
@@ -180,8 +188,8 @@ public class TerminalLabel extends TerminalRegion {
         public TerminalLabel build() {
             TerminalLabel label = new TerminalLabel(name, text, style);
             label.setBounds(x, y, width, height);
-            label.setAlignment(alignment);
-            label.setTruncation(truncation);
+            label.setTextAlignment(alignment);
+            label.setTextTruncation(truncation);
             label.setWordWrap(wordWrap);
             return label;
         }
