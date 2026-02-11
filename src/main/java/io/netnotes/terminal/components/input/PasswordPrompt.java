@@ -107,37 +107,45 @@ public class PasswordPrompt extends TerminalRegion {
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FILL);
 
-        headerLabel = new TerminalLabel("header");
-        promptLabel = new TerminalLabel("prompt");
-        confirmPromptLabel = new TerminalLabel("confirm-prompt");
-        statusLabel = new TerminalLabel("status");
-        footerLabel = new TerminalLabel("footer");
+        headerLabel = new TerminalLabel(name + "pass-prompt-header");
+        promptLabel = new TerminalLabel(name + "pass-prompt-prompt");
+        statusLabel = new TerminalLabel(name + "pass-prompt-status");
+        footerLabel = new TerminalLabel(name + "pass-prompt-footer");
 
-        createField = new TerminalPasswordField("password-input", false)
-            .withDisplayMode(TerminalPasswordField.DisplayMode.MASKED)
-            .withMaskChar('*')
-            .withTextStyle(passFieldTextStyle)
-            .withBaseStyle(passFieldBg)
-            .withOnComplete(this::handleCreateFirstEntered);
+        if (mode == Mode.CREATE) {
+            confirmPromptLabel = new TerminalLabel(name + "pass-prompt-confirm-prompt");
+            createField = new TerminalPasswordField(name + "pass-prompt-password-input", false)
+                .withDisplayMode(TerminalPasswordField.DisplayMode.MASKED)
+                .withMaskChar('▪')
+                .withTextStyle(passFieldTextStyle)
+                .withBaseStyle(passFieldBg)
+                .withOnComplete(this::handleCreateFirstEntered);
 
-        confirmField = new TerminalPasswordField("password-confirm", false)
-            .withDisplayMode(TerminalPasswordField.DisplayMode.MASKED)
-            .withMaskChar('*')
-            .withTextStyle(passFieldTextStyle)
-            .withBaseStyle(passFieldBg)
-            .withOnComplete(this::handleCreateConfirmEntered);
+            confirmField = new TerminalPasswordField(name + "pass-prompt-password-confirm", false)
+                .withDisplayMode(TerminalPasswordField.DisplayMode.MASKED)
+                .withMaskChar('▪')
+                .withTextStyle(passFieldTextStyle)
+                .withBaseStyle(passFieldBg)
+                .withOnComplete(this::handleCreateConfirmEntered);
 
-        verifyField = new TerminalPasswordField("password-verify", true)
-            .withDisplayMode(TerminalPasswordField.DisplayMode.INVISIBLE)
-            .withFixedCursor(true)
-            .withTextStyle(passFieldTextStyle)
-            .withBaseStyle(passFieldBg)
-            .withOnComplete(this::handleVerifyEntered);
+            verifyField = null;
+        } else {
+            confirmPromptLabel = null;
+            createField = null;
+            confirmField = null;
 
-        verifyField.setOnFocusChanged((field, isFocused) -> {
-            showVerifyLine = isFocused;
-            invalidate();
-        });
+            verifyField = new TerminalPasswordField(name + "pass-prompt-password-verify", true)
+                .withDisplayMode(TerminalPasswordField.DisplayMode.INVISIBLE)
+                .withFixedCursor(true)
+                .withTextStyle(passFieldTextStyle)
+                .withBaseStyle(passFieldBg)
+                .withOnComplete(this::handleVerifyEntered);
+
+            verifyField.setOnFocusChanged((field, isFocused) -> {
+                showVerifyLine = isFocused;
+                invalidate();
+            });
+        }
 
         headerLabel.setText(title);
         headerLabel.setTextStyle(textLabelStyle);
@@ -146,8 +154,10 @@ public class PasswordPrompt extends TerminalRegion {
         promptLabel.setTextStyle(TextStyle.NORMAL.copy().bgColor(boxBgStyle.getBackground()));
         promptLabel.setTextAlignment(TextAlignment.CENTER);
         
-        confirmPromptLabel.setTextStyle(TextStyle.NORMAL.copy().bgColor(boxBgStyle.getBackground()));
-        confirmPromptLabel.setTextAlignment(TextAlignment.CENTER);
+        if (confirmPromptLabel != null) {
+            confirmPromptLabel.setTextStyle(TextStyle.NORMAL.copy().bgColor(boxBgStyle.getBackground()));
+            confirmPromptLabel.setTextAlignment(TextAlignment.CENTER);
+        }
 
         statusLabel.setTextStyle(TextStyle.WARNING.copy().bgColor(boxBgStyle.getBackground()));
         statusLabel.setTextAlignment(TextAlignment.CENTER);
@@ -196,11 +206,15 @@ public class PasswordPrompt extends TerminalRegion {
         addChild(headerLabel, ctx -> layoutAt(ctx, 2, 1, getResolvedBoxWidth() - 4, false));
         addChild(promptLabel, ctx -> layoutAt(ctx, 2, 3, getResolvedBoxWidth() - 4, false));
 
-        addChild(createField, ctx -> layoutAt(ctx, 4, 5, getResolvedBoxWidth() - 8, mode != Mode.CREATE));
-        addChild(confirmPromptLabel, ctx -> layoutAt(ctx, 2, 7, getResolvedBoxWidth() - 4, mode != Mode.CREATE));
-        addChild(confirmField, ctx -> layoutAt(ctx, 4, 9, getResolvedBoxWidth() - 8, mode != Mode.CREATE));
-
-        addChild(verifyField, ctx -> layoutAt(ctx, 4, 5, getResolvedBoxWidth() - 8, mode != Mode.VERIFY));
+        if (mode == Mode.CREATE) {
+            addChild(requireCreateField("layout"), ctx -> layoutAt(ctx, 4, 5, getResolvedBoxWidth() - 8, false));
+            if (confirmPromptLabel != null) {
+                addChild(confirmPromptLabel, ctx -> layoutAt(ctx, 2, 7, getResolvedBoxWidth() - 4, false));
+            }
+            addChild(requireConfirmField("layout"), ctx -> layoutAt(ctx, 4, 9, getResolvedBoxWidth() - 8, false));
+        } else {
+            addChild(requireVerifyField("layout"), ctx -> layoutAt(ctx, 4, 5, getResolvedBoxWidth() - 8, false));
+        }
 
         addChild(statusLabel, ctx -> layoutAt(ctx, 2, mode == Mode.CREATE ? 11 : 7, getResolvedBoxWidth() - 4, false));
         addChild(footerLabel, ctx -> layoutAt(ctx, 2, getResolvedBoxHeight() - 2, getResolvedBoxWidth() - 4, false));
@@ -214,24 +228,27 @@ public class PasswordPrompt extends TerminalRegion {
         
         stateMachine.onStateAdded(STATE_ACTIVE, (old, now, bit) -> {
             promptLabel.setText(promptText);
-            confirmPromptLabel.setText(confirmPromptText);
             statusLabel.setText("");
             if (mode == Mode.CREATE) {
-                createField.clear();
-                confirmField.clear();
-                createField.requestFocus();
+                if (confirmPromptLabel != null) {
+                    confirmPromptLabel.setText(confirmPromptText);
+                }
+                requireCreateField("activate").clear();
+                requireConfirmField("activate").clear();
+                requireCreateField("activate").requestFocus();
             } else {
-                verifyField.clear();
-                verifyField.requestFocus();
+                requireVerifyField("activate").clear();
+                requireVerifyField("activate").requestFocus();
             }
             startTimeout();
             invalidate();
         });
         
         stateMachine.onStateAdded(STATE_CONFIRMING, (old, now, bit) -> {
+            requireMode(Mode.CREATE, "confirm state");
             statusLabel.setText("");
-            confirmField.clear();
-            confirmField.requestFocus();
+            requireConfirmField("confirm state").clear();
+            requireConfirmField("confirm state").requestFocus();
             startTimeout();
             invalidate();
         });
@@ -264,15 +281,13 @@ public class PasswordPrompt extends TerminalRegion {
         
         fillRegion(batch, boxX, boxY, resolvedBoxWidth, resolvedBoxHeight, ' ', boxBgStyle);
         
-        if (mode == Mode.VERIFY && showVerifyLine && verifyField.hasFocus()) {
+        if (mode == Mode.VERIFY && showVerifyLine && requireVerifyField("render").hasFocus()) {
             int lineY = boxY + 2;
-            fillRegion(batch, boxX + 1, lineY, resolvedBoxWidth - 2, 1, '-', lineStyle);
+            fillRegion(batch, boxX + 1, lineY, resolvedBoxWidth - 2, 1, '─', lineStyle);
         }
      
     }
     
-    //TODO: use actual builder not just with methods, high secure password prompt needs to be created as such
-
     public PasswordPrompt withTitle(String title) { 
         this.title = title; 
         if (headerLabel != null) headerLabel.setText(title);
@@ -286,6 +301,7 @@ public class PasswordPrompt extends TerminalRegion {
     }
     
     public PasswordPrompt withConfirmPrompt(String confirmPrompt) { 
+        requireMode(Mode.CREATE, "confirm prompt");
         this.confirmPromptText = confirmPrompt; 
         if (confirmPromptLabel != null) confirmPromptLabel.setText(confirmPrompt);
         return this; 
@@ -304,11 +320,13 @@ public class PasswordPrompt extends TerminalRegion {
     }
     
     public PasswordPrompt onPassword(Consumer<NoteBytesEphemeral> handler) { 
+        requireMode(Mode.CREATE, "password handler");
         this.onPassword = handler; 
         return this; 
     }
 
     public PasswordPrompt onVerify(Consumer<NoteBytesEphemeral> handler) {
+        requireMode(Mode.VERIFY, "verify handler");
         this.onVerify = handler;
         return this;
     }
@@ -324,6 +342,7 @@ public class PasswordPrompt extends TerminalRegion {
     }
     
     public PasswordPrompt onMismatch(Runnable handler) { 
+        requireMode(Mode.CREATE, "mismatch handler");
         this.onMismatch = handler; 
         return this; 
     }
@@ -344,12 +363,14 @@ public class PasswordPrompt extends TerminalRegion {
     }
     
     private void handleCreateFirstEntered(NoteBytesEphemeral password) {
+        requireMode(Mode.CREATE, "create password");
         firstPassword = password.copy();
         password.close();
         transitionTo(STATE_ACTIVE, STATE_CONFIRMING);
     }
     
     private void handleCreateConfirmEntered(NoteBytesEphemeral password) {
+        requireMode(Mode.CREATE, "confirm password");
         if (firstPassword == null) {
             password.close();
             transitionTo(STATE_CONFIRMING, STATE_ACTIVE);
@@ -377,12 +398,14 @@ public class PasswordPrompt extends TerminalRegion {
     }
 
     private void handleVerifyEntered(NoteBytesEphemeral password) {
+        requireMode(Mode.VERIFY, "verify password");
         cancelTimeout();
-        if (onVerify != null) {
-            onVerify.accept(password);
-        } else {
-            completeWithPassword(password);
+        if (onVerify == null) {
+            password.close();
+            throw new IllegalStateException("[PasswordPrompt] onVerify handler required in VERIFY mode");
         }
+        onVerify.accept(password);
+        deactivate();
     }
     
     private void showMismatchError() {
@@ -448,9 +471,9 @@ public class PasswordPrompt extends TerminalRegion {
     private void cleanupResources() {
         cancelTimeout();
         
-        createField.clear();
-        confirmField.clear();
-        verifyField.clear();
+        if (createField != null) createField.clear();
+        if (confirmField != null) confirmField.clear();
+        if (verifyField != null) verifyField.clear();
         showVerifyLine = false;
         
         if (firstPassword != null) {
@@ -469,6 +492,33 @@ public class PasswordPrompt extends TerminalRegion {
             removeKeyDownHandler(cancelHandlerId);
         }
         deactivate();
+    }
+
+    private void requireMode(Mode expected, String action) {
+        if (mode != expected) {
+            throw new IllegalStateException("[PasswordPrompt] " + action + " requires " + expected + " mode");
+        }
+    }
+
+    private TerminalPasswordField requireCreateField(String action) {
+        if (createField == null) {
+            throw new IllegalStateException("[PasswordPrompt] " + action + " requires create field");
+        }
+        return createField;
+    }
+
+    private TerminalPasswordField requireConfirmField(String action) {
+        if (confirmField == null) {
+            throw new IllegalStateException("[PasswordPrompt] " + action + " requires confirm field");
+        }
+        return confirmField;
+    }
+
+    private TerminalPasswordField requireVerifyField(String action) {
+        if (verifyField == null) {
+            throw new IllegalStateException("[PasswordPrompt] " + action + " requires verify field");
+        }
+        return verifyField;
     }
 
     public static Builder builder(String name) {
@@ -530,6 +580,15 @@ public class PasswordPrompt extends TerminalRegion {
         public Builder headerStyle(TextStyle style) { this.textLabelStyle = style; return this; }
 
         public PasswordPrompt build() {
+            if (mode == Mode.VERIFY && onPassword != null) {
+                throw new IllegalStateException("[PasswordPrompt.Builder] onPassword not valid in VERIFY mode");
+            }
+            if (mode == Mode.VERIFY && onMismatch != null) {
+                throw new IllegalStateException("[PasswordPrompt.Builder] onMismatch not valid in VERIFY mode");
+            }
+            if (mode == Mode.CREATE && onVerify != null) {
+                throw new IllegalStateException("[PasswordPrompt.Builder] onVerify not valid in CREATE mode");
+            }
             if (mode == Mode.CREATE && (confirmPromptText == null || confirmPromptText.isEmpty())) {
                 confirmPromptText = "Confirm password:";
             }
