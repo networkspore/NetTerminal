@@ -1,9 +1,9 @@
 package io.netnotes.renderer;
 
 
+import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.RendererStates;
 import io.netnotes.engine.ui.UIRenderer;
-import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerConfig;
 import io.netnotes.engine.ui.containers.ContainerId;
@@ -12,12 +12,13 @@ import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
-import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
+import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.Color;
 import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor;
@@ -41,7 +42,14 @@ import java.util.concurrent.TimeUnit;
  * - RenderManager handles all container lifecycle and commits
  * - No backward dependency from Renderer to RenderManager
  */
-public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
+public class ConsoleUIRenderer extends UIRenderer<
+    Point2D, 
+    TerminalRectangle,
+    ConsoleContainer
+> {
+
+    public static final NoteBytesReadOnly DEFAULT_RENDERER_ID = new NoteBytesReadOnly("JLINE3");
+
     public static final int RENDERER_INITIALIZING    = 0;
     public static final int RENDERER_READY           = 1;
     public static final int RENDERER_HAS_ACTIVE      = 2;
@@ -83,12 +91,16 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
 
     // ===== SIGNAL HANDLER =====
     private Terminal.SignalHandler resizeHandler;
+    private TerminalRectanglePool regionPool = TerminalRectanglePool.getInstance();
 
+    public ConsoleUIRenderer() throws IOException{
+        this(DEFAULT_RENDERER_ID);
+    }
     /**
      * Constructor
      */
-    public ConsoleUIRenderer() throws IOException {
-        super("console-renderer");
+    public ConsoleUIRenderer(NoteBytesReadOnly rendererId) throws IOException {
+        super("console-renderer", rendererId);
         this.terminal = TerminalBuilder.builder()
             .system(true)
             .encoding("UTF-8")
@@ -98,7 +110,7 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
         this.termHeight = terminal.getHeight();
         this.originalAttributes = terminal.getAttributes();
 
-        this.renderManager = new ConsoleRenderManager(this);
+        this.renderManager = new ConsoleRenderManager(this, regionPool);
         
         inputCapture = new ConsoleInputCapture(terminal, this::handleInputEvent);
         inputCapture.setOnCtrlC(this::handleCtrlC);
@@ -374,6 +386,14 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
     }
     
     // ===== CONTAINER MANAGEMENT =====
+
+    //TODO: allow portions of the screen for containers?
+     @Override
+    protected TerminalRectangle createContainerRegion(NoteBytesMap msgReq) {
+        TerminalRectangle containerRegion = regionPool.obtain();
+        containerRegion.set(0, 0, termWidth, termHeight);
+        return containerRegion;
+    }
     
     @Override
     protected CompletableFuture<ConsoleContainer> doCreateContainer(
@@ -381,15 +401,17 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
         String title,
         ContextPath ownerPath,
         ContainerConfig config,
-        String rendererId
+        String rendererId,
+        TerminalRectangle containerRegion
     ) {
-
+    
         ConsoleContainer container = new ConsoleContainer(
             id, title, ownerPath, config,
             rendererId,
-            termWidth,
-            termHeight
+            containerRegion,
+            regionPool
         );
+
         container.setOnRequestMade(c -> {
             if (c instanceof ConsoleContainer cc) {
                 renderManager.enqueueRequest(cc);
@@ -399,28 +421,26 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
         return CompletableFuture.completedFuture(container);
     }
 
+    //protected TerminalRectangle createRegion()
+
     @Override
     protected CompletableFuture<NoteBytesReadOnly> onContainerCreated(
-        ContainerId containerId,
-        NoteBytesMap createMsg
+        ConsoleContainer container,
+        TerminalRectangle containerRegion
     ) {
-        int width = terminal.getWidth();
-        int height = terminal.getHeight();
-        
-        NoteBytes rendererIdBytes = createMsg.get(ContainerCommands.RENDERER_ID);
-        
+
         NoteBytesMap response = new NoteBytesMap();
         response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        response.put(ContainerCommands.RENDERER_ID, rendererIdBytes);
-        response.put(Keys.WIDTH, width);
-        response.put(Keys.HEIGHT, height);
+        response.put(ContainerCommands.RENDERER_ID, getId());
+        response.put(ContainerCommands.REGION, containerRegion.toNoteBytes());
+
 
         Log.logNoteBytes("[ConsoleRenderer.onContainerCreated]", response);
         
         return CompletableFuture.completedFuture(response.toNoteBytesReadOnly());
     }
 
-    public Container<ConsoleContainer> createContainer(
+    /*public ConsoleContainer createContainer(
         ContainerId id,
         String title,
         ContextPath ownerPath,
@@ -458,11 +478,11 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
         } finally {
             state.removeState(RendererStates.CREATING_CONTAINER);
         }
-    }
+    }*/
 
     @Override
     public ConsoleContainer getContainerFromMsg(NoteBytesMap msg){
-        Container<ConsoleContainer> container = super.getContainerFromMsg(msg);
+        ConsoleContainer container = super.getContainerFromMsg(msg);
         return container != null && container instanceof ConsoleContainer consoleContainer ? consoleContainer : null;
     }
 
@@ -711,9 +731,7 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
     // ===== TERMINAL EVENT HANDLING =====
 
     private void handleTerminalResize() {
-        rendererExecutor.execute(() -> {
-            doHandleTerminalResize();
-        });
+        rendererExecutor.execute(this::doHandleTerminalResize);
     }
 
     private void doHandleTerminalResize() {
@@ -803,4 +821,5 @@ public class ConsoleUIRenderer extends UIRenderer<ConsoleContainer> {
             Log.logMsg("[ConsoleUIRenderer] Container cleanup complete: " + containerId);
         });
     }
+   
 }

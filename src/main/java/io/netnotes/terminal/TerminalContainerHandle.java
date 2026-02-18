@@ -1,10 +1,9 @@
 package io.netnotes.terminal;
 
-import java.io.IOException;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.terminal.events.TerminalEventsFactory;
-import io.netnotes.terminal.events.containerEvents.TerminalRegionEvent;
+import io.netnotes.terminal.events.containerEvents.TerminalResizeEvent;
 import io.netnotes.terminal.layout.TerminalFloatingLayoutManager;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -33,9 +32,10 @@ public class TerminalContainerHandle extends ContainerHandle<
     TerminalLayoutContext,
     TerminalLayoutData,
     TerminalLayoutCallback,
+    TerminalEventsFactory,
     TerminalContainerHandle.TerminalBuilder
 > {
-
+    private final TerminalRectanglePool regionPool = TerminalRectanglePool.getInstance();
     public TerminalContainerHandle(TerminalBuilder builder){
         super(builder);
     }
@@ -64,11 +64,6 @@ public class TerminalContainerHandle extends ContainerHandle<
     }
 
     @Override
-    protected RoutedEvent createRoutedEvent(NoteBytes eventBytes) throws IOException {
-        return TerminalEventsFactory.from(contextPath, eventBytes);
-    }
-
-    @Override
     protected TerminalBatchBuilder createBatch() {
         return new TerminalBatchBuilder();
     }
@@ -79,12 +74,11 @@ public class TerminalContainerHandle extends ContainerHandle<
 
     @Override
     protected void onContainerResized(RoutedEvent event) {
-         if (!(event instanceof TerminalRegionEvent)) {
+         if (!(event instanceof TerminalResizeEvent)) {
             return;
         }
         
-        TerminalRegionEvent resizeEvent = (TerminalRegionEvent) event;
-        TerminalRectangle newRegion = extractRegionFromResizeEvent(resizeEvent);
+        TerminalRectangle newRegion = extractRegionFromResizeEvent(event);
         
         if (newRegion == null) {
             return;
@@ -103,14 +97,15 @@ public class TerminalContainerHandle extends ContainerHandle<
            
             applyRegionToRenderable(rootRenderable, allocatedRegion);
             
+            regionPool.recycle(oldRegion);   
         }
     }
 
 
     @Override
     protected TerminalRectangle extractRegionFromResizeEvent(RoutedEvent event) {
-        if(event instanceof TerminalRegionEvent resizeEvent){
-            return resizeEvent.getRegion();
+        if(event instanceof TerminalResizeEvent resizeEvent){
+            return resizeEvent.getAndConsumeRegion();
         }
         return null;
     }
@@ -197,6 +192,11 @@ public class TerminalContainerHandle extends ContainerHandle<
         Point2D point = region.getAbsolutePosition();
         renderable.getRegionPool().recycle(region);
         return point;
+    }
+
+    @Override
+    protected TerminalEventsFactory createEventsFactory() {
+        return new TerminalEventsFactory(regionPool);
     }
 
 

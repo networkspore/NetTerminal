@@ -485,6 +485,27 @@ public class PasswordPrompt extends TerminalRegion {
     public boolean isActive() {
         return !stateMachine.hasState(STATE_INACTIVE);
     }
+
+    public void reset() {
+        if (createField != null) createField.clear();
+        if (confirmField != null) confirmField.clear();
+        if (verifyField != null) verifyField.clear();
+        
+        if (firstPassword != null) {
+            firstPassword.close();
+            firstPassword = null;
+        }
+        
+        statusLabel.setText("");
+        
+        // Reset to initial state based on mode
+        if (mode == Mode.CREATE && stateMachine.hasState(STATE_CONFIRMING)) {
+            transitionTo(STATE_CONFIRMING, STATE_ACTIVE);
+        }
+        // VERIFY mode stays in ACTIVE, just clears field
+        
+        invalidate();
+    }
     
     @Override
     protected void onCleanup() {

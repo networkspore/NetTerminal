@@ -7,6 +7,8 @@ import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.TerminalRectanglePool;
 
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -87,9 +89,12 @@ public class ConsoleRenderManager {
             lastSuccessTime = now;
         }
     }
+
+    private final TerminalRectanglePool regionPool;
     
-    public ConsoleRenderManager(ConsoleUIRenderer renderer) {
+    public ConsoleRenderManager(ConsoleUIRenderer renderer, TerminalRectanglePool regionPool) {
         this.renderer = renderer;
+        this.regionPool = regionPool;
     }
     
     /**
@@ -170,9 +175,7 @@ public class ConsoleRenderManager {
      * Process pending requests for a single container
      */
     private void processContainerRequests(ConsoleContainer container) {
-        if (!container.isEventStreamReady()) {
-            return;
-        }
+       
 
         Log.logMsg("[ConsoleRenderManager] processing container requests");
         
@@ -557,11 +560,14 @@ public class ConsoleRenderManager {
      * Handle resize - increments generation
      */
     public void onResize(int width, int height) {
+        
         for (ConsoleContainer container : renderer.getAllContainers()) {
-            container.resize(width, height);
+            TerminalRectangle containerRegion = regionPool.obtain();
+            container.setRegion(containerRegion);
+            regionPool.recycle(containerRegion);
         }
         markDirtyForNewGeneration();
-        Log.logMsg("[ConsoleRenderManager] Resize applied: " + width + "x" + height + 
+        Log.logMsg("[ConsoleRenderManager] Resize applied: width:" + width + " height:" + height + 
             " (gen=" + generation.get() + ")");
     }
     

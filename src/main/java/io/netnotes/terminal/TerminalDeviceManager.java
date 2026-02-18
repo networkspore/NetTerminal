@@ -1,5 +1,6 @@
 package io.netnotes.terminal;
 import io.netnotes.engine.ui.containers.DeviceManager;
+import io.netnotes.noteBytes.NoteBytes;
 
 public abstract class TerminalDeviceManager extends DeviceManager
 <
@@ -7,7 +8,7 @@ public abstract class TerminalDeviceManager extends DeviceManager
     TerminalDeviceManager
 >{
 
-    protected TerminalDeviceManager(String deviceId, String mode, String deviceType) {
+    protected TerminalDeviceManager(NoteBytes deviceId, NoteBytes mode, NoteBytes deviceType) {
         super(deviceId, mode, deviceType);
     }
 
