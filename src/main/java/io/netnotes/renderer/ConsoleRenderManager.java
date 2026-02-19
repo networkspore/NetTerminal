@@ -265,32 +265,28 @@ public class ConsoleRenderManager {
     /**
      * Handle focus request
      */
-    private void handleFocusRequest(ConsoleContainer container, 
-                                     BitFlagStateMachine.StateSnapshot snap) {
+    private void handleFocusRequest(ConsoleContainer container,
+                                    BitFlagStateMachine.StateSnapshot snap) {
         boolean canGrant = snap.hasState(Container.STATE_VISIBLE) && 
-                          !snap.hasState(Container.STATE_HIDDEN);
+                        !snap.hasState(Container.STATE_HIDDEN);
         
         if (canGrant) {
-            // Revoke focus from current
             ConsoleContainer current = focusedContainer.get();
             if (current != null && current != container) {
-                current.revokeFocus().thenRun(() -> {
-                    Log.logMsg("[ConsoleRenderManager] Focus revoked from: " + 
-                        current.getId());
-                });
+                current.revokeFocus();
+                renderer.onFocusRevoked(current);
             }
             
-            // Grant focus and set as focused
-            container.grantFocus().thenRun(() -> {
-                focusedContainer.set(container);
-                markDirtyForNewGeneration(); // Focus change = new generation
-                Log.logMsg("[ConsoleRenderManager] Focus granted to: " + 
-                    container.getId() + " (gen=" + generation.get() + ")");
-            });
+            // Set focused + dirty synchronously here, before async grantFocus
+            focusedContainer.set(container);
+            renderer.onFocusGranted(container);
+            markDirtyForNewGeneration();
+            
+            container.grantFocus();  // fire-and-forget state + event emission
+            Log.logMsg("[ConsoleRenderManager] Focus granted to: " + 
+                container.getId() + " (gen=" + generation.get() + ")");
         } else {
             container.clearRequest(Container.STATE_FOCUS_REQUESTED);
-            Log.logMsg("[ConsoleRenderManager] Focus denied for: " + 
-                container.getId() + " (not visible or hidden)");
         }
     }
     

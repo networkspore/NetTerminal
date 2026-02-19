@@ -11,11 +11,11 @@ import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
-import io.netnotes.engine.ui.containers.ContainerConfig;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.terminal.StyleConstants;
 import io.netnotes.terminal.TerminalCommands;
+import io.netnotes.terminal.TerminalContainerConfig;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TextStyle;
@@ -40,6 +40,7 @@ import java.util.concurrent.CompletableFuture;
 public class ConsoleContainer extends Container<
     Point2D,
     TerminalRectangle,
+    TerminalContainerConfig,
     ConsoleContainer
 > {
     private final TerminalRectanglePool regionPool;
@@ -59,12 +60,11 @@ public class ConsoleContainer extends Container<
         ContainerId id,
         String title,
         ContextPath ownerPath,
-        ContainerConfig config,
+        TerminalContainerConfig config,
         String rendererId,
-        TerminalRectangle region,
         TerminalRectanglePool pool
     ) {
-        super(id, title, ownerPath, config, rendererId, region);
+        super(id, title, ownerPath, config, rendererId);
         int height = getHeight();
         int width = getWidth();
         // Allocate buffers

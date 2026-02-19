@@ -6,6 +6,7 @@ import java.util.Map;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
 import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutable;
@@ -159,9 +160,14 @@ public class TerminalHStack extends TerminalRegion {
     
     // ===== CHILD MANAGEMENT =====
     
-    @Override
+     @Override
     public void addChild(TerminalRenderable child) {
-        super.addChild(child);
+        this.addChild(child, null); 
+    }
+
+    @Override 
+    public void addChild(TerminalRenderable child, TerminalLayoutCallback callback){
+        super.addChild(child, null);
         addToLayoutGroup(child, layoutGroupId);
     }
 

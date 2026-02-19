@@ -349,6 +349,8 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         }
         addToPanel(BorderPanel.CENTER, content);
     }
+
+    
     
     /**
      * Remove content from the CENTER region by reference.

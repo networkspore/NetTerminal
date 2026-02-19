@@ -161,13 +161,13 @@ public class TerminalVStack extends TerminalRegion {
     
     @Override
     public void addChild(TerminalRenderable child) {
-        super.addChild(child);
-        addToLayoutGroup(child, layoutGroupId);
+        this.addChild(child, null); 
     }
 
     @Override 
     public void addChild(TerminalRenderable child, TerminalLayoutCallback callback){
-        this.addChild(child);
+        super.addChild(child, null);
+        addToLayoutGroup(child, layoutGroupId);
     }
 
     // ===== LAYOUT CALCULATION =====

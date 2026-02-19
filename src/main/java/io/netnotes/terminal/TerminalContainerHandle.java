@@ -33,6 +33,7 @@ public class TerminalContainerHandle extends ContainerHandle<
     TerminalLayoutData,
     TerminalLayoutCallback,
     TerminalEventsFactory,
+    TerminalContainerConfig,
     TerminalContainerHandle.TerminalBuilder
 > {
     private final TerminalRectanglePool regionPool = TerminalRectanglePool.getInstance();
@@ -54,14 +55,16 @@ public class TerminalContainerHandle extends ContainerHandle<
 
     protected void setupStateTransitions() {}
 
+
     @Override
-    protected TerminalRectangle extractRegionFromResponse(NoteBytesMap responseMap) {
+    protected TerminalRectangle extractRegionFromCreateResponse(NoteBytesMap responseMap) {
         NoteBytes regionBytes =  responseMap.get(Keys.REGION);
         if(regionBytes == null || regionBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
             throw new IllegalStateException("valid region required in response");
         }
-        return TerminalRectangle.fromNoteBytes(regionBytes.getAsNoteBytesMap());
+        return TerminalRectangle.fromNoteBytes(regionBytes);
     }
+
 
     @Override
     protected TerminalBatchBuilder createBatch() {
@@ -147,6 +150,7 @@ public class TerminalContainerHandle extends ContainerHandle<
     public static class TerminalBuilder extends ContainerHandle.Builder<
         TerminalContainerHandle,
         TerminalRectangle,
+        TerminalContainerConfig,
         TerminalBuilder
     > {
 
@@ -158,6 +162,11 @@ public class TerminalContainerHandle extends ContainerHandle<
         @Override
         public TerminalContainerHandle build() {
             return new TerminalContainerHandle(this);
+        }
+
+        @Override
+        protected TerminalContainerConfig createContainerConfig() {
+            return new TerminalContainerConfig();
         }
         
     }
@@ -198,6 +207,7 @@ public class TerminalContainerHandle extends ContainerHandle<
     protected TerminalEventsFactory createEventsFactory() {
         return new TerminalEventsFactory(regionPool);
     }
+
 
 
     

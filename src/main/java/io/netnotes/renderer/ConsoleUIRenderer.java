@@ -4,19 +4,25 @@ package io.netnotes.renderer;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.RendererStates;
 import io.netnotes.engine.ui.UIRenderer;
+import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
-import io.netnotes.engine.ui.containers.ContainerConfig;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
+import io.netnotes.noteBytes.NoteBoolean;
+import io.netnotes.noteBytes.NoteBytes;
+import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
+import io.netnotes.terminal.TerminalContainerConfig;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TextStyle;
@@ -45,6 +51,7 @@ import java.util.concurrent.TimeUnit;
 public class ConsoleUIRenderer extends UIRenderer<
     Point2D, 
     TerminalRectangle,
+    TerminalContainerConfig,
     ConsoleContainer
 > {
 
@@ -387,12 +394,13 @@ public class ConsoleUIRenderer extends UIRenderer<
     
     // ===== CONTAINER MANAGEMENT =====
 
-    //TODO: allow portions of the screen for containers?
+    //TODO: allow split screen for containers
      @Override
-    protected TerminalRectangle createContainerRegion(NoteBytesMap msgReq) {
+    protected void allocateContainerRegion(TerminalContainerConfig config) {
+        //config.initialRegion(); <- Requested Region
         TerminalRectangle containerRegion = regionPool.obtain();
         containerRegion.set(0, 0, termWidth, termHeight);
-        return containerRegion;
+        config.withInitialRegion(containerRegion);
     }
     
     @Override
@@ -400,17 +408,12 @@ public class ConsoleUIRenderer extends UIRenderer<
         ContainerId id,
         String title,
         ContextPath ownerPath,
-        ContainerConfig config,
-        String rendererId,
-        TerminalRectangle containerRegion
+        TerminalContainerConfig config,
+        String rendererId
     ) {
     
-        ConsoleContainer container = new ConsoleContainer(
-            id, title, ownerPath, config,
-            rendererId,
-            containerRegion,
-            regionPool
-        );
+        ConsoleContainer container = new ConsoleContainer(id, title, ownerPath, config,rendererId, regionPool);
+        Log.logMsg("[ConsoleUIRenderer] consoleContainer created: " + id);
 
         container.setOnRequestMade(c -> {
             if (c instanceof ConsoleContainer cc) {
@@ -425,19 +428,32 @@ public class ConsoleUIRenderer extends UIRenderer<
 
     @Override
     protected CompletableFuture<NoteBytesReadOnly> onContainerCreated(
-        ConsoleContainer container,
-        TerminalRectangle containerRegion
+        ConsoleContainer container
     ) {
+        TerminalRectangle containerRegion = container.getConfig().initialRegion();
+        NoteBytes containerRegionBytes = containerRegion.toNoteBytes();
 
-        NoteBytesMap response = new NoteBytesMap();
-        response.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
-        response.put(ContainerCommands.RENDERER_ID, getId());
-        response.put(ContainerCommands.REGION, containerRegion.toNoteBytes());
-
+        Log.logNoteBytes("[ConsoleUIRenderer] containerRegion: ",containerRegionBytes); 
+        boolean isVisible = container.getStateMachine().hasState(Container.STATE_VISIBLE);
+        
+        NoteBytesReadOnly response;
+        
+        if(isVisible){
+            response = new NoteBytesObject(new NoteBytesPair[]{
+                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                new NoteBytesPair(ContainerCommands.REGION, containerRegionBytes)
+            }).readOnly();
+        }else{
+            response = new NoteBytesObject(new NoteBytesPair[]{
+                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
+                new NoteBytesPair(ContainerCommands.REGION, containerRegionBytes),
+                new NoteBytesPair(ContainerCommands.IS_VISIBLE, NoteBoolean.FALSE)
+            }).readOnly();
+        }
 
         Log.logNoteBytes("[ConsoleRenderer.onContainerCreated]", response);
         
-        return CompletableFuture.completedFuture(response.toNoteBytesReadOnly());
+        return CompletableFuture.completedFuture(response);
     }
 
     /*public ConsoleContainer createContainer(
@@ -821,5 +837,18 @@ public class ConsoleUIRenderer extends UIRenderer<
             Log.logMsg("[ConsoleUIRenderer] Container cleanup complete: " + containerId);
         });
     }
+    @Override
+    protected TerminalContainerConfig createContainerConfig() {
+        return new TerminalContainerConfig();
+    }
+    @Override
+    protected TerminalContainerConfig createContainerConfig(NoteBytes configBytes) {
+        if(configBytes == null || configBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
+            return new TerminalContainerConfig();
+        }
+        return new TerminalContainerConfig(configBytes.getAsMap());
+    }
+    
+ 
    
 }

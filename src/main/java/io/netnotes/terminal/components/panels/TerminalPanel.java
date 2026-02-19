@@ -80,18 +80,15 @@ public class TerminalPanel extends TerminalRegion {
      * Override addChild to automatically add children to layout group.
      * Children that implement TerminalSizeable will be sized to respect this panel's insets.
      */
-    @Override
+     @Override
     public void addChild(TerminalRenderable child) {
-        super.addChild(child);
-        addToLayoutGroup(child, layoutGroupId);
+        this.addChild(child, null); 
     }
 
-    /**
-     * Individual callbacks are disabled for this panel
-     */
-    @Override
+    @Override 
     public void addChild(TerminalRenderable child, TerminalLayoutCallback callback){
-        this.addChild(child);
+        super.addChild(child, null);
+        addToLayoutGroup(child, layoutGroupId);
     }
 
 
