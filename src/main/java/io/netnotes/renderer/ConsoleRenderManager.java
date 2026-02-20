@@ -7,12 +7,8 @@ import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
-import io.netnotes.terminal.TerminalRectangle;
-import io.netnotes.terminal.TerminalRectanglePool;
-
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
-import java.util.concurrent.CompletionException;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
@@ -47,7 +43,7 @@ public class ConsoleRenderManager {
     // Render loop control
     private volatile boolean running = false;
     private CompletableFuture<Void> renderLoop;
-    private CompletableFuture<Void> renderInFlight = null;
+    private final Map<ContainerId, CompletableFuture<Void>> renderInFlight = new ConcurrentHashMap<>();
     
     // Frame timing
     private static final long FRAME_NS = 16_000_000; // ~60fps
@@ -90,11 +86,9 @@ public class ConsoleRenderManager {
         }
     }
 
-    private final TerminalRectanglePool regionPool;
     
-    public ConsoleRenderManager(ConsoleUIRenderer renderer, TerminalRectanglePool regionPool) {
+    public ConsoleRenderManager(ConsoleUIRenderer renderer) {
         this.renderer = renderer;
-        this.regionPool = regionPool;
     }
     
     /**
@@ -142,12 +136,12 @@ public class ConsoleRenderManager {
         }
     }
 
-    private void tick(long frameTime) throws Exception {
+    private void tick(long frameTime) throws InterruptedException {
         processQueuedRequests();
         
         // Render if dirty for current generation
         if (isDirtyForCurrentGen()) {
-            renderFocusedContainer(frameTime);
+            renderVisibleContainers(frameTime);
         }
     }
     
@@ -179,7 +173,7 @@ public class ConsoleRenderManager {
 
         Log.logMsg("[ConsoleRenderManager] processing container requests");
         
-        StateSnapshot snap = container.getStateMachine().getSnapshot();
+        StateSnapshot snap = container.getState();
         
         // DESTROY takes precedence over everything
         if (snap.hasState(Container.STATE_DESTROY_REQUESTED)) {
@@ -216,8 +210,9 @@ public class ConsoleRenderManager {
             handleRestoreRequest(container, snap);
         }
         
-        // Re-enqueue if still has pending requests
-        if (hasAnyPendingRequests(snap)) {
+        // Re-enqueue if container still has pending requests (re-read current state)
+        StateSnapshot afterSnap = container.getState();
+        if (hasAnyPendingRequests(afterSnap)) {
             requestQueue.offer(container);
         }
     }
@@ -239,97 +234,58 @@ public class ConsoleRenderManager {
     /**
      * Handle update request (content change)
      */
-    private void handleUpdateRequest(ConsoleContainer container,
-                                     BitFlagStateMachine.StateSnapshot snap) {
-        // Only render if this is the focused container
-        if (focusedContainer.get() == container) {
-            markDirty();
-        }
-        
+    private void handleUpdateRequest(ConsoleContainer container, StateSnapshot snap) {
+        if (container.shouldRender()) markDirty();
         container.getStateMachine().removeState(Container.STATE_UPDATE_REQUESTED);
     }
-
     /**
      * Handle render request
      */
-    private void handleRenderRequest(ConsoleContainer container,
-                                     BitFlagStateMachine.StateSnapshot snap) {
-        // Only render if this is the focused container
-        if (focusedContainer.get() == container) {
-            markDirty();
-        }
-        
+    private void handleRenderRequest(ConsoleContainer container, StateSnapshot snap) {
+        if (container.shouldRender()) markDirty();
         container.getStateMachine().removeState(Container.STATE_RENDER_REQUESTED);
     }
     
     /**
      * Handle focus request
      */
-    private void handleFocusRequest(ConsoleContainer container,
-                                    BitFlagStateMachine.StateSnapshot snap) {
-        boolean canGrant = snap.hasState(Container.STATE_VISIBLE) && 
-                        !snap.hasState(Container.STATE_HIDDEN);
-        
-        if (canGrant) {
-            ConsoleContainer current = focusedContainer.get();
-            if (current != null && current != container) {
-                current.revokeFocus();
-                renderer.onFocusRevoked(current);
-            }
-            
-            // Set focused + dirty synchronously here, before async grantFocus
-            focusedContainer.set(container);
-            renderer.onFocusGranted(container);
-            markDirtyForNewGeneration();
-            
-            container.grantFocus();  // fire-and-forget state + event emission
-            Log.logMsg("[ConsoleRenderManager] Focus granted to: " + 
-                container.getId() + " (gen=" + generation.get() + ")");
-        } else {
+    private void handleFocusRequest(ConsoleContainer container, StateSnapshot snap) {
+        if (!snap.hasState(Container.STATE_VISIBLE) || snap.hasState(Container.STATE_HIDDEN)) {
             container.clearRequest(Container.STATE_FOCUS_REQUESTED);
+            return;
         }
+        if (!renderer.getLayoutManager().canGrantFocus(container.getId())) {
+            container.clearRequest(Container.STATE_FOCUS_REQUESTED);
+            return;
+        }
+        renderer.getAllContainers().stream()
+            .filter(c -> c != container && c.getStateMachine().hasState(Container.STATE_FOCUSED))
+            .forEach(ConsoleContainer::revokeFocus);
+        //TODO: ensure focusedContainer
+        container.grantFocus();
+        focusedContainer.set(container);
+        renderer.getLayoutManager().onFocusGranted(container.getId());
+        Log.logMsg("[ConsoleRenderManager] Focus granted to: " + container.getId());
     }
-    
+        
     /**
      * Handle show request
      */
-    private void handleShowRequest(ConsoleContainer container, 
-                                    BitFlagStateMachine.StateSnapshot snap) {
+    private void handleShowRequest(ConsoleContainer container, StateSnapshot snap) {
         container.grantShow().thenRun(() -> {
+            renderer.getLayoutManager().onContainerShown(container);
             markDirty();
-            Log.logMsg("[ConsoleRenderManager] Show granted to: " + container.getId());
-            
-            // If no focused container, try to focus this one
-            if (focusedContainer.get() == null) {
-                ConsoleContainer currentFocused = renderer.getAllContainers()
-                    .stream()
-                    .filter(c -> {
-                        BitFlagStateMachine.StateSnapshot s = c.getStateMachine().getSnapshot();
-                        return s.hasState(Container.STATE_VISIBLE) && 
-                            s.hasState(Container.STATE_FOCUSED);
-                    })
-                    .findFirst()
-                    .orElse(null);
-                
-                if (currentFocused == null) {
-                    container.requestFocus();
-                    enqueueRequest(container);
-                }
-            }
+            Log.logMsg("[ConsoleRenderManager] Show granted: " + container.getId());
         });
     }
     
     /**
      * Handle hide request
      */
-    private void handleHideRequest(ConsoleContainer container, 
-                                    BitFlagStateMachine.StateSnapshot snap) {
+    private void handleHideRequest(ConsoleContainer container, StateSnapshot snap) {
         container.grantHide().thenRun(() -> {
-            if (focusedContainer.get() == container) {
-                findNewFocusedContainer();
-            }
+            renderer.getLayoutManager().onContainerHidden(container);
             markDirty();
-            Log.logMsg("[ConsoleRenderManager] Hide granted to: " + container.getId());
         });
     }
     
@@ -376,47 +332,17 @@ public class ConsoleRenderManager {
     /**
      * Handle destroy request
      */
-    private void handleDestroyRequest(ConsoleContainer container, 
-                                      BitFlagStateMachine.StateSnapshot snap) {
+    private void handleDestroyRequest(ConsoleContainer container, StateSnapshot snap) {
         container.grantDestroy().thenRun(() -> {
-            if (focusedContainer.get() == container) {
-                findNewFocusedContainer();
-            }
-            
-            // Clean up failure tracker
+            renderer.getLayoutManager().onContainerRemoved(container);
             failureTrackers.remove(container.getId());
-            
-            Log.logMsg("[ConsoleRenderManager] Destroy granted to: " + 
-                container.getId());
+            // clear focused reference if this container was focused
+            focusedContainer.compareAndSet(container, null);
+            markDirty();
         });
     }
     
-    /**
-     * Find new focused container after current loses focus/hides/destroys
-     */
-    private void findNewFocusedContainer() {
-        ConsoleContainer nextFocused = renderer.getAllContainers()
-            .stream()
-            .filter(c -> {
-                BitFlagStateMachine.StateSnapshot snap = c.getStateMachine().getSnapshot();
-                return snap.hasState(Container.STATE_VISIBLE) && 
-                       !snap.hasState(Container.STATE_HIDDEN) &&
-                       !snap.hasState(Container.STATE_DESTROYED);
-            })
-            .findFirst()
-            .orElse(null);
-        
-        if (nextFocused != null) {
-            nextFocused.requestFocus().thenRun(() -> {
-                enqueueRequest(nextFocused);
-                Log.logMsg("[ConsoleRenderManager] Auto-focusing: " + 
-                    nextFocused.getId());
-            });
-        } else {
-            focusedContainer.set(null);
-            Log.logMsg("[ConsoleRenderManager] No focused container");
-        }
-    }
+  
     
     /**
      * Check if dirty for current generation
@@ -425,107 +351,47 @@ public class ConsoleRenderManager {
         long currentGen = generation.get();
         return dirtyGen == currentGen;
     }
+
+    private void renderVisibleContainers(long frameTime) {
+        renderer.getAllContainers().stream()
+            .filter(ConsoleContainer::shouldRender)
+            .forEach(c -> renderContainer(c, frameTime));
+    }
     
     /**
-     * Render focused container
      * Only renders if container.shouldRender() returns true
      */
-    private void renderFocusedContainer(long renderTime) {
-        if (renderInFlight != null) {
-            return; // a render is already pending
-        }
-        
-        ConsoleContainer focused = focusedContainer.get();
-        if (focused == null) {
-            return;
-        }
-        
-        // Check if container should be rendered
-        // This checks: VISIBLE && !HIDDEN && !ERROR && !DESTROYED
-        if (!focused.shouldRender()) {
-            Log.logMsg("[ConsoleRenderManager] Skipping render for " + focused.getId() + 
-                " - shouldRender() = false");
-            
-            // Clear dirty to avoid spinning
-            long currentGen = generation.get();
-            if (dirtyGen == currentGen) {
-                dirtyGen = -1;
-            }
-            return;
-        }
-        
-        long currentGen = generation.get();
-        
-        // Check if container has too many recent failures
-        RenderFailureTracker tracker = failureTrackers.computeIfAbsent(
-            focused.getId(), 
-            k -> new RenderFailureTracker()
-        );
-        
-        if (tracker.shouldSkipRender(renderTime)) {
-            Log.logError("[ConsoleRenderManager] Skipping render for " + focused.getId() + 
-                " due to " + tracker.consecutiveFailures + " consecutive failures");
-            
-            focused.getStateMachine().addState(Container.STATE_RENDER_ERROR);
-            
-            // Clear dirty to avoid spinning
-            if (dirtyGen == currentGen) {
-                dirtyGen = -1;
-            }
-            return;
-        }
-        
-        // Pull state asynchronously
-        renderInFlight = focused.getRenderableState()
-            .thenAccept(state -> {
-                if (state == null) {
-                    throw new CompletionException(new NullPointerException("Render state is null"));
-                }
-                
-                if (!isGenerationCurrent(currentGen)) {
-                    Log.logMsg("[ConsoleRenderManager] Generation changed during state pull, skipping render");
-                    return;
-                }
-                
-                try {
-                    renderer.renderState(state, currentGen);
-                    
-                    // Commit render after successful rendering
-                    focused.commitRender();
-                    
-                    // Clear dirty after successful render
-                    if (dirtyGen == currentGen) {
-                        dirtyGen = -1;
-                    }
-                    
-                    tracker.recordSuccess(System.nanoTime());
-                    focused.getStateMachine().removeState(Container.STATE_RENDER_ERROR);
-                } catch (Exception ex) {
-                    Log.logError("[ConsoleRenderManager]", "Failed to render state", ex);
-                    tracker.recordFailure(System.nanoTime());
-                    focused.getStateMachine().addState(Container.STATE_RENDER_ERROR);
+    private void renderContainer(ConsoleContainer container, long frameTime) {
+        ContainerId id = container.getId();
+        if (renderInFlight.containsKey(id)) return;
 
-                    escalateContainerError(tracker, focused);
-                }
+        RenderFailureTracker tracker = failureTrackers.computeIfAbsent(id, k -> new RenderFailureTracker());
+        if (tracker.shouldSkipRender(frameTime)) {
+            container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
+            return;
+        }
+
+        long currentGen = generation.get();
+      
+        CompletableFuture<Void> inFlight = container.getRenderableState()
+            .thenAccept(state -> {
+                if (!isGenerationCurrent(currentGen)) return;
+                renderer.renderState(state, currentGen);
+                container.commitRender();
+                if (dirtyGen == currentGen) dirtyGen = -1;
+                tracker.recordSuccess(System.nanoTime());
+                container.getStateMachine().removeState(Container.STATE_RENDER_ERROR);
             })
             .whenComplete((v, ex) -> {
-                if(ex != null){
-                    Log.logError("[ConsoleRenderManager]", "Failed to pull render state", ex);
-         
+                renderInFlight.remove(id);
+                if (ex != null) {
                     tracker.recordFailure(System.nanoTime());
-                    focused.getStateMachine().addState(Container.STATE_RENDER_ERROR);
-
-                    // Clear dirty to avoid spinning on failed state
-                    long currentGen2 = generation.get();
-                    if (dirtyGen == currentGen2) {
-                        dirtyGen = -1;
-                    }
-
-                    escalateContainerError(tracker, focused);
+                    container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
+                    escalateContainerError(tracker, container);
                 }
-                // Clear in-flight flag
-                renderInFlight = null;
             });
+
+        renderInFlight.put(id, inFlight);
     }
 
     private void escalateContainerError(RenderFailureTracker tracker, ConsoleContainer focused){
@@ -536,37 +402,9 @@ public class ConsoleRenderManager {
         }
     }
     
-    /**
-     * Set focused container (called when renderer wants to change focus)
-     */
-    public void setFocused(ConsoleContainer container) {
-        ConsoleContainer current = focusedContainer.get();
-        if (current == container) {
-            return;
-        }
-        
-        focusedContainer.set(container);
-        
-        if (container != null) {
-            markDirtyForNewGeneration();
-        }
-    }
+  
     
-    /**
-     * Handle resize - increments generation
-     */
-    public void onResize(int width, int height) {
-        
-        for (ConsoleContainer container : renderer.getAllContainers()) {
-            TerminalRectangle containerRegion = regionPool.obtain();
-            container.setRegion(containerRegion);
-            regionPool.recycle(containerRegion);
-        }
-        markDirtyForNewGeneration();
-        Log.logMsg("[ConsoleRenderManager] Resize applied: width:" + width + " height:" + height + 
-            " (gen=" + generation.get() + ")");
-    }
-    
+  
     /**
      * Mark as dirty for current generation (content change)
      */
@@ -576,11 +414,11 @@ public class ConsoleRenderManager {
     
     /**
      * Mark dirty with new generation (layout/focus change)
-     */
+    
     private void markDirtyForNewGeneration() {
         long newGen = generation.incrementAndGet();
         dirtyGen = newGen;
-    }
+    } */
     
     /**
      * Check if generation is still current
@@ -601,6 +439,11 @@ public class ConsoleRenderManager {
      */
     public ConsoleContainer getFocusedContainer() {
         return focusedContainer.get();
+    }
+
+    public void clearFocusedContainer(ConsoleContainer container) {
+        if (container == null) return;
+        focusedContainer.compareAndSet(container, null);
     }
     
     /**

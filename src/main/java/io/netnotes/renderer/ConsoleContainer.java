@@ -44,6 +44,7 @@ public class ConsoleContainer extends Container<
     ConsoleContainer
 > {
     private final TerminalRectanglePool regionPool;
+    private TerminalRectangle contentBounds;
     // Cell buffers (indexed as [y][x] for natural row-major ordering)
     private Cell[][] cells;
     private Cell[][] prevCells;
@@ -52,7 +53,8 @@ public class ConsoleContainer extends Container<
     private int cursorX = 0;
     private int cursorY = 0;
     private boolean cursorVisible = true;
-
+   
+    private volatile boolean isBoundsManaged = false; //is ContainerLayoutManager managing bounds
     /**
      * Constructor
      */
@@ -65,20 +67,15 @@ public class ConsoleContainer extends Container<
         TerminalRectanglePool pool
     ) {
         super(id, title, ownerPath, config, rendererId);
-        int height = getHeight();
-        int width = getWidth();
+        this.regionPool = pool;
+        this.contentBounds = pool.obtain();
+        this.contentBounds.set(config.initialRegion());
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
         // Allocate buffers
         this.cells = new Cell[height][width];
         this.prevCells = new Cell[height][width];
-        this.regionPool = pool;
-        // Initialize cells
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                cells[y][x] = new Cell();
-                prevCells[y][x] = new Cell();
-                prevCells[y][x].character = (char) 0xFFFF; // Force initial render
-            }
-        }
+        rebuildBufferSize();
     }
 
     
@@ -167,70 +164,101 @@ public class ConsoleContainer extends Container<
         });
     }
 
-    @Override
-    public CompletableFuture<Void> setRegion(TerminalRectangle bounds) {
-        int newHeight = bounds.getHeight();
-        int newWidth = bounds.getWidth();
-        int newX = bounds.getX(); 
-        int newY = bounds.getY();
-        return containerExecutor.execute(() -> {
-            int height = getHeight();
-            int width = getWidth();
-            if (height == newHeight && width == newWidth) {
-                return;
-            }
-            
-            Log.logMsg("[ConsoleContainer:" + id + "] Resizing: " + 
-                width + "x" + height + " -> " + newWidth + "x" + newHeight);
-            
-            // Create new buffers
-            Cell[][] newCells = new Cell[newHeight][newWidth];
-            Cell[][] newPrevCells = new Cell[newHeight][newWidth];
-            
-            // Initialize all cells
-            for (int y = 0; y < newHeight; y++) {
-                for (int x = 0; x < newWidth; x++) {
-                    newCells[y][x] = new Cell();
-                    newPrevCells[y][x] = new Cell();
-                }
-            }
-            
-            // Copy existing content
-            if (this.cells != null) {
-                int copyHeight = Math.min(height, newHeight);
-                int copyWidth = Math.min(width, newWidth);
-                
-                for (int y = 0; y < copyHeight; y++) {
-                    for (int x = 0; x < copyWidth; x++) {
-                        if (cells[y] != null && cells[y][x] != null) {
-                            newCells[y][x].copyFrom(cells[y][x]);
-                        }
-                    }
-                }
-            }
-            
-            // Update dimensions
-            this.bounds.setX(newX);
-            this.bounds.setY(newY);
-            this.bounds.setHeight(newHeight);
-            this.bounds.setWidth(newWidth);
-            this.cells = newCells;
-            this.prevCells = newPrevCells;
-            
-            // Clamp cursor
-            this.cursorX = Math.min(this.cursorX, newWidth - 1);
-            this.cursorY = Math.min(this.cursorY, newHeight - 1);
-            
-            // Request render
-            requestRenderInternal();
-            
-            // Emit resize event
+    public void isManaged(boolean isManaged){
+        this.isBoundsManaged = isManaged;
+    }
+
+    public boolean isBoundsManaged(){
+        return isBoundsManaged;
+    }
+
+    public  CompletableFuture<Void> setAllocatedBounds(int x, int y, int width, int height, boolean isManaged){
+        return containerExecutor.execute(()->{
+            isBoundsManaged = isManaged;
             TerminalRectangle region = regionPool.obtain();
-            region.set(newX, newY, newWidth, newHeight);
-            NoteBytesMap resizeEvent = ContainerCommands.containerResized(id.toNoteBytes(), region.toNoteBytesArray());
-            emitEvent(resizeEvent);
-            regionPool.recycle(region);
+            region.set(x, y, width, height);
+            setAllocatedBoundsInternal(region);
         });
+    }
+
+    @Override
+    public CompletableFuture<Void> setAllocatedBounds(TerminalRectangle region){
+        return containerExecutor.execute(()->{
+            setAllocatedBoundsInternal(region);
+        });
+    }
+
+    private void setAllocatedBoundsInternal(TerminalRectangle region){
+        allocatedBounds.copyFrom(region);
+        
+        if(isBoundsManaged){
+            handleContentBoundsInternal(region);
+        }
+        region.setPosition(0, 0);
+        NoteBytesMap resizeEvent = ContainerCommands.containerResized(
+            id.toNoteBytes(), 
+            region.toNoteBytes(),
+            isBoundsManaged
+        );
+        emitEvent(resizeEvent);
+        regionPool.recycle(region);
+    }
+
+    /**
+     * Rebuild clean buffer for complete render
+     * @param width
+     * @param height
+     */
+    private void rebuildBufferSize(){
+        int width = contentBounds.getWidth();
+        int height = contentBounds.getHeight();
+
+        Cell[][] newCells = new Cell[height][width];
+        Cell[][] newPrevCells = new Cell[height][width];
+        
+        // Initialize all cells
+        for (int y = 0; y < height; y++) {
+            for (int x = 0; x < width; x++) {
+                newCells[y][x] = new Cell();
+                newPrevCells[y][x] = new Cell();
+                newPrevCells[y][x].character = (char) 0xFFFF; // Force render
+            }
+        }
+        
+        this.cells = newCells;
+        this.prevCells = newPrevCells;
+    }
+
+    //TODO: clamp cursor
+    private void clampCursor(boolean current){
+        if(current){
+            this.cursorX = Math.max(contentBounds.getX(), Math.min(this.cursorX, contentBounds.getWidth()-1));
+            this.cursorY = Math.max(contentBounds.getY(), Math.min(this.cursorY, contentBounds.getHeight()-1));
+        }
+    }
+
+    private void handleContentBounds(NoteBytes contentBoundsBytes){
+        if(contentBoundsBytes == null){
+            return;
+        }
+        TerminalRectangle newContentBounds = TerminalRectangle.fromNoteBytes(
+            contentBoundsBytes, 
+            regionPool
+        );
+        if(isBoundsManaged){
+            newContentBounds.copyFrom(allocatedBounds);
+        }
+        handleContentBoundsInternal(newContentBounds);
+        regionPool.recycle(newContentBounds);
+    }
+
+    private void handleContentBoundsInternal(TerminalRectangle newContentBounds){
+        if (newContentBounds.equals(contentBounds)) {
+            return;
+        }
+        
+        contentBounds.copyFrom(newContentBounds);
+        rebuildBufferSize();
     }
     
     /**
@@ -267,8 +295,12 @@ public class ConsoleContainer extends Container<
                 new IllegalArgumentException("batch_commands required")
             );
         }
+        NoteBytes contentBounds = message.get(ContainerCommands.CONTENT_BOUNDS);
+       
+        handleContentBounds(contentBounds);
         
-        NoteBytes[] cmdsArray = cmdsBytes.getAsNoteBytesArray().getAsArray();
+        
+        NoteBytes[] cmdsArray = cmdsBytes.getAsNoteBytesArrayReadOnly().getAsArray();
         
         return containerExecutor.execute(() -> {
             // Execute all commands serially
@@ -579,8 +611,8 @@ public class ConsoleContainer extends Container<
         prevCells[0][0].character + "' -> cells[0][0]: '" + 
         cells[0][0].character + "' after clear");
 
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
         
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -596,8 +628,8 @@ public class ConsoleContainer extends Container<
     }
     
     private void printInternal(String text, TextStyle style, boolean newline) {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
         for (char ch : text.toCharArray()) {
             if (cursorY >= height) break;
@@ -619,8 +651,8 @@ public class ConsoleContainer extends Container<
     }
     
     private void printAtInternal(int x, int y, String text, TextStyle style) {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
         if (y < 0 || y >= height || x < 0) return;
         
@@ -635,8 +667,8 @@ public class ConsoleContainer extends Container<
     }
     
     private void clearLineInternal(int y) {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
         if (y < 0 || y >= height) return;
         
@@ -646,11 +678,11 @@ public class ConsoleContainer extends Container<
     }
     
     private void clearRegionInternal(TerminalRectangle region) {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
-        int startX = Math.max(bounds.getX(), region.getX());
-        int startY = Math.max(bounds.getY(), region.getY());
+        int startX = Math.max(contentBounds.getX(), region.getX());
+        int startY = Math.max(contentBounds.getY(), region.getY());
         int endX = Math.min(width - 1, region.getX() + region.getWidth() - 1);
         int endY = Math.min(height - 1, region.getY() + region.getHeight() - 1);
         
@@ -670,8 +702,8 @@ public class ConsoleContainer extends Container<
         Position titlePos, 
         BoxStyle style
     ) {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
         if (x < 0 || y < 0 || x + boxWidth > width || y + boxHeight > height) return;
         if (boxWidth < 2 || boxHeight < 2) return;
@@ -803,11 +835,11 @@ public class ConsoleContainer extends Container<
     }
     
     private void fillRegionInternal(TerminalRectangle region, int codePoint, TextStyle style) {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
-        int startX = Math.max(bounds.getX(), region.getX());
-        int startY = Math.max(bounds.getY(), region.getY());
+        int startX = Math.max(contentBounds.getX(), region.getX());
+        int startY = Math.max(contentBounds.getY(), region.getY());
         int endX = Math.min(width - 1, region.getX() + region.getWidth() - 1);
         int endY = Math.min(height - 1, region.getY() + region.getHeight() - 1);
         
@@ -821,8 +853,8 @@ public class ConsoleContainer extends Container<
     }
     
     private void swapBuffersInternal() {
-        int height = bounds.getHeight();
-        int width = bounds.getWidth();
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
         for (int y = 0; y < height; y++) {
             for (int x = 0; x < width; x++) {
@@ -975,8 +1007,8 @@ private void drawBorderedTextInternal(TerminalRectangle region, String text, Pos
 
 private void drawPanelInternal(TerminalRectangle region, String title, Position titlePos,
                               BoxStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
-    int height = bounds.getHeight();
-    int width = bounds.getWidth();       
+    int height = contentBounds.getHeight();
+    int width = contentBounds.getWidth();       
 
     int fillX = region.getX() + 1;
     int fillY = region.getY() + 1;
@@ -1000,8 +1032,8 @@ private void drawPanelInternal(TerminalRectangle region, String title, Position 
 private void drawButtonInternal(TerminalRectangle region, String label, Position labelPos,
                                boolean selected, TextStyle style) {
     TextStyle buttonStyle = selected ? style.inverse() : style;
-    int height = bounds.getHeight();
-    int width = bounds.getWidth();
+    int height = contentBounds.getHeight();
+    int width = contentBounds.getWidth();
 
     for (int y = region.getY(); y < region.getY() + region.getHeight(); y++) {
         for (int x = region.getX(); x < region.getX() + region.getWidth(); x++) {
@@ -1022,8 +1054,8 @@ private void drawButtonInternal(TerminalRectangle region, TerminalRectangle rend
 ) {
     TextStyle buttonStyle = selected ? style.inverse() : style;
 
-    int height = bounds.getHeight();
-    int width = bounds.getWidth();
+    int height = contentBounds.getHeight();
+    int width = contentBounds.getWidth();
 
     int visLeft = renderRegion.getX();
     int visTop = renderRegion.getY();
@@ -1059,8 +1091,8 @@ private void drawPanelInternal(TerminalRectangle region, TerminalRectangle rende
                               String title, Position titlePos, BoxStyle boxStyle, 
                               TextStyle borderStyle, TextStyle fillStyle
 ) {
-    int height = bounds.getHeight();
-    int width = bounds.getWidth();
+    int height = contentBounds.getHeight();
+    int width = contentBounds.getWidth();
 
     int fillX = region.getX() + 1;
     int fillY = region.getY() + 1;
@@ -1112,8 +1144,8 @@ private int[] calculateTextPosition(TerminalRectangle region, String text, Posit
 private void drawProgressBarInternal(TerminalRectangle region, double progress, 
                                     TextStyle style, TextStyle emptyStyle
 ) {
-    int height = bounds.getHeight();
-    int width = bounds.getWidth();
+    int height = contentBounds.getHeight();
+    int width = contentBounds.getWidth();
 
     progress = Math.max(0.0, Math.min(1.0, progress));
     
@@ -1150,8 +1182,8 @@ private void drawProgressBarInternal(TerminalRectangle region, double progress,
 private void drawProgressBarInternal(TerminalRectangle region, TerminalRectangle renderRegion,
                                     double progress, TextStyle style, TextStyle emptyStyle
 ) {
-    int height = bounds.getHeight();
-    int width = bounds.getWidth();
+    int height = contentBounds.getHeight();
+    int width = contentBounds.getWidth();
 
     progress = Math.max(0.0, Math.min(1.0, progress));
     
@@ -1189,7 +1221,7 @@ private void drawTextBlockInternal(TerminalRectangle region, String text,
                                   TextAlignment align, TextStyle style
 ) {
     if (text == null || text.isEmpty()) return;
-    int height = bounds.getHeight();
+    int height = contentBounds.getHeight();
 
     // Simple word wrapping implementation
     String[] lines = wrapText(text, region.getWidth());
@@ -1316,10 +1348,10 @@ private String[] wrapText(String text, int maxWidth) {
     
     // ===== ACCESSORS =====
     
-    int getX() { return bounds.getX(); }
-    int getY() { return bounds.getY(); }
-    int getHeight() { return bounds.getWidth(); }
-    int getWidth() { return bounds.getHeight(); }
+    int getX() { return contentBounds.getX(); }
+    int getY() { return contentBounds.getY(); }
+    int getHeight() { return contentBounds.getHeight(); }
+    int getWidth() { return contentBounds.getWidth(); }
     int getCursorX() { return cursorX; }
     int getCursorY() { return cursorY; }
     boolean isCursorVisible() { return cursorVisible; }
@@ -1370,6 +1402,7 @@ private String[] wrapText(String text, int maxWidth) {
 
     @Override
     protected void onShowGranted() {
+        
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.EVENT, io.netnotes.engine.io.input.events.EventBytes.EVENT_CONTAINER_SHOWN);
         emitEvent(map);

@@ -4,22 +4,19 @@ package io.netnotes.renderer;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.RendererStates;
 import io.netnotes.engine.ui.UIRenderer;
-import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
+import io.netnotes.engine.io.input.Keyboard.KeyCode;
 import io.netnotes.engine.io.process.StreamChannel;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.messaging.NoteMessaging.ProtocolMesssages;
 import io.netnotes.noteBytes.NoteBoolean;
 import io.netnotes.noteBytes.NoteBytes;
-import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.noteBytes.collections.NoteBytesPair;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
-import io.netnotes.engine.state.BitFlagStateMachine;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
 import io.netnotes.terminal.TerminalContainerConfig;
@@ -48,14 +45,17 @@ import java.util.concurrent.TimeUnit;
  * - RenderManager handles all container lifecycle and commits
  * - No backward dependency from Renderer to RenderManager
  */
-public class ConsoleUIRenderer extends UIRenderer<
+public final class ConsoleUIRenderer extends UIRenderer<
     Point2D, 
     TerminalRectangle,
+    ConsoleContainerLayoutManager,
     TerminalContainerConfig,
     ConsoleContainer
 > {
 
     public static final NoteBytesReadOnly DEFAULT_RENDERER_ID = new NoteBytesReadOnly("JLINE3");
+    private static final int MIN_TERM_WIDTH = 80;
+    private static final int MIN_TERM_HEIGHT = 25;
 
     public static final int RENDERER_INITIALIZING    = 0;
     public static final int RENDERER_READY           = 1;
@@ -66,8 +66,6 @@ public class ConsoleUIRenderer extends UIRenderer<
     public static final int RENDERER_SHUTTING_DOWN   = 6;
 
     private static final ThreadLocal<StringBuilder> RENDER_BUFFER = ThreadLocal.withInitial(() -> new StringBuilder(8192));
-
-    private final BitFlagStateMachine rendererState;
 
     private static final long RESIZE_DEBOUNCE_MS = 80;
 
@@ -89,6 +87,7 @@ public class ConsoleUIRenderer extends UIRenderer<
 
     private final ConsoleRenderManager renderManager;
     
+   
     private CompletableFuture<Void> resizePollFuture;
     private volatile boolean signalBasedResizeWorking = false;
     private static final long SIGNAL_TEST_DURATION_MS = 2000;
@@ -99,6 +98,7 @@ public class ConsoleUIRenderer extends UIRenderer<
     // ===== SIGNAL HANDLER =====
     private Terminal.SignalHandler resizeHandler;
     private TerminalRectanglePool regionPool = TerminalRectanglePool.getInstance();
+    private final HotkeyRegistry hotkeyRegistry = new HotkeyRegistry();
 
     public ConsoleUIRenderer() throws IOException{
         this(DEFAULT_RENDERER_ID);
@@ -107,29 +107,64 @@ public class ConsoleUIRenderer extends UIRenderer<
      * Constructor
      */
     public ConsoleUIRenderer(NoteBytesReadOnly rendererId) throws IOException {
-        super("console-renderer", rendererId);
+        super("console-renderer", rendererId, new ConsoleContainerLayoutManager());
         this.terminal = TerminalBuilder.builder()
             .system(true)
             .encoding("UTF-8")
             .build();
         
-        this.termWidth = terminal.getWidth();
-        this.termHeight = terminal.getHeight();
+        this.termWidth = Math.max(MIN_TERM_WIDTH, terminal.getWidth());
+        this.termHeight = Math.max(MIN_TERM_HEIGHT, terminal.getHeight());
+        containerLayoutManager.init(this, termWidth, termHeight);
         this.originalAttributes = terminal.getAttributes();
 
-        this.renderManager = new ConsoleRenderManager(this, regionPool);
+        this.renderManager = new ConsoleRenderManager(this);
         
-        inputCapture = new ConsoleInputCapture(terminal, this::handleInputEvent);
-        inputCapture.setOnCtrlC(this::handleCtrlC);
-
-        this.rendererState = new BitFlagStateMachine("ConsoleUIRenderer");
-        rendererState.addState(RENDERER_INITIALIZING);
-
+        inputCapture = new ConsoleInputCapture(terminal, this::handleInputEvent, hotkeyRegistry);
+        
+        state.addState(RENDERER_INITIALIZING);
+        registerSystemHotkeys();
         setupRendererStateTransitions();
         
         Log.logMsg("[ConsoleUIRenderer] Terminal created: " + termWidth + "x" + termHeight);
     }
 
+    private void registerSystemHotkeys(){
+        hotkeyRegistry.register(KeyCode.C, ConsoleEventFactory.MOD_CONTROL, this::handleCtrlC);
+         // Ctrl+1/2/3
+        
+        hotkeyRegistry.register(KeyCode.BACKSLASH, ConsoleEventFactory.MOD_CONTROL, 
+            () -> containerLayoutManager.focusSlot(0));
+        hotkeyRegistry.register(KeyCode.RIGHT_BRACKET, ConsoleEventFactory.MOD_CONTROL, 
+            () -> containerLayoutManager.cycleForward());
+        hotkeyRegistry.register(KeyCode.LEFT_BRACKET, ConsoleEventFactory.MOD_CONTROL, 
+            () -> containerLayoutManager.cycleBackward());
+
+        // Ctrl+Alt+Left/Right  move container
+        hotkeyRegistry.register(KeyCode.LEFT,  ConsoleEventFactory.MOD_CONTROL | ConsoleEventFactory.MOD_ALT,
+            () -> containerLayoutManager.moveContainer(-1));
+        hotkeyRegistry.register(KeyCode.RIGHT, ConsoleEventFactory.MOD_CONTROL | ConsoleEventFactory.MOD_ALT,
+            () -> containerLayoutManager.moveContainer(1));
+
+        // Ctrl+Alt+=/−  adjust max visible
+        hotkeyRegistry.register(KeyCode.EQUALS, ConsoleEventFactory.MOD_CONTROL | ConsoleEventFactory.MOD_ALT,
+            () -> containerLayoutManager.adjustMaxVisible(1));
+        hotkeyRegistry.register(KeyCode.MINUS,  ConsoleEventFactory.MOD_CONTROL | ConsoleEventFactory.MOD_ALT,
+            () -> containerLayoutManager.adjustMaxVisible(-1));
+    }
+
+    ConsoleRenderManager getRenderManager() {
+        return renderManager;
+    }
+
+    public ConsoleContainerLayoutManager getLayoutManager(){
+        return containerLayoutManager;
+    }
+
+    public void onFocusGranted(ContainerId containerId){
+        ConsoleContainer consoleContainer = containers.get(containerId);
+        onFocusGranted(consoleContainer);
+    }
     /**
      * Setup renderer state machine transitions
      */
@@ -183,7 +218,7 @@ public class ConsoleUIRenderer extends UIRenderer<
             );
         }
         
-        return container.handleFocusContainer(msg)
+        return containerLayoutManager.requestFocus(container.getId())
             .thenAccept(v -> replySuccess(packet))
             .exceptionally(ex -> {
                 replyError(packet, ex.getMessage());
@@ -232,7 +267,7 @@ public class ConsoleUIRenderer extends UIRenderer<
             renderManager.start();
             initializeTerminalHandlers();
             
-            rendererState.addState(RENDERER_READY);
+            state.addState(RENDERER_READY);
 
             Log.logMsg("[ConsoleUIRenderer] Terminal initialized");
 
@@ -329,8 +364,8 @@ public class ConsoleUIRenderer extends UIRenderer<
      */
     private void checkForResize() {
         try {
-            int newWidth = terminal.getWidth();
-            int newHeight = terminal.getHeight();
+            int newWidth = Math.max(MIN_TERM_WIDTH, terminal.getWidth());
+            int newHeight = Math.max(MIN_TERM_HEIGHT, terminal.getHeight());
             
             if (newWidth != termWidth || newHeight != termHeight) {
                 Log.logMsg("[ConsoleUIRenderer] Size change detected via polling: " + 
@@ -359,7 +394,7 @@ public class ConsoleUIRenderer extends UIRenderer<
     protected CompletableFuture<Void> doShutdown() {
         Log.logMsg("[ConsoleUIRenderer] Shutdown starting");
         
-        rendererState.addState(RENDERER_SHUTTING_DOWN);
+        state.addState(RENDERER_SHUTTING_DOWN);
         
         renderManager.stop();
         rendererExecutor.shutdown();
@@ -394,14 +429,7 @@ public class ConsoleUIRenderer extends UIRenderer<
     
     // ===== CONTAINER MANAGEMENT =====
 
-    //TODO: allow split screen for containers
-     @Override
-    protected void allocateContainerRegion(TerminalContainerConfig config) {
-        //config.initialRegion(); <- Requested Region
-        TerminalRectangle containerRegion = regionPool.obtain();
-        containerRegion.set(0, 0, termWidth, termHeight);
-        config.withInitialRegion(containerRegion);
-    }
+
     
     @Override
     protected CompletableFuture<ConsoleContainer> doCreateContainer(
@@ -412,7 +440,7 @@ public class ConsoleUIRenderer extends UIRenderer<
         String rendererId
     ) {
     
-        ConsoleContainer container = new ConsoleContainer(id, title, ownerPath, config,rendererId, regionPool);
+        ConsoleContainer container = new ConsoleContainer(id, title, ownerPath, config, rendererId, regionPool);
         Log.logMsg("[ConsoleUIRenderer] consoleContainer created: " + id);
 
         container.setOnRequestMade(c -> {
@@ -430,26 +458,42 @@ public class ConsoleUIRenderer extends UIRenderer<
     protected CompletableFuture<NoteBytesReadOnly> onContainerCreated(
         ConsoleContainer container
     ) {
-        TerminalRectangle containerRegion = container.getConfig().initialRegion();
-        NoteBytes containerRegionBytes = containerRegion.toNoteBytes();
+        return containerLayoutManager.onContainerAdded(container)
+            .thenCompose(v -> handleContainerAllocationResponse(container, true))
+            .exceptionallyCompose(ex -> {
+                return handleContainerAllocationResponse(container, false);
+            });
+    }
 
-        Log.logNoteBytes("[ConsoleUIRenderer] containerRegion: ",containerRegionBytes); 
-        boolean isVisible = container.getStateMachine().hasState(Container.STATE_VISIBLE);
+    private CompletableFuture<NoteBytesReadOnly> handleContainerAllocationResponse(
+        ConsoleContainer container,
+        boolean isManaged
+    ){
+        return container.getAllocationBounds()
+            .thenCompose(bounds->createCreationResponse(
+                bounds.toNoteBytes(), 
+                isManaged, 
+                container.isVisible()
+            ));
+    }
+
+
+    private CompletableFuture<NoteBytesReadOnly> createCreationResponse(
+        NoteBytes allocatedRegionBytes, boolean isManaged,  boolean isVisible)
+    {
+         Log.logNoteBytes("[ConsoleUIRenderer] containerRegion: ",allocatedRegionBytes); 
+     
         
-        NoteBytesReadOnly response;
+        NoteBytesMap responseMap = new NoteBytesMap();
         
-        if(isVisible){
-            response = new NoteBytesObject(new NoteBytesPair[]{
-                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
-                new NoteBytesPair(ContainerCommands.REGION, containerRegionBytes)
-            }).readOnly();
-        }else{
-            response = new NoteBytesObject(new NoteBytesPair[]{
-                new NoteBytesPair(Keys.STATUS, ProtocolMesssages.SUCCESS),
-                new NoteBytesPair(ContainerCommands.REGION, containerRegionBytes),
-                new NoteBytesPair(ContainerCommands.IS_VISIBLE, NoteBoolean.FALSE)
-            }).readOnly();
+        responseMap.put(Keys.STATUS, ProtocolMesssages.SUCCESS);
+        responseMap.put(ContainerCommands.REGION, allocatedRegionBytes);
+        if(!isVisible){
+            responseMap.put(ContainerCommands.IS_VISIBLE, NoteBoolean.FALSE);
         }
+        responseMap.put(ContainerCommands.IS_MANAGED, isManaged ? NoteBoolean.TRUE : NoteBoolean.FALSE);
+
+        NoteBytesReadOnly response = responseMap.toNoteBytesReadOnly();
 
         Log.logNoteBytes("[ConsoleRenderer.onContainerCreated]", response);
         
@@ -752,13 +796,13 @@ public class ConsoleUIRenderer extends UIRenderer<
 
     private void doHandleTerminalResize() {
         try {
-            rendererState.addState(RENDERER_HANDLING_RESIZE);
+            state.addState(RENDERER_HANDLING_RESIZE);
             
             int newWidth = terminal.getWidth();
             int newHeight = terminal.getHeight();
             
             if (newWidth == termWidth && newHeight == termHeight) {
-                rendererState.removeState(RENDERER_HANDLING_RESIZE);
+                state.removeState(RENDERER_HANDLING_RESIZE);
                 return;
             }
             
@@ -771,15 +815,20 @@ public class ConsoleUIRenderer extends UIRenderer<
             clearScreen();
             
             // Delegate to render manager
-            renderManager.onResize(newWidth, newHeight);
-            
-            rendererState.removeState(RENDERER_HANDLING_RESIZE);
+            //renderManager.onResize(newWidth, newHeight);
+            TerminalRectangle viewPort = regionPool.obtain();
+            viewPort.set(0, 0, newWidth, newHeight);
+            containerLayoutManager.onViewportResized(viewPort);
+            regionPool.recycle(viewPort);
+            state.removeState(RENDERER_HANDLING_RESIZE);
             
         } catch (Exception e) {
             Log.logError("[ConsoleUIRenderer] Resize error: " + e.getMessage());
-            rendererState.removeState(RENDERER_HANDLING_RESIZE);
+            state.removeState(RENDERER_HANDLING_RESIZE);
         }
     }
+
+
     
     // ===== CAPABILITIES =====
     
@@ -818,6 +867,8 @@ public class ConsoleUIRenderer extends UIRenderer<
                 state.removeState(RendererStates.HAS_CONTAINERS);
                 state.removeState(RendererStates.HAS_VISIBLE_CONTAINERS);
             }
+
+            containerLayoutManager.onContainerRemoved(container);
             
             if (container.getOwnerPath() != null) {
                 List<ContainerId> ownerList = ownerContainers.get(container.getOwnerPath());

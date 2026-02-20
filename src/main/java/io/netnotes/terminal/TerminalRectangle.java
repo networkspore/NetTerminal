@@ -4,7 +4,6 @@ import java.util.Objects;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBytes;
-import io.netnotes.noteBytes.NoteBytesArrayReadOnly;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
@@ -820,6 +819,9 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
     }
 
     public static TerminalRectangle fromNoteBytes(NoteBytesMap map){
+        return fromNoteBytes(map, TerminalRectanglePool.getInstance());
+    }
+    public static TerminalRectangle fromNoteBytes(NoteBytesMap map, TerminalRectanglePool regionPool){
 
         NoteBytes xBytes = map.get(Keys.X);
         NoteBytes yBytes = map.get(Keys.Y);
@@ -835,16 +837,20 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         int parentAbsX = parentXBytes != null ? parentXBytes.getAsInt() : 0;
         int parentAbsY = parentYBytes != null ? parentYBytes.getAsInt() : 0;
 
-        TerminalRectangle rect = TerminalRectanglePool.getInstance().obtain();
+        TerminalRectangle rect = regionPool.obtain();
         rect.set(x, y, width, height, parentAbsX, parentAbsY);
         return rect;
     }
 
-    public static TerminalRectangle fromNoteBytes(NoteBytes noteBytes){
+    public static TerminalRectangle fromNoteBytes(NoteBytes noteBytes, TerminalRectanglePool regionPool){
         if(noteBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
             throw new IllegalArgumentException("TerminalRectangle.fromNoteBytes is not an object");
         }
-        return fromNoteBytes(noteBytes.getAsNoteBytesMap());        
+        return fromNoteBytes(noteBytes.getAsNoteBytesMap(), regionPool);   
+    }
+
+    public static TerminalRectangle fromNoteBytes(NoteBytes noteBytes){
+        return fromNoteBytes(noteBytes, TerminalRectanglePool.getInstance());
     }
 
     public NoteBytesObject toNoteBytes(){
@@ -965,14 +971,5 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         this.parentAbsoluteY = region.parentAbsoluteY;
     }
 
-    @Override
-    public NoteBytes toNoteBytesArray() {
-        NoteBytes[] noteBytes = new NoteBytes[]{
-                new NoteBytes(x),
-                new NoteBytes(y),
-                new NoteBytes(width),
-                new NoteBytes(height)
-            };
-        return new NoteBytesArrayReadOnly(noteBytes);
-    }
+ 
 }

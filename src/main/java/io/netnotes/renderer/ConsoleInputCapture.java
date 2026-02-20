@@ -49,9 +49,10 @@ public class ConsoleInputCapture {
 
     private InputStream input = null;
     private Consumer<NoteBytesMap> emitter;
-    private Runnable onCtrlC = null;
+    private final HotkeyRegistry hotkeyRegistry;
 
-    public ConsoleInputCapture(Terminal terminal, Consumer<NoteBytesMap> emitter) {
+
+    public ConsoleInputCapture(Terminal terminal, Consumer<NoteBytesMap> emitter, HotkeyRegistry registry) {
         this.emitter = emitter;
         this.terminal = terminal;
         this.executor = Executors.newSingleThreadExecutor(r -> {
@@ -59,15 +60,13 @@ public class ConsoleInputCapture {
             t.setDaemon(true);
             return t;
         });
-        
+        this.hotkeyRegistry = registry;
     }
     public void setEmitter(Consumer<NoteBytesMap> emitter){
         this.emitter = emitter;
     }
 
-    public void setOnCtrlC(Runnable onCtrlC){
-        this.onCtrlC = onCtrlC;
-    }
+
     // ===== LIFECYCLE =====
     
   
@@ -195,13 +194,12 @@ public class ConsoleInputCapture {
         // Single-byte handling (ASCII range)
         // For control characters (1-26, except Tab/LF/CR), return raw char
         if (KeyCode.isControlChar(firstByte) && firstByte != 9 && firstByte != 10 && firstByte != 13) {
-            // Check for Ctrl+C before emitting
-            if (firstByte == 3) { // Ctrl+C
-                handleCtrlC();
-                return;
-            }
             int hidCode = KeyCode.controlCharToHid(firstByte);
-            addKeyPress(hidCode, ConsoleEventFactory.MOD_CONTROL);
+            int mods = ConsoleEventFactory.MOD_CONTROL;
+            if (!hotkeyRegistry.dispatch(hidCode, mods)) {
+                // not consumed by hotkey — emit as normal event
+                addKeyPress(hidCode, mods);
+            }
             return;
         }
         
@@ -209,11 +207,7 @@ public class ConsoleInputCapture {
         processInput(firstByte);
     }
 
-    private void handleCtrlC() {
-        if(onCtrlC != null){
-            onCtrlC.run();
-        }
-    }
+
     
     /**
      * Decode UTF-8 multi-byte sequence
@@ -306,13 +300,14 @@ public class ConsoleInputCapture {
             int[] hidMapping = ConsoleEventFactory.asciiToHid(next);
             int hidCode = hidMapping[0];
             int baseMods = hidMapping[1];
-            
-            if (hidCode != KeyCode.NONE) {
-                addKeyPress(hidCode, baseMods | MOD_ALT);
+       
+            if (!hotkeyRegistry.dispatch(hidCode, baseMods | MOD_ALT)) {
+                if(hidCode != KeyCode.NONE){
+                    addKeyPress(hidCode, baseMods | MOD_ALT);
+                }
+                emitter.accept(ConsoleEventFactory.createKeyChar(next, baseMods | MOD_ALT));
             }
-            
-            // Also add char event with Alt modifier
-            emitter.accept(ConsoleEventFactory.createKeyChar(next, baseMods | MOD_ALT));
+   
         } else {
             Log.logMsg("[ConsoleInputReader] Unknown ESC sequence: ESC " + next);
         }
