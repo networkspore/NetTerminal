@@ -1,4 +1,4 @@
-package io.netnotes.renderer;
+package io.netnotes.consoleRenderer;
 
 
 import io.netnotes.engine.state.BitFlagStateMachine;
@@ -12,7 +12,6 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.locks.LockSupport;
 
 /**
@@ -26,12 +25,11 @@ import java.util.concurrent.locks.LockSupport;
  */
 public class ConsoleRenderManager {
     
-    private final ConsoleUIRenderer renderer;
+    private final ConsoleRenderer renderer;
     private final AtomicLong generation = new AtomicLong(0);
     
-    // Focused container - determines what gets rendered
-    private final AtomicReference<ConsoleContainer> focusedContainer = 
-        new AtomicReference<>(null);
+    // NOTE: focused container tracking lives in Renderer base (focusedContainerId / getFocusedContainer()).
+    // RenderManager delegates to renderer for all focus authority.
     
     // Request queue - containers enqueue themselves
     private final ConcurrentLinkedQueue<ConsoleContainer> requestQueue = 
@@ -87,7 +85,7 @@ public class ConsoleRenderManager {
     }
 
     
-    public ConsoleRenderManager(ConsoleUIRenderer renderer) {
+    public ConsoleRenderManager(ConsoleRenderer renderer) {
         this.renderer = renderer;
     }
     
@@ -235,8 +233,9 @@ public class ConsoleRenderManager {
      * Handle update request (content change)
      */
     private void handleUpdateRequest(ConsoleContainer container, StateSnapshot snap) {
+        // Container.handleUpdateContainer() → grantUpdate() owns STATE_UPDATE_REQUESTED and the updateFuture.
+        // RenderManager's only job here is to mark the screen dirty if this container is visible.
         if (container.shouldRender()) markDirty();
-        container.getStateMachine().removeState(Container.STATE_UPDATE_REQUESTED);
     }
     /**
      * Handle render request
@@ -247,7 +246,14 @@ public class ConsoleRenderManager {
     }
     
     /**
-     * Handle focus request
+     * Handle focus request.
+     *
+     * Ownership rules enforced here:
+     *  - canGrantFocus() / visibility checks happen first (layout manager arbitrates)
+     *  - revokeFocus() owns clearing STATE_FOCUSED on the outgoing container and fires onFocusRevoked()
+     *  - grantFocus() owns clearing STATE_FOCUS_REQUESTED, setting STATE_FOCUSED, firing onFocusGranted()
+     *  - renderer.onFocusGranted/Revoked() are the single authority for Renderer.focusedContainerId
+     *  - layoutManager.onFocusGranted() is called last (for reflow) — it must NOT call requestFocus() again
      */
     private void handleFocusRequest(ConsoleContainer container, StateSnapshot snap) {
         if (!snap.hasState(Container.STATE_VISIBLE) || snap.hasState(Container.STATE_HIDDEN)) {
@@ -258,20 +264,37 @@ public class ConsoleRenderManager {
             container.clearRequest(Container.STATE_FOCUS_REQUESTED);
             return;
         }
+        if (snap.hasState(Container.STATE_FOCUSED)) {
+            // Already focused — clear request flag without re-granting or calling onFocusGranted again.
+            container.getStateMachine().removeState(Container.STATE_FOCUS_REQUESTED);
+            return;
+        }
+
+        // Revoke focus from any currently focused container.
+        // revokeFocus() clears STATE_FOCUSED + STATE_FOCUS_REQUESTED and fires container.onFocusRevoked()
+        // (which emits the focus-lost event to the client).
+        // renderer.onFocusRevoked() then clears Renderer.focusedContainerId.
         renderer.getAllContainers().stream()
             .filter(c -> c != container && c.getStateMachine().hasState(Container.STATE_FOCUSED))
-            .forEach(ConsoleContainer::revokeFocus);
-        //TODO: ensure focusedContainer
-        container.grantFocus();
-        focusedContainer.set(container);
-        renderer.getLayoutManager().onFocusGranted(container.getId());
-        Log.logMsg("[ConsoleRenderManager] Focus granted to: " + container.getId());
+            .forEach(prev -> {
+                prev.revokeFocus();
+                renderer.onFocusRevoked(prev);
+            });
+
+        // grantFocus() owns: clear STATE_FOCUS_REQUESTED, set STATE_FOCUSED, call container.onFocusGranted().
+        // Chaining ensures renderer state and layout reflow only happen after the container state is committed.
+        container.grantFocus().thenRun(() -> {
+            renderer.onFocusGranted(container);             // sets Renderer.focusedContainerId
+            renderer.getLayoutManager().onFocusGranted(container.getId()); // updates focusedIndex, reflows
+            Log.logMsg("[ConsoleRenderManager] Focus granted to: " + container.getId());
+        });
     }
         
     /**
      * Handle show request
      */
     private void handleShowRequest(ConsoleContainer container, StateSnapshot snap) {
+        container.getStateMachine().removeState(Container.STATE_SHOW_REQUESTED);
         container.grantShow().thenRun(() -> {
             renderer.getLayoutManager().onContainerShown(container);
             markDirty();
@@ -283,6 +306,7 @@ public class ConsoleRenderManager {
      * Handle hide request
      */
     private void handleHideRequest(ConsoleContainer container, StateSnapshot snap) {
+        container.getStateMachine().removeState(Container.STATE_HIDE_REQUESTED);
         container.grantHide().thenRun(() -> {
             renderer.getLayoutManager().onContainerHidden(container);
             markDirty();
@@ -297,6 +321,7 @@ public class ConsoleRenderManager {
         boolean canGrant = snap.hasState(Container.STATE_FOCUSED);
         
         if (canGrant) {
+            container.getStateMachine().removeState(Container.STATE_MAXIMIZE_REQUESTED);
             container.grantMaximize().thenRun(() -> {
                 markDirty();
                 Log.logMsg("[ConsoleRenderManager] Maximize granted to: " + 
@@ -317,6 +342,7 @@ public class ConsoleRenderManager {
         boolean canGrant = snap.hasState(Container.STATE_MAXIMIZED);
         
         if (canGrant) {
+            container.getStateMachine().removeState(Container.STATE_RESTORE_REQUESTED);
             container.grantRestore().thenRun(() -> {
                 markDirty();
                 Log.logMsg("[ConsoleRenderManager] Restore granted to: " + 
@@ -333,11 +359,11 @@ public class ConsoleRenderManager {
      * Handle destroy request
      */
     private void handleDestroyRequest(ConsoleContainer container, StateSnapshot snap) {
+        container.getStateMachine().removeState(Container.STATE_DESTROY_REQUESTED);
         container.grantDestroy().thenRun(() -> {
             renderer.getLayoutManager().onContainerRemoved(container);
             failureTrackers.remove(container.getId());
-            // clear focused reference if this container was focused
-            focusedContainer.compareAndSet(container, null);
+            // Focus tracking lives in Renderer base; onContainerDestroyed will clear it if needed.
             markDirty();
         });
     }
@@ -356,6 +382,13 @@ public class ConsoleRenderManager {
         renderer.getAllContainers().stream()
             .filter(ConsoleContainer::shouldRender)
             .forEach(c -> renderContainer(c, frameTime));
+        
+        // After all cell content has been written, emit the final cursor state once.
+        // Using the focused container's desired cursor state (via effectiveCursorVisible)
+        // ensures no unfocused container can stomp the cursor position or visibility.
+        renderer.applyCursorState(
+            (ConsoleContainer) renderer.getFocusedContainer()
+        );
     }
     
     /**
@@ -432,18 +465,6 @@ public class ConsoleRenderManager {
      */
     public long getCurrentGeneration() {
         return generation.get();
-    }
-    
-    /**
-     * Get focused container
-     */
-    public ConsoleContainer getFocusedContainer() {
-        return focusedContainer.get();
-    }
-
-    public void clearFocusedContainer(ConsoleContainer container) {
-        if (container == null) return;
-        focusedContainer.compareAndSet(container, null);
     }
     
     /**

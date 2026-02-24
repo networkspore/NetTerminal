@@ -3,13 +3,14 @@ package io.netnotes.terminal.input;
 import java.util.function.Consumer;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
-import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyCharEvent;
 import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyCharEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
@@ -24,7 +25,7 @@ import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
  * - Cursor movement doesn't trigger render (cursor is moved separately)
  * - Full clear invalidates entire input area
  */
-public class TerminalTextInput extends TerminalRenderable {
+public class TerminalTextInput extends TerminalRegion {
     public static final int MAX_LENGTH = 256;
     
     private final NoteIntegerArray buffer = new NoteIntegerArray();
@@ -41,6 +42,8 @@ public class TerminalTextInput extends TerminalRenderable {
     
     public TerminalTextInput(String name, int row, int col, int maxLength) {
         super(name);
+        setWidthPreference(SizePreference.STATIC);
+        setHeightPreference(SizePreference.STATIC);
         
         this.keyRunTable = new KeyRunTable(
             new NoteBytesRunnablePair(KeyCodeBytes.ENTER, this::handleEnter),

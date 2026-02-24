@@ -1,10 +1,8 @@
-package io.netnotes.renderer;
+package io.netnotes.consoleRenderer;
 
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
-import io.netnotes.engine.messaging.NoteMessaging.MessageExecutor;
 import io.netnotes.noteBytes.NoteBytes;
-import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.Position;
@@ -52,9 +50,23 @@ public class ConsoleContainer extends Container<
     // Cursor state (using x,y coordinates)
     private int cursorX = 0;
     private int cursorY = 0;
-    private boolean cursorVisible = true;
+
+    /**
+     * CURSOR STATE MODEL
+     *
+     * cursorDesired  — what the container/component *wants*.
+     *                  Set by handleShowCursor / handleHideCursor.
+     *                  Survives focus loss; intent is remembered.
+     *                  Default true so a freshly-focused container shows a cursor
+     *                  until a component explicitly hides it.
+     *
+     * effectiveCursorVisible() — cursorDesired && isFocused().
+     *                  Only the focused container should ever claim the physical cursor.
+     *                  Exposed via getRenderableState() so the renderer never has to
+     *                  know about focus — it just renders what the state says.
+     */
+    private boolean cursorDesired = true;
    
-    private volatile boolean isBoundsManaged = false; //is ContainerLayoutManager managing bounds
     /**
      * Constructor
      */
@@ -68,8 +80,14 @@ public class ConsoleContainer extends Container<
     ) {
         super(id, title, ownerPath, config, rendererId);
         this.regionPool = pool;
+        TerminalRectangle initialRegion = config.initialRegion();
+        if (initialRegion == null) {
+            Log.logError("[ConsoleContainer] initialRegion is null, using minimum bounds");
+            initialRegion = pool.obtain();
+            initialRegion.set(0, 0, ConsoleContainerLayoutManager.MIN_COL_WIDTH, ConsoleContainerLayoutManager.MIN_ROW_HEIGHT);
+        }
         this.contentBounds = pool.obtain();
-        this.contentBounds.set(config.initialRegion());
+        this.contentBounds.set(initialRegion);
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
         // Allocate buffers
@@ -83,9 +101,6 @@ public class ConsoleContainer extends Container<
     
     @Override
     protected void setupMessageMap() {
-        // Batch command
-        msgMap.put(ContainerCommands.CONAINER_BATCH, this::handleBatchCommand);
-        
         // Individual terminal commands
         msgMap.put(TerminalCommands.TERMINAL_CLEAR, this::handleClear);
         msgMap.put(TerminalCommands.TERMINAL_PRINT, this::terminalPrint);
@@ -116,8 +131,8 @@ public class ConsoleContainer extends Container<
         batchMsgMap.put(TerminalCommands.TERMINAL_PRINTLN, (cmd)->executePrintInternal(cmd, true));
         batchMsgMap.put(TerminalCommands.TERMINAL_PRINT_AT, (cmd)->executePrintAtInternal(cmd));
         batchMsgMap.put(TerminalCommands.TERMINAL_MOVE_CURSOR, (cmd)->executeMoveCursorInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_SHOW_CURSOR, (cmd)->{ cursorVisible = true; });
-        batchMsgMap.put(TerminalCommands.TERMINAL_HIDE_CURSOR, (cmd)->{ cursorVisible = false; });
+        batchMsgMap.put(TerminalCommands.TERMINAL_SHOW_CURSOR, (cmd)->{ cursorDesired = true; });
+        batchMsgMap.put(TerminalCommands.TERMINAL_HIDE_CURSOR, (cmd)->{ cursorDesired = false; });
         batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE, (cmd)->clearLineInternal(cursorY));
         batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE_AT, (cmd)-> executeClearLineAtInternal(cmd));
         batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_REGION, (cmd)->executeClearRegionInternal(cmd));
@@ -157,26 +172,45 @@ public class ConsoleContainer extends Container<
             return new ConsoleRenderManager.RenderableState(
                 getHeight(), getWidth(),
                 cursorY, cursorX,
-                cursorVisible,
+                effectiveCursorVisible(),
                 cells,
                 prevCells
             );
         });
     }
 
-    public void isManaged(boolean isManaged){
-        this.isBoundsManaged = isManaged;
+    /** Cursor is only physically visible when this container is focused and the component wants it. */
+    private boolean effectiveCursorVisible() {
+        return cursorDesired && isFocused();
     }
 
-    public boolean isBoundsManaged(){
-        return isBoundsManaged;
+    private void setBoundsStates(boolean isManaged, boolean isOffScreen){
+        if (isManaged) {
+            stateMachine.addState(Container.STATE_LAYOUT_MANAGED);
+        } else {
+            stateMachine.removeState(Container.STATE_LAYOUT_MANAGED);
+        }
+        if (isOffScreen) {
+            stateMachine.addState(Container.STATE_OFF_SCREEN);
+        } else {
+            stateMachine.removeState(Container.STATE_OFF_SCREEN);
+        }
     }
 
-    public  CompletableFuture<Void> setAllocatedBounds(int x, int y, int width, int height, boolean isManaged){
+    public  CompletableFuture<Void> setAllocatedBounds(int x, int y, int width, int height, boolean isManaged, boolean isOffScreen){
         return containerExecutor.execute(()->{
-            isBoundsManaged = isManaged;
+            setBoundsStates(isManaged, isOffScreen);
             TerminalRectangle region = regionPool.obtain();
             region.set(x, y, width, height);
+            setAllocatedBoundsInternal(region);
+        });
+    }
+
+    public CompletableFuture<Void> setAllocatedBoundsOffScreen(boolean isManaged, boolean isOffScreen){
+        return containerExecutor.execute(()->{
+            setBoundsStates(isManaged, isOffScreen);
+            TerminalRectangle region = regionPool.obtain();
+            region.copyFrom(allocatedBounds);
             setAllocatedBoundsInternal(region);
         });
     }
@@ -188,17 +222,31 @@ public class ConsoleContainer extends Container<
         });
     }
 
+  
+
+    public boolean isBoundsManaged(){
+        return stateMachine.hasState(Container.STATE_LAYOUT_MANAGED);
+    }
+
+    public boolean isOffScreen(){
+        return stateMachine.hasState(Container.STATE_OFF_SCREEN);
+    }
+
     private void setAllocatedBoundsInternal(TerminalRectangle region){
         allocatedBounds.copyFrom(region);
-        
+
+        boolean isBoundsManaged = stateMachine.hasState(Container.STATE_LAYOUT_MANAGED);
+        boolean isOffScreen = stateMachine.hasState(Container.STATE_OFF_SCREEN);
+
         if(isBoundsManaged){
             handleContentBoundsInternal(region);
         }
         region.setPosition(0, 0);
-        NoteBytesMap resizeEvent = ContainerCommands.containerResized(
+        NoteBytesMap resizeEvent = ContainerCommands.containerRegionChanged(
             id.toNoteBytes(), 
             region.toNoteBytes(),
-            isBoundsManaged
+            isBoundsManaged,
+            isOffScreen
         );
         emitEvent(resizeEvent);
         regionPool.recycle(region);
@@ -229,14 +277,6 @@ public class ConsoleContainer extends Container<
         this.prevCells = newPrevCells;
     }
 
-    //TODO: clamp cursor
-    private void clampCursor(boolean current){
-        if(current){
-            this.cursorX = Math.max(contentBounds.getX(), Math.min(this.cursorX, contentBounds.getWidth()-1));
-            this.cursorY = Math.max(contentBounds.getY(), Math.min(this.cursorY, contentBounds.getHeight()-1));
-        }
-    }
-
     private void handleContentBounds(NoteBytes contentBoundsBytes){
         if(contentBoundsBytes == null){
             return;
@@ -245,7 +285,7 @@ public class ConsoleContainer extends Container<
             contentBoundsBytes, 
             regionPool
         );
-        if(isBoundsManaged){
+        if(isBoundsManaged()){
             newContentBounds.copyFrom(allocatedBounds);
         }
         handleContentBoundsInternal(newContentBounds);
@@ -283,56 +323,14 @@ public class ConsoleContainer extends Container<
         }
     }
     
-    // ===== BATCH COMMAND HANDLER =====
-    
-    /**
-     * Handle batch of commands atomically
-     */
-    public CompletableFuture<Void> handleBatchCommand(NoteBytesMap message) {
-        NoteBytes cmdsBytes = message.get(ContainerCommands.BATCH_COMMANDS);
-        if (cmdsBytes == null) {
-            return CompletableFuture.failedFuture(
-                new IllegalArgumentException("batch_commands required")
-            );
-        }
-        NoteBytes contentBounds = message.get(ContainerCommands.CONTENT_BOUNDS);
-       
+    @Override
+    protected void onBatchContentBounds(NoteBytes contentBounds, NoteBytesMap batchCommand) {
         handleContentBounds(contentBounds);
-        
-        
-        NoteBytes[] cmdsArray = cmdsBytes.getAsNoteBytesArrayReadOnly().getAsArray();
-        
-        return containerExecutor.execute(() -> {
-            // Execute all commands serially
-            for (NoteBytes cmdBytes : cmdsArray) {
-                NoteBytesMap cmd = cmdBytes.getAsNoteBytesMap();
-                executeCommandInternal(cmd);
-            }
-            
-            // Single render request after all commands
-            requestRenderInternal();
-        });
     }
- 
-    /**
-     * Execute single command internally (within serial executor)
-     * Does NOT request render - caller handles that
-     */
-    private void executeCommandInternal(NoteBytesMap cmd) {
-        NoteBytesReadOnly cmdType = cmd.getReadOnly(Keys.CMD);
-        if (cmdType == null) {
-            Log.logError("[ConsoleContainer:" + id + "] Command missing 'cmd' field");
-            return;
-        }
-        Log.logNoteBytes("[ConsoleContainer.executCommandInternal]", cmd);
 
-        MessageExecutor msgExec = batchMsgMap.get(cmdType);
-        
-        if(msgExec != null){
-            msgExec.execute(cmd);
-        } else {
-            Log.logError("[ConsoleContainer:" + id + "] Unknown command: " + cmdType);
-        }
+    @Override
+    protected void onBatchComplete() {
+        requestRenderInternal();
     }
     
     // ===== INDIVIDUAL COMMAND HANDLERS =====
@@ -381,15 +379,17 @@ public class ConsoleContainer extends Container<
     
     public CompletableFuture<Void> handleShowCursor(NoteBytesMap command) {
         return containerExecutor.execute(() -> {
-            cursorVisible = true;
-            requestRenderInternal();
+            cursorDesired = true;
+            // Only worth re-rendering for cursor state change if we're the focused container.
+            // If not focused, the desired state is stored and will take effect on focus gain.
+            if (isFocused()) requestRenderInternal();
         });
     }
     
     public CompletableFuture<Void> handleHideCursor(NoteBytesMap command) {
         return containerExecutor.execute(() -> {
-            cursorVisible = false;
-            requestRenderInternal();
+            cursorDesired = false;
+            if (isFocused()) requestRenderInternal();
         });
     }
     
@@ -1354,7 +1354,10 @@ private String[] wrapText(String text, int maxWidth) {
     int getWidth() { return contentBounds.getWidth(); }
     int getCursorX() { return cursorX; }
     int getCursorY() { return cursorY; }
-    boolean isCursorVisible() { return cursorVisible; }
+    /** Returns the effective cursor visibility — desired AND focused. */
+    boolean isCursorVisible() { return effectiveCursorVisible(); }
+    /** Returns the raw desired cursor state, regardless of focus. */
+    boolean isCursorDesired() { return cursorDesired; }
     
     // ===== EVENT DISPATCHING =====
     
@@ -1370,6 +1373,10 @@ private String[] wrapText(String text, int maxWidth) {
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.EVENT, io.netnotes.engine.io.input.events.EventBytes.EVENT_CONTAINER_FOCUS_GAINED);
         emitEvent(map);
+        // Re-render immediately so effectiveCursorVisible() resolves with the stored
+        // cursorDesired — the cursor appears (or stays hidden if desired=false) without
+        // waiting for the next component render cycle.
+        requestRenderInternal();
     }
 
     @Override
@@ -1377,6 +1384,9 @@ private String[] wrapText(String text, int maxWidth) {
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.EVENT, io.netnotes.engine.io.input.events.EventBytes.EVENT_CONTAINER_FOCUS_LOST);
         emitEvent(map);
+        // Re-render so effectiveCursorVisible() now returns false — the cursor is
+        // physically hidden without the component needing to do anything.
+        requestRenderInternal();
     }
 
     @Override
@@ -1406,6 +1416,12 @@ private String[] wrapText(String text, int maxWidth) {
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.EVENT, io.netnotes.engine.io.input.events.EventBytes.EVENT_CONTAINER_SHOWN);
         emitEvent(map);
+    }
+
+
+    @Override
+    protected void onEventStreamClosed() {
+        destroyNow();
     }
 
     

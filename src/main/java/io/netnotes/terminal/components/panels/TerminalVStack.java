@@ -7,9 +7,9 @@ import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
-import io.netnotes.terminal.layout.TerminalLayoutable;
 import io.netnotes.terminal.layout.TerminalSizeable;
-import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.components.TerminalRegion;
@@ -301,18 +301,8 @@ public class TerminalVStack extends TerminalRegion {
      * Checks if child implements TerminalLayoutable, otherwise uses stack default
      */
     private SizePreference resolvePreference(TerminalRenderable child, boolean isWidth) {
-        if (child instanceof TerminalLayoutable) {
-            TerminalLayoutable layoutable = (TerminalLayoutable) child;
-            SizePreference pref = isWidth 
-                ? layoutable.getWidthPreference()
-                : layoutable.getHeightPreference();
-            
-            // null or INHERIT means use parent's default
-            if (pref != null && pref != SizePreference.INHERIT) {
-                return pref;
-            }
-        } else if (child instanceof TerminalSizeable) {
-            TerminalSizeable sizeable = (TerminalSizeable) child;
+        if (child instanceof TerminalSizeable sizeable) {
+    
             SizePreference pref = isWidth 
                 ? sizeable.getWidthPreference()
                 : sizeable.getHeightPreference();
@@ -344,8 +334,8 @@ public class TerminalVStack extends TerminalRegion {
     }
 
     private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalLayoutable) {
-            return ((TerminalLayoutable) child).isHiddenManaged();
+        if (child instanceof TerminalSizeable sizeable) {
+            return sizeable.isHiddenManaged();
         }
         return true;
     }
@@ -483,7 +473,7 @@ public class TerminalVStack extends TerminalRegion {
     }
 
     @Override
-    protected void onCleanup(){
+    protected void onDestroying(){
         destroyLayoutGroup(layoutGroupId);   
     }
  

@@ -1,5 +1,6 @@
 package io.netnotes.terminal.components;
 
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalSizeable;
@@ -12,6 +13,7 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     private float percentHeight = 0f;
     private int minWidth = 0;
     private int minHeight = 0;
+    private boolean isHiddenManaged = true;
 
     public TerminalRegion(String regionName){
         super(regionName);
@@ -33,6 +35,18 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
 
     public int getMinHeight(){
         return minHeight + getInsets().getVertical();
+    }
+
+    @Override
+    public boolean isHiddenManaged(){
+        return isHiddenManaged;
+    }
+
+    public void setIsHiddenManaged(boolean isHiddenManaged){
+        if(this.isHiddenManaged != isHiddenManaged ){
+            this.isHiddenManaged = isHiddenManaged;
+            requestLayoutUpdate();
+        }
     }
 
     @Override
@@ -132,5 +146,38 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     public void setPercentHeight(float percent) {
         this.percentHeight = percent;
         invalidate();
+    }
+
+    @Override
+    public int getMinSize(int axis) {
+        switch(axis){
+            case 0:
+                return getMinWidth();
+            case 1:
+                return getMinHeight();
+        }
+        throw new IllegalArgumentException("getMinSize TerminalRegion does not have: " + axis + " axis");
+    }
+
+    @Override
+    public int getPreferredSize(int axis) {
+        switch(axis){
+            case 0:
+                return getPreferredWidth();
+            case 1:
+                return getPreferredHeight();
+        }
+        throw new IllegalArgumentException("getPreferredSize TerminalRegion does not have: " + axis + " axis");
+    }
+
+    @Override
+    public SizePreference getSizePreference(int axis) {
+        switch(axis){
+            case 0:
+                return getWidthPreference();
+            case 1:
+                return getHeightPreference();
+        }
+        throw new IllegalArgumentException("getSizePreference TerminalRegion does not have: " + axis + " axis");
     }
 }

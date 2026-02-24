@@ -4,7 +4,7 @@ import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TerminalRenderable;
-import io.netnotes.engine.ui.layout.LayoutData;
+import io.netnotes.engine.ui.renderer.layout.LayoutData;
 
 
 /**
@@ -115,7 +115,7 @@ public final class TerminalLayoutData extends LayoutData<
             if(spatialRegion == null){
                 initSpatialRegion();
             }
-            spatialRegion.setX(height);
+            spatialRegion.setHeight(height);
             this.setHeight = true;
             return this;
         }

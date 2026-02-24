@@ -1,4 +1,4 @@
-package io.netnotes.renderer;
+package io.netnotes.consoleRenderer;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -18,8 +18,9 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
 
 
     public static final int MIN_COL_WIDTH = 40;
+    public static final int MIN_ROW_HEIGHT = 24;
 
-    private ConsoleUIRenderer renderer;
+    private ConsoleRenderer renderer;
     private final List<ConsoleContainer> displayOrder = new ArrayList<>();
     private int maxVisible = 1;
     private int focusedIndex = 0;
@@ -28,9 +29,9 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
     private int preLockMaxVisible = 1;
     private int preLockFocusedIndex = 0;
     private int termWidth = 40;
-    private int termHeight = 40;
+    private int termHeight = 24;
 
-    public void init(ConsoleUIRenderer renderer, int termWidth, int termHeight) {
+    public void init(ConsoleRenderer renderer, int termWidth, int termHeight) {
         this.renderer = renderer;
         this.termWidth = termWidth;
         this.termHeight = termHeight;
@@ -184,17 +185,21 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
         return displayOrder.get(idx).requestFocus();
     }
 
+    /**
+     * Called by RenderManager AFTER grantFocus() and renderer.onFocusGranted() have completed.
+     * Only responsible for updating the layout manager's own focusedIndex and triggering reflow.
+     * Must NOT call renderer.onFocusGranted() or requestFocus() — that would re-enter the pipeline.
+     */
     public void onFocusGranted(ContainerId id) {
         if (id == null) return;
         if (layoutLocked && lockedContainerId != null && !lockedContainerId.equals(id)) return;
         int idx = indexOfContainerId(id);
         if (idx < 0) return;
         focusedIndex = idx;
-        renderer.onFocusGranted(id);
         reflow();
     }
 
-    private int visibleCount() {
+    public int visibleCount() {
         return Math.min(getFocusableIndices().size(), maxVisible);
     }
 
@@ -245,13 +250,14 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
             return;
         }
 
-        // No focusable containers; revoke any stale focus
+        // No focusable containers; revoke any stale focus.
+        // revokeFocus() clears STATE_FOCUSED on the container and emits the focus-lost event.
+        // renderer.onFocusRevoked() clears Renderer.focusedContainerId.
         displayOrder.stream()
             .filter(c -> c.getStateMachine().hasState(Container.STATE_FOCUSED))
             .forEach(c -> {
                 c.revokeFocus();
                 renderer.onFocusRevoked(c);
-                renderer.getRenderManager().clearFocusedContainer(c);
             });
     }
 
@@ -283,13 +289,9 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
     private CompletableFuture<Void> reflow() {
         List<Integer> focusable = getFocusableIndices();
         int visible = Math.min(focusable.size(), maxVisible);
-        if (visible == 0) return CompletableFuture.completedFuture(null);
         boolean isManaged = visible > 1;
-
-        int colWidth = Math.max(termWidth / visible, MIN_COL_WIDTH);
-        int remainder = termWidth - (colWidth * visible);
-
-        List<CompletableFuture<Void>> futures = new ArrayList<>(visible);
+        List<CompletableFuture<Void>> futures = new ArrayList<>(displayOrder.size());
+        List<Integer> visibleIndices = new ArrayList<>(visible);
 
         int windowStart = 0;
         int focusableSize = focusable.size();
@@ -303,16 +305,31 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
             windowStart = desiredStart;
         }
 
-        // Containers outside visible window retain stale bounds but aren't rendered
-        for (int i = 0; i < visible; i++) {
-            int containerIndex = focusable.get(windowStart + i);
-            int x = i * colWidth;
-            int w = (containerIndex == focusedIndex) ? colWidth + Math.max(0, remainder) : colWidth;
-            // Sets allocated bounds on ConsoleContainer (clip rect for renderer)
-            CompletableFuture<Void> future = displayOrder.get(containerIndex).setAllocatedBounds(
-                x, 0, w, termHeight, isManaged);
-            futures.add(future);
+        if (visible > 0) {
+            int colWidth = Math.max(termWidth / visible, MIN_COL_WIDTH);
+            int remainder = termWidth - (colWidth * visible);
+
+            // Containers in visible window get allocated bounds (on-screen)
+            for (int i = 0; i < visible; i++) {
+                int containerIndex = focusable.get(windowStart + i);
+                visibleIndices.add(containerIndex);
+                int x = i * colWidth;
+                int w = (containerIndex == focusedIndex) ? colWidth + Math.max(0, remainder) : colWidth;
+                // Sets allocated bounds on ConsoleContainer (clip rect for renderer)
+                CompletableFuture<Void> future = displayOrder.get(containerIndex).setAllocatedBounds(
+                    x, 0, w, termHeight, isManaged, false);
+                futures.add(future);
+            }
         }
+
+        // Non-visible containers get off-screen bounds + flag
+        for (int i = 0; i < displayOrder.size(); i++) {
+            if (!visibleIndices.contains(i)) {
+                ConsoleContainer container = displayOrder.get(i);
+                futures.add(container.setAllocatedBoundsOffScreen(isManaged, true));
+            }
+        }
+    
       
         return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
     }

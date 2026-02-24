@@ -8,9 +8,9 @@ import io.netnotes.terminal.layout.TerminalLayoutGroup;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.Position;
-import io.netnotes.engine.ui.Renderable;
 import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.TextAlignment;
+import io.netnotes.engine.ui.renderer.Renderable;
 
 /**
  * TerminalRenderable - Abstract base class for terminal renderables
@@ -53,8 +53,7 @@ public abstract class TerminalRenderable extends Renderable<
     TerminalLayoutGroup,
     TerminalRenderable
 > {
-
-
+    
     private boolean clampCursor = true;          // Default to clamping cursor
     
     /**
@@ -696,10 +695,10 @@ public abstract class TerminalRenderable extends Renderable<
      * Cursor is clamped to bounds if clampCursor is true
      */
     protected void moveCursor(TerminalBatchBuilder batch, int x, int y) {
-        if (clampCursor) {
-            x = clampX(x);
-            y = clampY(y);
-        }
+        // Only the focused component should move the cursor — a non-focused component
+        // repositioning the cursor would corrupt the terminal state for the focused one.
+        if (!hasFocus()) return;
+        if (clampCursor) { x = clampX(x); y = clampY(y); }
         x = Math.max(0, Math.min(x, getWidth() - 1));
         y = Math.max(0, Math.min(y, getHeight() - 1));
         batch.moveCursor(toAbsoluteX(x), toAbsoluteY(y));
@@ -742,9 +741,10 @@ public abstract class TerminalRenderable extends Renderable<
     }
     
     protected void showCursor(TerminalBatchBuilder batch) {
+        if (!hasFocus()) return;
         batch.showCursor();
     }
-    
+        
     protected void hideCursor(TerminalBatchBuilder batch) {
         batch.hideCursor();
     }

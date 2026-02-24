@@ -1,4 +1,4 @@
-package io.netnotes.renderer;
+package io.netnotes.consoleRenderer;
 
 import io.netnotes.terminal.TextStyle;
 

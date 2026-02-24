@@ -11,7 +11,7 @@ import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.ui.Position;
-import io.netnotes.engine.ui.RenderableStates;
+import io.netnotes.engine.ui.renderer.RenderableStates;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -41,7 +41,7 @@ public class ScrollableTextViewer extends TerminalRegion {
     
     private final List<String> lines = Collections.synchronizedList(new ArrayList<>());
     private volatile int maxLines = 1000;
-    
+
     private final boolean showBorder;
     private final String title;
     

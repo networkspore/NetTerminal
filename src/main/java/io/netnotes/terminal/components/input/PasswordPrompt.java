@@ -13,6 +13,7 @@ import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.noteBytes.NoteBytesEphemeral;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
@@ -508,11 +509,15 @@ public class PasswordPrompt extends TerminalRegion {
     }
     
     @Override
-    protected void onCleanup() {
+    protected void onRemovedFromLayout() {
+        deactivate();
+    }
+
+    @Override
+    protected void onDestroying(){
         if (cancelHandlerId != null) {
             removeKeyDownHandler(cancelHandlerId);
         }
-        deactivate();
     }
 
     private void requireMode(Mode expected, String action) {

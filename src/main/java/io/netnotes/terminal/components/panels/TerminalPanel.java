@@ -3,7 +3,8 @@ package io.netnotes.terminal.components.panels;
 import java.util.Map;
 
 import io.netnotes.engine.ui.Position;
-import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
@@ -14,7 +15,6 @@ import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
-import io.netnotes.terminal.layout.TerminalLayoutable;
 import io.netnotes.terminal.layout.TerminalSizeable;
 
 public class TerminalPanel extends TerminalRegion {
@@ -300,8 +300,8 @@ public class TerminalPanel extends TerminalRegion {
 
 
     private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalLayoutable) {
-            return ((TerminalLayoutable) child).isHiddenManaged();
+        if (child instanceof TerminalSizeable sizable) {
+            return sizable.isHiddenManaged();
         }
         return true;
     }
@@ -496,7 +496,7 @@ public class TerminalPanel extends TerminalRegion {
     }
 
     @Override
-    protected void onCleanup() {
+    protected void onDestroying() {
         destroyLayoutGroup(layoutGroupId);
         layoutCallbackEntry = null;
     }

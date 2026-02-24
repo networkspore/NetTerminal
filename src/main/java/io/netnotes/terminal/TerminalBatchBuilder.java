@@ -3,9 +3,9 @@ import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.engine.ui.BatchBuilder;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.TextAlignment;
+import io.netnotes.engine.ui.renderer.BatchBuilder;
 
 /**
  * TerminalBatchBuilder - Build atomic batches of terminal commands with clip region support
@@ -24,7 +24,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     public TerminalBatchBuilder() {
         super();
     }
-    
+
     @Override
     public void addCommand(NoteBytesMap cmd) {
         commands.add(cmd.toNoteBytes());

@@ -252,6 +252,14 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
     public Point2D getPosition(){
         return new Point2D(getX(), getY());
     }
+
+
+    @Override
+    public TerminalRectangle subtractPosition(Point2D point) {
+        this.x -= point.getX();
+        this.y -= point.getY();
+        return this;
+    }
     
     /**
      * Get width
@@ -846,11 +854,19 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         if(noteBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
             throw new IllegalArgumentException("TerminalRectangle.fromNoteBytes is not an object");
         }
+        if(regionPool == null){
+            throw new NullPointerException("Passed null region pool");
+        }
+
         return fromNoteBytes(noteBytes.getAsNoteBytesMap(), regionPool);   
     }
 
     public static TerminalRectangle fromNoteBytes(NoteBytes noteBytes){
-        return fromNoteBytes(noteBytes, TerminalRectanglePool.getInstance());
+        TerminalRectanglePool pool = TerminalRectanglePool.getInstance();
+        if(pool == null){
+          throw new NullPointerException("[TerminalRectangle] TerminalRectanglePool.getInstance() returned null");
+        }
+        return fromNoteBytes(noteBytes, pool);
     }
 
     public NoteBytesObject toNoteBytes(){
@@ -970,6 +986,12 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         this.parentAbsoluteX = region.parentAbsoluteX;
         this.parentAbsoluteY = region.parentAbsoluteY;
     }
+
+    @Override
+    public int getDimensionCount() {
+        return 2;
+    }
+
 
  
 }

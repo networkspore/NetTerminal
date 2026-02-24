@@ -1,11 +1,12 @@
-package io.netnotes.renderer;
+package io.netnotes.consoleRenderer;
 
 
 import io.netnotes.engine.ui.Point2D;
-import io.netnotes.engine.ui.RendererStates;
-import io.netnotes.engine.ui.UIRenderer;
+
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerId;
+import io.netnotes.engine.ui.renderer.Renderer;
+import io.netnotes.engine.ui.renderer.RendererStates;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.RoutedPacket;
 import io.netnotes.engine.io.input.Keyboard.KeyCode;
@@ -33,7 +34,6 @@ import org.jline.terminal.TerminalBuilder;
 import org.jline.terminal.Terminal.Signal;
 
 import java.io.IOException;
-import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.TimeUnit;
 
@@ -45,7 +45,7 @@ import java.util.concurrent.TimeUnit;
  * - RenderManager handles all container lifecycle and commits
  * - No backward dependency from Renderer to RenderManager
  */
-public final class ConsoleUIRenderer extends UIRenderer<
+public final class ConsoleRenderer extends Renderer<
     Point2D, 
     TerminalRectangle,
     ConsoleContainerLayoutManager,
@@ -55,7 +55,7 @@ public final class ConsoleUIRenderer extends UIRenderer<
 
     public static final NoteBytesReadOnly DEFAULT_RENDERER_ID = new NoteBytesReadOnly("JLINE3");
     private static final int MIN_TERM_WIDTH = 80;
-    private static final int MIN_TERM_HEIGHT = 25;
+    private static final int MIN_TERM_HEIGHT = 24;
 
     public static final int RENDERER_INITIALIZING    = 0;
     public static final int RENDERER_READY           = 1;
@@ -71,6 +71,8 @@ public final class ConsoleUIRenderer extends UIRenderer<
 
     private final String description = "JLine3 terminal renderer";
 
+    private volatile int detectedWidth = 0;
+    private volatile int detectedHeight = 0;
     
     // ===== TERMINAL =====
     private final Terminal terminal;
@@ -100,21 +102,23 @@ public final class ConsoleUIRenderer extends UIRenderer<
     private TerminalRectanglePool regionPool = TerminalRectanglePool.getInstance();
     private final HotkeyRegistry hotkeyRegistry = new HotkeyRegistry();
 
-    public ConsoleUIRenderer() throws IOException{
+    public ConsoleRenderer() throws IOException{
         this(DEFAULT_RENDERER_ID);
     }
+
+
     /**
      * Constructor
      */
-    public ConsoleUIRenderer(NoteBytesReadOnly rendererId) throws IOException {
+    public ConsoleRenderer(NoteBytesReadOnly rendererId) throws IOException {
         super("console-renderer", rendererId, new ConsoleContainerLayoutManager());
         this.terminal = TerminalBuilder.builder()
             .system(true)
             .encoding("UTF-8")
             .build();
         
-        this.termWidth = Math.max(MIN_TERM_WIDTH, terminal.getWidth());
-        this.termHeight = Math.max(MIN_TERM_HEIGHT, terminal.getHeight());
+        setTermWidth(terminal.getWidth());
+        setTermHeight(terminal.getHeight());
         containerLayoutManager.init(this, termWidth, termHeight);
         this.originalAttributes = terminal.getAttributes();
 
@@ -127,6 +131,16 @@ public final class ConsoleUIRenderer extends UIRenderer<
         setupRendererStateTransitions();
         
         Log.logMsg("[ConsoleUIRenderer] Terminal created: " + termWidth + "x" + termHeight);
+    }
+
+    private void setTermWidth(int w){
+        this.detectedWidth = w;
+        this.termWidth = Math.max(MIN_TERM_WIDTH, w);
+    }
+
+    private void setTermHeight(int h){
+        this.detectedHeight = h;
+        this.termHeight = Math.max(MIN_TERM_HEIGHT, h);
     }
 
     private void registerSystemHotkeys(){
@@ -161,10 +175,6 @@ public final class ConsoleUIRenderer extends UIRenderer<
         return containerLayoutManager;
     }
 
-    public void onFocusGranted(ContainerId containerId){
-        ConsoleContainer consoleContainer = containers.get(containerId);
-        onFocusGranted(consoleContainer);
-    }
     /**
      * Setup renderer state machine transitions
      */
@@ -364,13 +374,14 @@ public final class ConsoleUIRenderer extends UIRenderer<
      */
     private void checkForResize() {
         try {
-            int newWidth = Math.max(MIN_TERM_WIDTH, terminal.getWidth());
-            int newHeight = Math.max(MIN_TERM_HEIGHT, terminal.getHeight());
+            int newWidth =  terminal.getWidth();
+            int newHeight = terminal.getHeight();
             
-            if (newWidth != termWidth || newHeight != termHeight) {
+            if (newWidth != detectedWidth || newHeight != detectedHeight) {
+                setTermWidth(newWidth);
+                setTermHeight(newHeight);
                 Log.logMsg("[ConsoleUIRenderer] Size change detected via polling: " + 
                     termWidth + "x" + termHeight + " -> " + newWidth + "x" + newHeight);
-                
                 resizeDebouncer.submit(this::handleTerminalResize);
             }
         } catch (Exception e) {
@@ -439,7 +450,8 @@ public final class ConsoleUIRenderer extends UIRenderer<
         TerminalContainerConfig config,
         String rendererId
     ) {
-    
+
+     
         ConsoleContainer container = new ConsoleContainer(id, title, ownerPath, config, rendererId, regionPool);
         Log.logMsg("[ConsoleUIRenderer] consoleContainer created: " + id);
 
@@ -460,9 +472,7 @@ public final class ConsoleUIRenderer extends UIRenderer<
     ) {
         return containerLayoutManager.onContainerAdded(container)
             .thenCompose(v -> handleContainerAllocationResponse(container, true))
-            .exceptionallyCompose(ex -> {
-                return handleContainerAllocationResponse(container, false);
-            });
+            .exceptionallyCompose(ex -> handleContainerAllocationResponse(container, false));
     }
 
     private CompletableFuture<NoteBytesReadOnly> handleContainerAllocationResponse(
@@ -470,11 +480,14 @@ public final class ConsoleUIRenderer extends UIRenderer<
         boolean isManaged
     ){
         return container.getAllocationBounds()
-            .thenCompose(bounds->createCreationResponse(
-                bounds.toNoteBytes(), 
-                isManaged, 
-                container.isVisible()
-            ));
+            .thenCompose(bounds->{
+                bounds.setPosition(0, 0);
+                return createCreationResponse(
+                    bounds.toNoteBytes(), 
+                    isManaged, 
+                    container.isVisible()
+                );
+            });
     }
 
 
@@ -539,12 +552,6 @@ public final class ConsoleUIRenderer extends UIRenderer<
             state.removeState(RendererStates.CREATING_CONTAINER);
         }
     }*/
-
-    @Override
-    public ConsoleContainer getContainerFromMsg(NoteBytesMap msg){
-        ConsoleContainer container = super.getContainerFromMsg(msg);
-        return container != null && container instanceof ConsoleContainer consoleContainer ? consoleContainer : null;
-    }
 
     protected ConsoleContainer getConsoleContainer(ContainerId id) {
         return containers.get(id);
@@ -642,7 +649,10 @@ public final class ConsoleUIRenderer extends UIRenderer<
             }
             updates.setLength(0);
             
-            // Hide cursor during update
+            // Cursor is hidden for the duration of cell writes to prevent flicker.
+            // Cursor positioning and show/hide for the frame is done once, after all
+            // containers have rendered, via applyCursorState(). This prevents any
+            // unfocused container's render from clobbering the focused container's cursor.
             updates.append("\033[?25l");
             
             // Differential rendering
@@ -659,34 +669,24 @@ public final class ConsoleUIRenderer extends UIRenderer<
                     }
                     
                     changedCells++;
-                    
-                    // Position cursor
                     updates.append(String.format("\033[%d;%dH", row + 1, col + 1));
                     
-                    // Update style if changed
                     if (!current.style.equals(currentStyle)) {
                         updates.append("\033[0m");
                         appendStyleCodes(updates, current.style);
                         currentStyle = current.style.copy();
                     }
                     
-                    // Write character
                     updates.append(current.character != '\0' ? current.character : ' ');
                 }
             }
             
-            // Reset style
             updates.append("\033[0m");
             
-            // Position and show cursor if visible
-            if (state.cursorVisible) {
-                updates.append(String.format("\033[%d;%dH", 
-                    state.cursorRow + 1, state.cursorCol + 1));
-                updates.append("\033[?25h");
-            }
+            // NOTE: No cursor show/position here. applyCursorState() handles that
+            // once after the full frame, using only the focused container's state.
             
-            // Write to terminal (atomic operation)
-            if (changedCells > 0 || state.cursorVisible) {
+            if (changedCells > 0) {
                 terminal.writer().write(updates.toString());
                 terminal.flush();
             }
@@ -694,7 +694,34 @@ public final class ConsoleUIRenderer extends UIRenderer<
         } catch (Exception e) {
             Log.logError("[ConsoleUIRenderer] Render error: " + e.getMessage());
             e.printStackTrace();
-            throw e; // Propagate to RenderManager for error handling
+            throw e;
+        }
+    }
+
+    /**
+     * Emit the final cursor state for the frame.
+     *
+     * Called by ConsoleRenderManager once after all containers have been rendered,
+     * with the currently focused container (or null if none). This is the only place
+     * cursor show/hide and positioning escape codes are emitted — keeping it here
+     * prevents any rendering order dependency between containers.
+     *
+     * @param focused the focused container, or null if nothing is focused
+     */
+    public void applyCursorState(ConsoleContainer focused) {
+        try {
+            if (focused == null || !focused.isCursorVisible()) {
+                // Hide cursor — nothing focused, or focused container wants it hidden.
+                terminal.writer().write("\033[?25l");
+            } else {
+                // Position cursor at the focused container's stored position, then show it.
+                terminal.writer().write(String.format("\033[%d;%dH\033[?25h",
+                    focused.getCursorY() + 1,
+                    focused.getCursorX() + 1));
+            }
+            terminal.flush();
+        } catch (Exception e) {
+            Log.logError("[ConsoleUIRenderer] Cursor state error: " + e.getMessage());
         }
     }
     
@@ -801,17 +828,14 @@ public final class ConsoleUIRenderer extends UIRenderer<
             int newWidth = terminal.getWidth();
             int newHeight = terminal.getHeight();
             
-            if (newWidth == termWidth && newHeight == termHeight) {
+            if (newWidth == detectedWidth && newHeight == detectedHeight) {
                 state.removeState(RENDERER_HANDLING_RESIZE);
                 return;
             }
-            
+            setTermWidth(newWidth);
+            setTermHeight(newHeight);
             Log.logMsg(String.format("[ConsoleUIRenderer] Resize: %dx%d -> %dx%d",
                 termWidth, termHeight, newWidth, newHeight));
-            
-            termWidth = newWidth;
-            termHeight = newHeight;
-            
             clearScreen();
             
             // Delegate to render manager
@@ -853,51 +877,40 @@ public final class ConsoleUIRenderer extends UIRenderer<
 
     @Override
     protected CompletableFuture<Void> onContainerDestroyed(ContainerId containerId) {
-        return rendererExecutor.execute(() -> {
-            Log.logMsg("[ConsoleUIRenderer] Container destroyed: " + containerId);
-            
-            ConsoleContainer container = containers.remove(containerId);
-            
-            if (container == null) {
-                Log.logError("[ConsoleUIRenderer] Container not found: " + containerId);
-                return;
-            }
-            
-            if (containers.isEmpty()) {
-                state.removeState(RendererStates.HAS_CONTAINERS);
-                state.removeState(RendererStates.HAS_VISIBLE_CONTAINERS);
-            }
+        // removeContainer() (defined in Renderer base) handles: containers map, ownerContainers,
+        // HAS_CONTAINERS / HAS_FOCUSED_CONTAINER state, and focusedContainerId.
+        // onContainerUnregistered() is the narrow hook for the layout manager call.
+        return removeContainer(containerId);
+    }
 
-            containerLayoutManager.onContainerRemoved(container);
-            
-            if (container.getOwnerPath() != null) {
-                List<ContainerId> ownerList = ownerContainers.get(container.getOwnerPath());
-                if (ownerList != null) {
-                    ownerList.remove(containerId);
-                    if (ownerList.isEmpty()) {
-                        ownerContainers.remove(container.getOwnerPath());
-                    }
-                }
-            }
-            
-            if (containerId.equals(focusedContainerId)) {
-                focusedContainerId = null;
-                state.removeState(RendererStates.HAS_FOCUSED_CONTAINER);
-            }
-            
-            Log.logMsg("[ConsoleUIRenderer] Container cleanup complete: " + containerId);
-        });
+    @Override
+    protected void onContainerUnregistered(ConsoleContainer container) {
+        Log.logMsg("[ConsoleUIRenderer] Container cleanup complete: " + container.getId());
+        containerLayoutManager.onContainerRemoved(container);
+    }
+
+    private TerminalRectangle getNewDefaultRegion(){
+        TerminalRectangle rect = regionPool.obtain();
+        rect.set(0, 0, termWidth, termHeight);
+        return rect;
     }
     @Override
     protected TerminalContainerConfig createContainerConfig() {
-        return new TerminalContainerConfig();
+        TerminalContainerConfig defaultConfig = new TerminalContainerConfig();
+        return defaultConfig.withInitialRegion(getNewDefaultRegion());
     }
+
+
     @Override
     protected TerminalContainerConfig createContainerConfig(NoteBytes configBytes) {
         if(configBytes == null || configBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
-            return new TerminalContainerConfig();
+            return createContainerConfig();
         }
-        return new TerminalContainerConfig(configBytes.getAsMap());
+        TerminalContainerConfig config = new TerminalContainerConfig(configBytes.getAsMap());
+        if(config.initialRegion() == null){
+            config.withInitialRegion(getNewDefaultRegion());
+        }
+        return config;
     }
     
  

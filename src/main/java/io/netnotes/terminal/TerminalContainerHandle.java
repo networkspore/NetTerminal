@@ -3,7 +3,7 @@ package io.netnotes.terminal;
 import java.util.concurrent.CompletableFuture;
 
 import io.netnotes.terminal.events.TerminalEventsFactory;
-import io.netnotes.terminal.events.containerEvents.TerminalResizeEvent;
+import io.netnotes.terminal.events.containerEvents.TerminalRegionChangedEvent;
 import io.netnotes.terminal.layout.TerminalFloatingLayoutManager;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -11,12 +11,11 @@ import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutManager;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.io.input.events.RoutedEvent;
-import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.ui.Point2D;
+import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerHandle;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
@@ -32,11 +31,12 @@ public class TerminalContainerHandle extends ContainerHandle<
     TerminalLayoutContext,
     TerminalLayoutData,
     TerminalLayoutCallback,
+    TerminalRectanglePool,
     TerminalEventsFactory,
     TerminalContainerConfig,
     TerminalContainerHandle.TerminalBuilder
 > {
-    private final TerminalRectanglePool regionPool = TerminalRectanglePool.getInstance();
+
     public TerminalContainerHandle(TerminalBuilder builder){
         super(builder);
     }
@@ -56,14 +56,7 @@ public class TerminalContainerHandle extends ContainerHandle<
     protected void setupStateTransitions() {}
 
 
-    @Override
-    protected TerminalRectangle extractRegionFromCreateResponse(NoteBytesMap responseMap) {
-        NoteBytes regionBytes =  responseMap.get(Keys.REGION);
-        if(regionBytes == null || regionBytes.getType() != NoteBytesMetaData.NOTE_BYTES_OBJECT_TYPE){
-            throw new IllegalStateException("valid region required in response");
-        }
-        return TerminalRectangle.fromNoteBytes(regionBytes);
-    }
+
 
 
     @Override
@@ -74,28 +67,55 @@ public class TerminalContainerHandle extends ContainerHandle<
     @Override
     protected void setupRoutedMessageMap() { }
 
+    private boolean handleRegionStateChange(TerminalRegionChangedEvent event){
+        boolean isChanged = false;
+        if(event.isLayoutManaged()){
+            if(!stateMachine.hasState(Container.STATE_LAYOUT_MANAGED)){
+                stateMachine.addState(Container.STATE_LAYOUT_MANAGED);
+                isChanged = true;
+            }
+        }else{
+            if(stateMachine.hasState(Container.STATE_LAYOUT_MANAGED)){
+                stateMachine.removeState(Container.STATE_LAYOUT_MANAGED);
+                isChanged = true;
+            }
+        }
+        if(event.isOffScreen()){
+            if(!stateMachine.hasState(Container.STATE_OFF_SCREEN)){
+                stateMachine.addState(Container.STATE_OFF_SCREEN);
+                isChanged = true;
+            }
+        }else{
+            if(stateMachine.hasState(Container.STATE_OFF_SCREEN)){
+                stateMachine.removeState(Container.STATE_OFF_SCREEN);
+                isChanged = true;
+            }
+        }
+
+        return isChanged;
+    }
 
     @Override
-    protected void onContainerResized(RoutedEvent event) {
-         if (!(event instanceof TerminalResizeEvent)) {
+    protected void onContainerRegionChanged(RoutedEvent event) {
+        if (!(event instanceof TerminalRegionChangedEvent regionChangedEvent)) {
             return;
         }
-        
-        TerminalRectangle newRegion = extractRegionFromResizeEvent(event);
-        
+        TerminalRectangle newRegion = regionChangedEvent.getAndConsumeRegion();
         if (newRegion == null) {
             return;
         }
+
+        boolean isStateChanged = handleRegionStateChange(regionChangedEvent);
         
         TerminalRectangle oldRegion = allocatedRegion;
         
-        if (!regionsEqual(oldRegion, newRegion)) {
+        if (!regionsEqual(oldRegion, newRegion) || isStateChanged) {
             allocatedRegion = newRegion;
             
             Log.logMsg(String.format("[TerminalContainer:%s] Resized: %s -> %s",getName(), oldRegion, newRegion));
             
-            if (notifyOnResize != null) {
-                notifyOnResize.accept(self());
+            if (notifyOnRegionChanged != null) {
+                notifyOnRegionChanged.accept(self());
             }
            
             applyRegionToRenderable(rootRenderable, allocatedRegion);
@@ -104,14 +124,9 @@ public class TerminalContainerHandle extends ContainerHandle<
         }
     }
 
+    
+  
 
-    @Override
-    protected TerminalRectangle extractRegionFromResizeEvent(RoutedEvent event) {
-        if(event instanceof TerminalResizeEvent resizeEvent){
-            return resizeEvent.getAndConsumeRegion();
-        }
-        return null;
-    }
 
   
     @Override
@@ -127,6 +142,16 @@ public class TerminalContainerHandle extends ContainerHandle<
         throw new UnsupportedOperationException("Unimplemented method 'onContainerRendered'");
     }
 
+    @Override
+    protected NoteBytesMap preprocessOutgoingRenderCommand(NoteBytesMap command) {
+        if (command == null || allocatedRegion == null) {
+            return command;
+        }
+        CursorCommandFilter.ClampResult result =
+            CursorCommandFilter.clampToBounds(command, allocatedRegion.toNoteBytes());
+        return result.command();
+    }
+
 
     @Override
     protected boolean regionsEqual(TerminalRectangle a, TerminalRectangle b) {
@@ -135,6 +160,7 @@ public class TerminalContainerHandle extends ContainerHandle<
         
         return a.equals(b);
     }
+
 
     @Override
     protected void applyRegionToRenderable(TerminalRenderable renderable, TerminalRectangle region) {
@@ -149,6 +175,7 @@ public class TerminalContainerHandle extends ContainerHandle<
 
     public static class TerminalBuilder extends ContainerHandle.Builder<
         TerminalContainerHandle,
+        TerminalRectanglePool,
         TerminalRectangle,
         TerminalContainerConfig,
         TerminalBuilder
@@ -203,11 +230,25 @@ public class TerminalContainerHandle extends ContainerHandle<
         return point;
     }
 
+ 
+
     @Override
-    protected TerminalEventsFactory createEventsFactory() {
-        return new TerminalEventsFactory(regionPool);
+    protected TerminalRectangle createRegionFromNoteBytes(NoteBytes regionBytes) {
+     
+        return TerminalRectangle.fromNoteBytes(regionBytes, regionPool);
     }
 
+    @Override
+    protected TerminalEventsFactory createEventsFactory(TerminalRectanglePool pool) {
+        return new TerminalEventsFactory(pool);
+    }
+
+    @Override
+    protected TerminalRectanglePool createRegionPool() {
+        return TerminalRectanglePool.getInstance();
+    }
+
+   
 
 
     

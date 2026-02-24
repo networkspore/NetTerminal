@@ -1,7 +1,7 @@
 package io.netnotes.terminal.layout;
 
-import io.netnotes.engine.ui.layout.GroupCallbackEntry;
-import io.netnotes.engine.ui.layout.GroupCallbackPredicate;
+import io.netnotes.engine.ui.renderer.layout.GroupCallbackEntry;
+import io.netnotes.engine.ui.renderer.layout.GroupCallbackPredicate;
 
 public class TerminalGroupCallbackEntry extends GroupCallbackEntry
 <

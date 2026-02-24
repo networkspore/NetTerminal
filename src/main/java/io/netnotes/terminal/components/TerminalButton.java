@@ -1,5 +1,6 @@
 package io.netnotes.terminal.components;
 
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
@@ -223,16 +224,47 @@ public class TerminalButton extends TerminalRegion {
     public boolean isEnabled() { return enabled; }
     public boolean isShowBorder() { return showBorder; }
 
+    // ===== SIZEABLE IMPLEMENTATION (FIXED) =====
+
     @Override
     public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getWidth()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredWidth();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinWidth();
+        }
+        
+        // FIT_CONTENT: Calculate based on text content
         int textLen = text != null ? text.length() : 0;
         int borderExtra = showBorder ? 4 : 0;
-        return Math.max(getMinWidth(), textLen + borderExtra);
+        
+        // Add border spacing + insets
+        return Math.max(getMinWidth(), textLen + borderExtra + getInsets().getHorizontal());
     }
 
     @Override
     public int getPreferredHeight() {
-        return Math.max(getMinHeight(), 1);
+        SizePreference pref = getHeightPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getHeight()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredHeight();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinHeight();
+        }
+        
+        // FIT_CONTENT: Calculate based on content
+        int baseHeight = showBorder ? 3 : 1;
+        return Math.max(getMinHeight(), baseHeight + getInsets().getVertical());
     }
     
     // ===== BUILDER =====

@@ -1,14 +1,8 @@
 package io.netnotes.terminal.layout;
 
+import io.netnotes.engine.ui.SizePreference;
+
 public interface TerminalSizeable {
-    
-    public enum SizePreference {
-        STATIC,
-        FILL,         // Take all available space (equivalent to PERCENT with 100%)
-        FIT_CONTENT,  // Use preferred/requested size
-        PERCENT,      // Use percentWidth or percentHeight fields
-        INHERIT       // Use parent's default (or null for same effect)
-    }
     
     SizePreference getWidthPreference();
     SizePreference getHeightPreference();
@@ -23,4 +17,6 @@ public interface TerminalSizeable {
     default void setPercentWidth(float percent) { }
     default float getPercentHeight() { return 0f; }
     default void setPercentHeight(float percent) { }
+
+    default boolean isHiddenManaged() { return true;  }
 }

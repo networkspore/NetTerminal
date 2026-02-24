@@ -3,6 +3,7 @@ package io.netnotes.terminal.menus;
 import java.util.*;
 import io.netnotes.terminal.*;
 import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.*;
 import io.netnotes.engine.io.input.events.*;
@@ -21,7 +22,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * - Scroll changes only invalidate scroll indicators
  * - Full menu changes invalidate entire allocated area
  */
-public class MenuNavigator extends TerminalRenderable {
+public class MenuNavigator extends TerminalRegion {
     
     private int horizontalScrollOffset = 0;
     private final Stack<MenuContext> navigationStack = new Stack<>();

@@ -13,9 +13,10 @@ import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
-import io.netnotes.terminal.layout.TerminalLayoutable;
 import io.netnotes.terminal.layout.TerminalSizeable;
-import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * A panel that can contain multiple renderables stacked in the same space,
@@ -26,7 +27,8 @@ import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
  * Supports scroll offsets and content padding for use in scrollable containers.
  * Enforces unique renderable names within the stack.
  */
-public class TerminalStackPanel extends TerminalRegion {
+public class TerminalStackPanel extends TerminalRegion  
+ {
     
     private final List<TerminalRenderable> stack = new ArrayList<>();
     private final Map<String, TerminalRenderable> nameToRenderable = new HashMap<>();
@@ -34,10 +36,9 @@ public class TerminalStackPanel extends TerminalRegion {
     
     private int scrollOffsetX = 0;
     private int scrollOffsetY = 0;
-    private final TerminalInsets contentPadding = new TerminalInsets();
+    private final TerminalInsets padding = new TerminalInsets();
     
-    // For scroll-aware sizing (content can be larger than viewport)
-    private TerminalRectangle contentSize = null;
+
 
     private final String layoutGroupId;
     private final String layoutCallbackId;
@@ -107,34 +108,34 @@ public class TerminalStackPanel extends TerminalRegion {
     /**
      * Set content padding. This creates internal spacing within the stack panel.
      */
-    public void setContentPadding(TerminalInsets padding) {
+    public void setPadding(TerminalInsets padding) {
         if (padding == null) {
-            if (!this.contentPadding.isZero()) {
-                this.contentPadding.clear();
+            if (!this.padding.isZero()) {
+                this.padding.clear();
                 requestLayoutUpdate();
             }
             return;
         }
         
-        if (!this.contentPadding.equals(padding)) {
-            this.contentPadding.copyFrom(padding);
+        if (!this.padding.equals(padding)) {
+            this.padding.copyFrom(padding);
             requestLayoutUpdate();
         }
     }
     
     public void setContentPadding(int padding) {
         int clamped = Math.max(0, padding);
-        if (this.contentPadding.getTop() != clamped ||
-            this.contentPadding.getRight() != clamped ||
-            this.contentPadding.getBottom() != clamped ||
-            this.contentPadding.getLeft() != clamped) {
-            this.contentPadding.setAll(clamped);
+        if (this.padding.getTop() != clamped ||
+            this.padding.getRight() != clamped ||
+            this.padding.getBottom() != clamped ||
+            this.padding.getLeft() != clamped) {
+            this.padding.setAll(clamped);
             requestLayoutUpdate();
         }
     }
     
     public TerminalInsets getInsets() {
-        return contentPadding;
+        return padding;
     }
 
     @Override
@@ -148,21 +149,7 @@ public class TerminalStackPanel extends TerminalRegion {
         super.setPercentHeight(percent);
         requestLayoutUpdate();
     }
-    
-    /**
-     * Set the desired content size. Used when content should be larger than the viewport
-     * (e.g., for scrolling). If null, content fills the available space.
-     */
-    public void setContentSize(TerminalRectangle size) {
-        if (this.contentSize != size && (this.contentSize == null || !this.contentSize.equals(size))) {
-            this.contentSize = size;
-            requestLayoutUpdate();
-        }
-    }
-    
-    public TerminalRectangle getContentSize() {
-        return contentSize;
-    }
+
     
     /**
      * Add a renderable to the stack. It will be hidden by default unless it's
@@ -174,25 +161,31 @@ public class TerminalStackPanel extends TerminalRegion {
         if (renderable == null) {
             throw new IllegalArgumentException("Cannot add null renderable to stack");
         }
+
+        if(stack.contains(renderable)){
+            return;
+        }
         
         String name = renderable.getName();
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("Renderable must have a non-empty name");
         }
-        
-        if (nameToRenderable.containsKey(name)) {
+        TerminalRenderable existingR = nameToRenderable.get(name);
+
+       
+        if (existingR != null) {
+            if (existingR == renderable) {
+                return;
+            }
             throw new IllegalArgumentException("Renderable with name '" + name + "' already exists in stack");
         }
-        
-        if (stack.contains(renderable)) {
-            return; // Already in stack (shouldn't happen if names are unique, but defensive)
-        }
-        
+        Log.logMsg("[TerminalStackPanel] addToStack addedChild:" + renderable.getName());
+       
         stack.add(renderable);
         nameToRenderable.put(name, renderable);
         addChild(renderable);
         addToLayoutGroup(renderable, layoutGroupId);
-        
+     
         // Set visibility policy for the renderable
         renderable.setVisibilityPolicy(this::visibilityPolicy);
         
@@ -375,45 +368,65 @@ public class TerminalStackPanel extends TerminalRegion {
         TerminalLayoutContext[] contexts,
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
     ) {
-        if (contexts.length == 0) return;
+        if (contexts.length == 0){ 
+            Log.logMsg("[TerminalStackPanel] contexts: 0");
+            return;
+        }
         
         TerminalRectangle parentPanel = contexts[0].getParentRegion();
-        if (parentPanel == null) return;
+        Log.logMsg("[TerminalStackPanel:" + getName() + "] layoutAllPanels parentRegion=" + parentPanel);
+        if (parentPanel == null){
+            Log.logMsg("[TerminalBorderPanel] layoutStack: parent region is null" +
+                "this.Region:" + (this.region != null ? this.region.toString() : "null")
+            );
+            
+            return; 
+        }
+
+        int viewportWidth = parentPanel.getWidth() - padding.getHorizontal();
+        int viewportHeight = parentPanel.getHeight() -  padding.getVertical();
         
-        int panelWidth = parentPanel.getWidth();
-        int panelHeight = parentPanel.getHeight();
-        
-        // Calculate viewport (available space after padding)
-        int viewportWidth = panelWidth - contentPadding.getHorizontal();
-        int viewportHeight = panelHeight - contentPadding.getVertical();
+        Log.logMsg("[TerminalStackPanel] parent: \n\tWidth: " + viewportWidth
+            + "\n\tpanelHeight: " + viewportHeight
+        );
+
+    
         
         // Determine content dimensions
         int contentWidth;
         int contentHeight;
         
-        if (contentSize != null) {
-            // Use explicit content size (for scrolling scenarios)
-            contentWidth = contentSize.getWidth();
-            contentHeight = contentSize.getHeight();
+        TerminalRenderable visible = visibleContent;
+        if(visible == null){
+            return;
+        }
+
+        if (visible instanceof TerminalSizeable sizable) {
+            contentWidth  = resolveContentDimension(visible, viewportWidth,
+                sizable.getPercentWidth(),  sizable.getWidthPreference(),  true);
+            contentHeight = resolveContentDimension(visible, viewportHeight,
+                sizable.getPercentHeight(), sizable.getHeightPreference(), false);
         } else {
-            // Default: content fills viewport
-            contentWidth = viewportWidth;
+            contentWidth  = viewportWidth;
             contentHeight = viewportHeight;
         }
+
+        Log.logMsg("[TerminalStackPanel] layoutStack: contentWidth: " + contentWidth + " contentHeight: " + contentHeight);
         
         // All items in the stack get the same layout with scroll offset applied
         for (TerminalLayoutContext context : contexts) {
             TerminalRenderable child = context.getRenderable();
             
             if (!stack.contains(child)) {
+                Log.logMsg("[TerminalStackPanel] layoutStack: skipping child: " + child.getName());
                 continue; // Skip if not in our stack
             }
             
             boolean shouldBeHidden = child.isHidden();
             
             // Apply scroll offset and padding
-            int x = contentPadding.getLeft() - scrollOffsetX;
-            int y = contentPadding.getTop() - scrollOffsetY;
+            int x = padding.getLeft() - scrollOffsetX;
+            int y = padding.getTop() - scrollOffsetY;
             
             TerminalLayoutData.TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder()
                 .setX(x)
@@ -430,10 +443,32 @@ public class TerminalStackPanel extends TerminalRegion {
             dataInterfaces.get(child.getName()).setLayoutData(layout);
         }
     }
+
+    private int resolveContentDimension(
+        TerminalRenderable child,
+        int viewport,
+        float percent,
+        SizePreference pref,
+        boolean isWidth
+    ) {
+        Log.logMsg("[TerminalStackPanel] layoutStack: child: " +child.getName()+ " Pref: " + pref);
+        return switch (pref) {
+            case FILL    -> viewport;
+            case PERCENT -> Math.round(viewport * (percent / 100f));
+            case STATIC  -> isWidth ? child.getRegion().getWidth() 
+                                    : child.getRegion().getHeight();
+            case FIT_CONTENT -> child instanceof TerminalSizeable s 
+                                    ? ( isWidth 
+                                            ? Math.max(s.getMinWidth(),  s.getPreferredWidth())
+                                            : Math.max(s.getMinHeight(), s.getPreferredHeight())) 
+                                    : viewport;
+            default -> viewport;
+        };
+    }
     
     private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalLayoutable) {
-            return ((TerminalLayoutable) child).isHiddenManaged();
+        if (child instanceof TerminalSizeable sizable) {
+            return sizable.isHiddenManaged();
         }
         return true;
     }
@@ -494,7 +529,7 @@ public class TerminalStackPanel extends TerminalRegion {
     }
     
     @Override
-    protected void onCleanup() {
+    protected void onDestroying() {
         destroyLayoutGroup(layoutGroupId);
         layoutCallbackEntry = null;
     }

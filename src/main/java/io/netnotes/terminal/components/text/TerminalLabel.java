@@ -1,6 +1,7 @@
 package io.netnotes.terminal.components.text;
 
 import io.netnotes.engine.ui.LabelTruncation;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
@@ -135,26 +136,64 @@ public class TerminalLabel extends TerminalRegion {
     public LabelTruncation getTruncation() { return truncation; }
     public boolean isWordWrap() { return wordWrap; }
 
+    // ===== SIZEABLE IMPLEMENTATION =====
+    
     @Override
     public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getWidth()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredWidth();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinWidth();
+        }
+        
+        // FIT_CONTENT: Calculate based on text content
         if (text == null || text.isEmpty()) {
             return getMinWidth();
         }
+        
+        // Find the longest line in the text
         String[] lines = text.split("\\R", -1);
         int maxLen = 0;
         for (String line : lines) {
             maxLen = Math.max(maxLen, line.length());
         }
-        return Math.max(getMinWidth(), maxLen);
+        
+        // Return max of minimum width or (content width + insets)
+        // Note: getMinWidth() already includes insets, so we add insets to content
+        return Math.max(getMinWidth(), maxLen + getInsets().getHorizontal());
     }
 
     @Override
     public int getPreferredHeight() {
+        SizePreference pref = getHeightPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getHeight()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredHeight();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinHeight();
+        }
+        
+        // FIT_CONTENT: Calculate based on text content
         if (text == null || text.isEmpty()) {
             return getMinHeight();
         }
-        int lines = text.split("\\R", -1).length;
-        return Math.max(getMinHeight(), Math.max(1, lines));
+        
+        // Count the number of lines
+        int lineCount = text.split("\\R", -1).length;
+        
+        // Return max of minimum height or (line count + insets)
+        // Ensure at least 1 line
+        return Math.max(getMinHeight(), Math.max(1, lineCount) + getInsets().getVertical());
     }
     
     // ===== BUILDER =====

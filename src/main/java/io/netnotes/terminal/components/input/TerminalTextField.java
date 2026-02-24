@@ -10,6 +10,7 @@ import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyCharEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextPosition;
 import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytes;
@@ -457,11 +458,51 @@ public class TerminalTextField extends TerminalRegion {
             onChange.accept(buffer.toString());
         }
     }
-    
-    // ===== CLEANUP =====
-    
+
+
     @Override
-    protected void onCleanup() {
+    public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getWidth()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredWidth();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinWidth();
+        }
+        
+        // FIT_CONTENT: Calculate based on text content
+        int textLen = buffer != null ? buffer.length() : 0;
+        
+        
+        // Add border spacing + insets
+        return Math.max(getMinWidth(), textLen + getInsets().getHorizontal());
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        SizePreference pref = getHeightPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getHeight()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredHeight();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinHeight();
+        }
+        
+        // FIT_CONTENT: Calculate based on content
+        int baseHeight = 1;
+        return Math.max(getMinHeight(), baseHeight + getInsets().getVertical());
+    }
+
+    @Override
+    protected void onDestroying(){
         if (keyCharHandlerId != null) {
             removeKeyCharHandler(keyCharHandlerId);
             keyCharHandlerId = null;
@@ -472,4 +513,5 @@ public class TerminalTextField extends TerminalRegion {
         }
         buffer.clear();
     }
+    
 }

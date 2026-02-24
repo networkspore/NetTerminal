@@ -163,4 +163,7 @@ public class VScrollIndicator extends TerminalRegion implements ScrollIndicator<
             }
         }
     }
+
+
+    
 }

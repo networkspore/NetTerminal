@@ -1,6 +1,7 @@
 package io.netnotes.terminal.components;
 
 import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
@@ -314,8 +315,23 @@ public class TerminalMessageBox extends TerminalRegion {
         return borders + paddingRows + messageRows + spacingRows + footerRows;
     }
     
+    // ===== SIZEABLE IMPLEMENTATION (FIXED) =====
+    
     @Override
     public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getWidth()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredWidth();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinWidth();
+        }
+        
+        // FIT_CONTENT: Calculate based on content
         int maxLength = 0;
         
         if (title != null) {
@@ -332,24 +348,39 @@ public class TerminalMessageBox extends TerminalRegion {
             maxLength = Math.max(maxLength, footer.length());
         }
         
-        int preferred = maxLength + (2 * padding) + 2;
+        // Add padding (internal spacing) + border (2) + insets (external spacing)
+        int preferred = maxLength + (2 * padding) + 2 + getInsets().getHorizontal();
         return Math.max(getMinWidth(), preferred);
     }
 
     @Override
     public int getPreferredHeight() {
-        return Math.max(getMinHeight(), getMinimumHeight());
+        SizePreference pref = getHeightPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getHeight()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredHeight();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinHeight();
+        }
+        
+        // FIT_CONTENT: Calculate based on content
+        int contentHeight = getMinimumHeight();
+        return Math.max(getMinHeight(), contentHeight + getInsets().getVertical());
     }
 
     @Override
     public int getMinWidth() {
-        int paddedMin = (2 * padding) + 2;
+        int paddedMin = (2 * padding) + 2 + getInsets().getHorizontal();
         return Math.max(super.getMinWidth(), Math.max(3, paddedMin));
     }
 
     @Override
     public int getMinHeight() {
-        int paddedMin = (2 * padding) + 2;
+        int paddedMin = (2 * padding) + 2 + getInsets().getVertical();
         return Math.max(super.getMinHeight(), Math.max(3, paddedMin));
     }
     

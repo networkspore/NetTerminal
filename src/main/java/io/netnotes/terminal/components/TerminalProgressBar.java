@@ -1,9 +1,9 @@
 package io.netnotes.terminal.components;
 
 import io.netnotes.engine.ui.Orientation;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.*;
 import io.netnotes.terminal.layout.TerminalInsets;
-import io.netnotes.terminal.layout.TerminalLayoutable;
 /**
  * TerminalProgressBar - Enhanced progress bar with color support
  * 
@@ -13,7 +13,7 @@ import io.netnotes.terminal.layout.TerminalLayoutable;
  * - Optional label and percentage display
  * - Vertical or horizontal orientation
  */
-public class TerminalProgressBar extends TerminalRegion implements TerminalLayoutable {
+public class TerminalProgressBar extends TerminalRegion {
     public final static int MIN_WIDTH = 8;
     public enum Style {
         CLASSIC,    // |25%|=====-----|
@@ -99,6 +99,42 @@ public class TerminalProgressBar extends TerminalRegion implements TerminalLayou
         invalidate();
     }
     
+
+    @Override
+    public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getWidth()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredWidth();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinWidth();
+        }
+   
+        return getMinWidth();
+        
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        SizePreference pref = getHeightPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getHeight()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredHeight();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinHeight();
+        }
+
+
+        return Math.max(getMinHeight(), 1 + getInsets().getVertical());
+    }
     
     
     @Override

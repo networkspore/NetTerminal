@@ -8,10 +8,11 @@ import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
-import io.netnotes.terminal.layout.TerminalLayoutable;
 import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.BorderPanel;
-import io.netnotes.engine.ui.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.components.TerminalRegion;
@@ -68,6 +69,8 @@ public class TerminalBorderPanel extends TerminalRegion {
         for (TerminalStackPanel stack : regionStacks.values()) {
             addToLayoutGroup(stack, layoutGroupId);
         }
+
+        Log.logMsg("[TerminalBorderPanel] isThisScroll?" + (this instanceof TerminalScrollPanel panel ? "name: " + panel.getName() : "false"));
     }
 
     public TerminalGroupCallbackEntry getTerminalGroupCallbackEntry() { 
@@ -308,16 +311,39 @@ public class TerminalBorderPanel extends TerminalRegion {
         TerminalLayoutContext[] contexts,
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
     ) {
-        if (contexts.length == 0) return;
+        
+        if (contexts.length == 0){ 
+            Log.logMsg("[TerminalBorderPanel] contexts: 0");
+            return;
+        }
         
         TerminalRectangle parentPanel = contexts[0].getParentRegion();
-        if (parentPanel == null) return;
-        
+        Log.logMsg("[BorderPanel]"
+            + "\n\tname:" + getName()
+            + "\n\tparentRegion:" + parentPanel
+            + "\n\tscrollPanel:" + (this instanceof TerminalScrollPanel panel 
+                ? "true\\n\\t\\tpanelName:" + panel 
+                : "false"
+            )
+       
+        );
+        if (parentPanel == null){
+            Log.logMsg("[TerminalBorderPanel] parent region is null" +
+                "this.Region:" + (this.region != null ? this.region.toString() : "null")
+            );
+            
+            return; 
+        }
+   
         int horizontalPadding = padding.getHorizontal();
         int verticalPadding = padding.getVertical();
 
         int availableWidth = parentPanel.getWidth() - horizontalPadding;
         int availableHeight = parentPanel.getHeight() - verticalPadding;
+        
+        Log.logMsg("[TerminalBorderPanel] parent: \n\tWidth: " + availableWidth
+            + "\n\tpanelHeight: " + availableHeight
+        );
         
         // Calculate dimensions for each region
         int topHeight = 0;
@@ -391,6 +417,14 @@ public class TerminalBorderPanel extends TerminalRegion {
         
         int centerWidth = availableWidth - leftWidth - rightWidth;
         int centerX = padding.getLeft() + leftWidth;
+        Log.logMsg("[TerminalBorderPanel] layoutAllPanels centerDimensions:"
+            + "\n\tcenterWidth: " + centerWidth
+            + "\n\tcenterX: " + centerX 
+            + "\n\tmiddleHeight: " + middleHeight 
+            + "\n\tavailableHeight:" + availableHeight 
+            + "\n\ttopHeight:" + topHeight
+            + "\n\tbottomHeight;" + bottomHeight
+        );
         layoutStackPanel(dataInterfaces, regionStacks.get(BorderPanel.CENTER),
             centerX, middleY, Math.max(0, centerWidth), Math.max(0, middleHeight), parentPanel);
     }
@@ -425,48 +459,48 @@ public class TerminalBorderPanel extends TerminalRegion {
     }
     
     private int calculatePreferredHeight(TerminalRenderable child, int availableWidth) {
+        if (child instanceof TerminalSizeable sizeable) {
+            SizePreference heightPref = sizeable.getHeightPreference();
+            
+            return switch (heightPref) {
+                case STATIC -> child.getRequestedRegion() != null 
+                    ? child.getRequestedRegion().getHeight() 
+                    : child.getRegion().getHeight();
+                case FILL   -> sizeable.getMinHeight();
+                case PERCENT -> sizeable.getMinHeight();
+                case FIT_CONTENT -> sizeable.getPreferredHeight();
+                default -> sizeable.getMinHeight();
+            };
+        }
+        
+        // Non-sizeable: requestedRegion is the only hint we have
         if (child.getRequestedRegion() != null) {
             return child.getRequestedRegion().getHeight();
         }
         
-        if (child instanceof TerminalSizeable) {
-            TerminalSizeable sizeable = (TerminalSizeable) child;
-            SizePreference heightPref = sizeable.getHeightPreference();
-            
-            if (heightPref == SizePreference.FILL) {
-                // For FILL preference, use minimum height as the "preferred" size
-                // The actual fill will happen during layout
-                return sizeable.getMinHeight();
-            } else if (heightPref == SizePreference.FIT_CONTENT) {
-                // Use the child's preferred height
-                return sizeable.getPreferredHeight();
-            }
-        }
-        
-        // Fallback: use minimum sensible height
         return 1;
     }
     
     private int calculatePreferredWidth(TerminalRenderable child, int availableHeight) {
+        if (child instanceof TerminalSizeable sizeable) {
+            SizePreference widthPref = sizeable.getWidthPreference();
+            
+            return switch (widthPref) {
+                case STATIC -> child.getRequestedRegion() != null 
+                    ? child.getRequestedRegion().getWidth() 
+                    : child.getRegion().getWidth();
+                case FILL    -> sizeable.getMinWidth();
+                case PERCENT -> sizeable.getMinWidth();
+                case FIT_CONTENT -> sizeable.getPreferredWidth();
+                default -> sizeable.getMinWidth();
+            };
+        }
+        
+        // Non-sizeable: requestedRegion is the only hint we have
         if (child.getRequestedRegion() != null) {
             return child.getRequestedRegion().getWidth();
         }
         
-        if (child instanceof TerminalSizeable) {
-            TerminalSizeable sizeable = (TerminalSizeable) child;
-            SizePreference widthPref = sizeable.getWidthPreference();
-            
-            if (widthPref == SizePreference.FILL) {
-                // For FILL preference, use minimum width as the "preferred" size
-                // The actual fill will happen during layout
-                return sizeable.getMinWidth();
-            } else if (widthPref == SizePreference.FIT_CONTENT) {
-                // Use the child's preferred width
-                return sizeable.getPreferredWidth();
-            }
-        }
-        
-        // Fallback: use minimum sensible width
         return 1;
     }
 
@@ -483,8 +517,8 @@ public class TerminalBorderPanel extends TerminalRegion {
     }
 
     private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalLayoutable) {
-            return ((TerminalLayoutable) child).isHiddenManaged();
+        if (child instanceof TerminalSizeable sizeable) {
+            return sizeable.isHiddenManaged();
         }
         return true;
     }
@@ -654,8 +688,29 @@ public class TerminalBorderPanel extends TerminalRegion {
     }
     
     @Override
-    protected void onCleanup() {
+    protected void onDestroying() {
         destroyLayoutGroup(layoutGroupId);
         layoutCallbackEntry = null;
+    }
+
+    protected int resolveContentDimension(
+        TerminalRenderable child,
+        int viewport,
+        float percent,
+        SizePreference pref,
+        boolean isWidth
+    ) {
+        return switch (pref) {
+            case FILL    -> viewport;
+            case PERCENT -> Math.round(viewport * (percent / 100f));
+            case STATIC  -> isWidth ? child.getRegion().getWidth() 
+                                    : child.getRegion().getHeight();
+            case FIT_CONTENT -> child instanceof TerminalSizeable s 
+                                    ? ( isWidth 
+                                            ? Math.max(s.getMinWidth(),  s.getPreferredWidth())
+                                            : Math.max(s.getMinHeight(), s.getPreferredHeight())) 
+                                    : viewport;
+            default -> viewport;
+        };
     }
 }

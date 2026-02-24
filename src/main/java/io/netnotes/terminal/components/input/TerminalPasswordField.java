@@ -11,6 +11,7 @@ import io.netnotes.engine.io.input.ephemeralEvents.EphemeralKeyDownEvent;
 import io.netnotes.engine.io.input.events.RoutedEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyCharEvent;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextPosition;
 import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytes;
@@ -61,7 +62,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 public class TerminalPasswordField extends TerminalRegion {
     public static final int MAX_PASSWORD_BYTE_LENGTH = 256;
     public static final int MAX_KEYSTROKE_COUNT = 128;
-    
+    public static final int PREF_SECURE_WIDTH = 10;
     /**
      * Display mode for password field
      */
@@ -641,11 +642,53 @@ public class TerminalPasswordField extends TerminalRegion {
             onChange.run();
         }
     }
+
+
+    @Override
+    public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getWidth()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredWidth();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinWidth();
+        }
+        
+        // FIT_CONTENT: Calculate based on text content
+        int textLen = !isHighSecurity ? keystrokeCount : PREF_SECURE_WIDTH;
+        
+        
+        // Add border spacing + insets
+        return Math.max(getMinWidth(), textLen + getInsets().getHorizontal());
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        SizePreference pref = getHeightPreference();
+        
+        // Handle STATIC - delegate to parent which uses region.getHeight()
+        if (pref == SizePreference.STATIC) {
+            return super.getPreferredHeight();
+        }
+        
+        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
+        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
+            return getMinHeight();
+        }
+        
+        // FIT_CONTENT: Calculate based on content
+        int baseHeight = 1;
+        return Math.max(getMinHeight(), baseHeight + getInsets().getVertical());
+    }
     
     // ===== CLEANUP =====
-    
+
     @Override
-    protected void onCleanup() {
+    protected void onDestroying(){
         if (keyCharHandlerId != null) {
             removeKeyCharHandler(keyCharHandlerId);
             keyCharHandlerId = null;
@@ -654,6 +697,10 @@ public class TerminalPasswordField extends TerminalRegion {
             removeKeyDownHandler(keyDownHandlerId);
             keyDownHandlerId = null;
         }
+    }
+    
+    @Override
+    protected void onRemovedFromLayout() {
         // Securely clear password buffer
         passwordBytes.close();
         Arrays.fill(keystrokeLengths, (byte) 0);
