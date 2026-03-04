@@ -3,7 +3,7 @@
     <modelVersion>4.0.0</modelVersion>
     <groupId>io.netnotes</groupId>
     <artifactId>netterminal</artifactId>
-    <version>0.8.6</version>
+    <version>0.9.4</version>
     
     <properties>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
@@ -12,9 +12,12 @@
         <exec.mainClass>io.netnotes.Main</exec.mainClass>
 
     </properties>
-       
-
         <dependencies>
+           <dependency>
+                <groupId>io.netnotes</groupId>
+                <artifactId>engine</artifactId>
+                <version>0.9.4</version>
+            </dependency>
 
             <dependency>
                 <groupId>org.jline</groupId>
@@ -22,16 +25,8 @@
                 <version>3.26.3</version> 
             </dependency>
  
-            <dependency>
-                <groupId>io.netnotes</groupId>
-                <artifactId>engine</artifactId>
-                <version>0.7.0</version>
-            </dependency>
-
-
         </dependencies>
       
-    
         <build>
             <extensions>
                 <extension>

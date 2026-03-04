@@ -4,6 +4,7 @@ package io.netnotes.consoleRenderer;
 import io.netnotes.engine.io.input.Keyboard.KeyCode;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.streams.StreamUtils;
 
 import org.jline.terminal.Attributes;
@@ -38,6 +39,9 @@ import java.util.function.Consumer;
  * - Event routing
  */
 public class ConsoleInputCapture {
+
+    private static final LogLevel LOG_LEVEL = LogLevel.GENERAL; 
+
     private static final int MOD_ALT = 0x0004;
 
     private final Terminal terminal;
@@ -76,13 +80,13 @@ public class ConsoleInputCapture {
             return captureStarted;
         }
   
-        Log.logMsg("[ConsoleInputCapture] Starting capture at: ");
+        Log.logMsg("[ConsoleInputCapture] Starting capture ", LOG_LEVEL);
         capturing = true;
         
         // Start capture loop in background
         capturingFuture = executor.submit(this::captureLoop);
 
-        Log.logMsg("[ConsoleInputCapture] Capture started, returning completed future");
+        Log.logMsg("[ConsoleInputCapture] Capture started, returning completed future", LOG_LEVEL);
         return captureStarted;
     }
 
@@ -99,11 +103,11 @@ public class ConsoleInputCapture {
      * 3. Emit all events from result
      */
     private void captureLoop() {
-        Log.logMsg("[ConsoleInputCapture] captureLoop() entered");
+        Log.logMsg("[ConsoleInputCapture] captureLoop() entered", LOG_LEVEL);
         
         // Get the raw input stream
         input = terminal.input();
-        Log.logMsg("[ConsoleInputCapture] Got InputStream: " + input);
+        Log.logMsg("[ConsoleInputCapture] Got InputStream: " + input, LOG_LEVEL);
         
         try {
             captureStarted.complete(null);
@@ -111,7 +115,7 @@ public class ConsoleInputCapture {
             // Verify terminal is in raw mode
             Attributes attrs = terminal.getAttributes();
             boolean rawMode = !attrs.getLocalFlag(Attributes.LocalFlag.ICANON);
-            Log.logMsg("[ConsoleInputCapture] Raw mode active: " + rawMode);
+            Log.logMsg("[ConsoleInputCapture] Raw mode active: " + rawMode, LOG_LEVEL);
             
             if (!rawMode) {
                 Log.logError("[ConsoleInputCapture] WARNING: Terminal NOT in raw mode!");
@@ -119,17 +123,17 @@ public class ConsoleInputCapture {
             
     
             
-            Log.logMsg("[ConsoleInputCapture] Starting read loop...");
+            Log.logMsg("[ConsoleInputCapture] Starting read loop...", LOG_LEVEL);
       
             int totalEvents = 0;
             while (capturing && !Thread.currentThread().isInterrupted()) {
                 try {
                     // Read next input - gets both raw char and events
                     readNext();
-                    Log.logMsg("[ConsoleInputCapture] event captured");
+                    Log.logMsg("[ConsoleInputCapture] event captured", LOG_LEVEL);
                     totalEvents++;
                 } catch (InterruptedIOException e) {
-                    Log.logMsg("[ConsoleInputCapture] Read interrupted");
+                    Log.logMsg("[ConsoleInputCapture] Read interrupted", LOG_LEVEL);
                     break;
                 } catch (Exception e) {
                     if (capturing) {
@@ -140,7 +144,7 @@ public class ConsoleInputCapture {
                 }
             }
             
-            Log.logMsg("[ConsoleInputCapture] Exited read loop. Total events (grouped): " + totalEvents);
+            Log.logMsg("[ConsoleInputCapture] Exited read loop. Total events (grouped): " + totalEvents, LOG_LEVEL);
             
         } catch (Exception e) {
             Log.logError("[ConsoleInputCapture] Fatal error in capture loop: " + e.getMessage());
@@ -150,7 +154,7 @@ public class ConsoleInputCapture {
             StreamUtils.safeClose(input);
             capturing = false;
             captureStarted = new CompletableFuture<>();
-            Log.logMsg("[ConsoleInputCapture] Capture loop ended");
+            Log.logMsg("[ConsoleInputCapture] Capture loop ended", LOG_LEVEL);
         }
     }
 
@@ -309,7 +313,7 @@ public class ConsoleInputCapture {
             }
    
         } else {
-            Log.logMsg("[ConsoleInputReader] Unknown ESC sequence: ESC " + next);
+            Log.logMsg("[ConsoleInputReader] Unknown ESC sequence: ESC " + next, LOG_LEVEL);
         }
     }
     
@@ -417,7 +421,7 @@ public class ConsoleInputCapture {
     public void stop() {
         if (!capturing) return;
         
-        Log.logMsg("[ConsoleInputCapture] Stopping...");
+        Log.logMsg("[ConsoleInputCapture] Stopping...", LOG_LEVEL);
         capturing = false;
         
         if (capturingFuture != null) {
@@ -429,7 +433,7 @@ public class ConsoleInputCapture {
         try {
             // Wait for executor to finish
             if (!executor.awaitTermination(1, TimeUnit.SECONDS)) {
-                Log.logMsg("[ConsoleInputCapture] Forcing executor shutdown");
+                Log.logMsg("[ConsoleInputCapture] Forcing executor shutdown", LOG_LEVEL);
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {
@@ -437,7 +441,7 @@ public class ConsoleInputCapture {
             executor.shutdownNow();
         }
         
-        Log.logMsg("[ConsoleInputCapture] Stopped");
+        Log.logMsg("[ConsoleInputCapture] Stopped", LOG_LEVEL);
   
     }
 }

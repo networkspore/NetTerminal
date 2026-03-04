@@ -51,7 +51,7 @@ public class TerminalButton extends TerminalRegion {
         if ((this.text == null && text != null) || 
             (this.text != null && !this.text.equals(text))) {
             this.text = text;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -73,7 +73,7 @@ public class TerminalButton extends TerminalRegion {
     public void setShowBorder(boolean showBorder) {
         if (this.showBorder != showBorder) {
             this.showBorder = showBorder;
-            invalidate();
+            notifyContentChanged();
         }
     }
     

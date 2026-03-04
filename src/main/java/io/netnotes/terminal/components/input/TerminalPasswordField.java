@@ -309,7 +309,11 @@ public class TerminalPasswordField extends TerminalRegion {
             currentLength = 0;
             keystrokeCount = 0;
             scrollOffset = 0;
-            invalidate();
+            if(isHighSecurity){
+                invalidate();
+            }else{
+                notifyContentChanged();
+            }
         }
     }
     
@@ -609,7 +613,11 @@ public class TerminalPasswordField extends TerminalRegion {
             keystrokeLengths[keystrokeCount] = 0;
             
             ensureCursorVisible();
-            invalidate();
+            if(isHighSecurity){
+                invalidate();
+            }else{
+                notifyContentChanged();
+            }
             fireOnChange();
         }
     }
@@ -643,6 +651,9 @@ public class TerminalPasswordField extends TerminalRegion {
         }
     }
 
+    public int getMinWidth(){
+        return Math.max(super.getMinWidth(), 2);
+    }
 
     @Override
     public int getPreferredWidth() {

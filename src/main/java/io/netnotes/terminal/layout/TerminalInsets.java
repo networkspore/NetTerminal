@@ -1,6 +1,7 @@
 package io.netnotes.terminal.layout;
 
 import java.util.Objects;
+import java.util.function.Consumer;
 
 /**
  * TerminalInsets - padding/margins for terminal layout
@@ -10,6 +11,8 @@ public class TerminalInsets {
     private int right;
     private int bottom;
     private int left;
+
+    private Consumer<TerminalInsets> onChanged = null;
 
     /**
      * Default constructor - all zero
@@ -39,6 +42,16 @@ public class TerminalInsets {
         set(top, right, bottom, left);
     }
 
+    public void setOnChanged(Consumer<TerminalInsets> onChanged){
+        this.onChanged = onChanged;
+    }
+
+    protected void thisChanged(){
+        if(this.onChanged != null){
+            onChanged.accept(this);
+        }
+    }
+
     public int getTop() {
         return top;
     }
@@ -55,27 +68,56 @@ public class TerminalInsets {
         return left;
     }
 
+    protected void updateChanged(){
+
+    }
+
     public void setTop(int top) {
+        int old = this.top;
+        
         this.top = Math.max(0, top);
+        if(old != this.top){
+            thisChanged();
+        }
     }
 
     public void setRight(int right) {
+        int old = this.right;
+       
         this.right = Math.max(0, right);
+        if(old != this.right){
+            thisChanged();
+        }
     }
 
     public void setBottom(int bottom) {
+        int old = this.bottom;
         this.bottom = Math.max(0,bottom);
+        if(this.bottom != old){
+            thisChanged();
+        }
     }
 
     public void setLeft(int left) {
+        int old = this.left;
         this.left = Math.max(0,left);
+        if(old != this.left){
+            thisChanged();;
+        }
     }
 
     public void set(int top, int right, int bottom, int left) {
+        int oldTop = this.top;
+        int oldRight = this.right;
+        int oldBottom = this.bottom;
+        int oldLeft = this.left;
         this.top = Math.max(0, top);
         this.right = Math.max(0, right);
         this.bottom = Math.max(0,bottom);
         this.left = Math.max(0,left);
+        if(oldTop != top || oldRight != right || oldBottom != bottom || oldLeft != left){
+            thisChanged();
+        }
     }
 
     public void setAll(int all) {
@@ -99,10 +141,14 @@ public class TerminalInsets {
     }
 
     public void clear() {
+        boolean changed = top != 0 || right != 0 || bottom != 0 || left != 0;
         top = 0;
         right = 0;
         bottom = 0;
         left = 0;
+        if(changed){
+            thisChanged();
+        }
     }
 
     public TerminalInsets copy() {
@@ -111,10 +157,14 @@ public class TerminalInsets {
 
     public void copyFrom(TerminalInsets other) {
         if (other == null) return;
-        this.top = other.top;
-        this.right = other.right;
-        this.bottom = other.bottom;
-        this.left = other.left;
+        set(other.top, other.right, other.bottom, other.left);
+    }
+
+    public boolean equals(int all) {
+        return top == all &&
+               right == all &&
+               bottom == all &&
+               left == all;
     }
 
     @Override

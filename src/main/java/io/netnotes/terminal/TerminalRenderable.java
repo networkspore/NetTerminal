@@ -11,6 +11,8 @@ import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.renderer.Renderable;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 
 /**
  * TerminalRenderable - Abstract base class for terminal renderables
@@ -53,6 +55,8 @@ public abstract class TerminalRenderable extends Renderable<
     TerminalLayoutGroup,
     TerminalRenderable
 > {
+
+    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
     
     private boolean clampCursor = true;          // Default to clamping cursor
     
@@ -481,8 +485,24 @@ public abstract class TerminalRenderable extends Renderable<
     }
     
     protected void printAt(TerminalBatchBuilder batch, int x, int y, String text, TextStyle style) {
-        if (!isEffectivelyVisible() || text.isEmpty()) return;
-        if (y < 0 || y >= getHeight()) return;
+        if (!isEffectivelyVisible() || text.isEmpty()){ 
+            Log.logMsg("[TerminalRenderable] printAt dropped"
+                + "\n\ttext:" + text
+                + "\n\tisEffectivelyVisible: " + isEffectivelyVisible()
+                + "\n\ttext.isEmpty: " + text.isEmpty() 
+            , LOG_LEVEL);
+            return;
+        }
+        if (y < 0 || y >= getHeight()){ 
+            Log.logMsg("[TerminalRenderable] printAt dropped"
+                + "\n\ttext:" + text
+                + "\n\ty: " + y
+                + "\n\ty<0: " + (y < 0)
+                + "\n\ty>=getHeight(): " + (y>=getHeight())
+                + "\n\theight: " + getHeight() 
+            , LOG_LEVEL);
+            return;
+        }
         
         int absY = toAbsoluteY(y);
         int left = toAbsoluteX(Math.max(0, x));
@@ -495,12 +515,24 @@ public abstract class TerminalRenderable extends Renderable<
             right = Math.min(right, clip.getX() + clip.getWidth());
         }
         
-        if (right <= left) return;
+        if (right <= left) {
+            Log.logMsg("[TerminalRenderable] printAt dropped"
+                + "\n\ttext:" + text
+                + "\n\tright <= left: " + (right<=left)
+                + "\n\tright:" + right
+                + "\n\tleft:" + left
+            , LOG_LEVEL);
+            return;
+        }
         
         int startIdx = left - toAbsoluteX(x);
         int endIdx = right - toAbsoluteX(x);
         text = text.substring(Math.max(0, startIdx), Math.min(text.length(), endIdx));
-        
+        Log.logMsg("[TerminalRenderable] printAt"
+                + "\n\ttext:" + text
+                + "\n\tleft:" + left
+                + "\n\tabsY" + absY
+        , LOG_LEVEL);
         batch.printAt(left, absY, text, style);
     }
     
@@ -711,14 +743,16 @@ public abstract class TerminalRenderable extends Renderable<
         TerminalRectangle region = regionPool.obtain();
         region.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
         batch.pushClipRegion(region);
-        regionPool.recycle(region);
     }
 
     /**
      * Pop clip region
      */
     protected void popClipRegion(TerminalBatchBuilder batch) {
-        batch.popClipRegion();
+        TerminalRectangle popped = batch.popClipRegion();
+        if (popped != null) {
+            regionPool.recycle(popped);
+        }
     }
     
     // ===== NON-POSITIONED OPERATIONS (pass-through) =====
@@ -1088,6 +1122,7 @@ public abstract class TerminalRenderable extends Renderable<
         return new int[] { Math.max(0, x), Math.max(0, y) };
     }
    
+    
     
     /**
      * Subclasses implement to render their 2D content

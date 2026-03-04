@@ -21,8 +21,8 @@ import io.netnotes.engine.ui.renderer.BatchBuilder;
  */
 public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     
-    public TerminalBatchBuilder() {
-        super();
+    public TerminalBatchBuilder(TerminalRectanglePool regionPool) {
+        super(regionPool);
     }
 
     @Override
@@ -447,4 +447,5 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     public void shadeRegion(TerminalRectangle region, TerminalRectangle renderRegion, String shadeChar, TextStyle style) {
         shadeRegion(region, renderRegion, shadeChar.codePointAt(0), style);
     }
+
 }

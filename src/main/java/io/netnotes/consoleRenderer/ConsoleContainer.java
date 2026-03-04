@@ -4,6 +4,7 @@ import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.TextAlignment;
@@ -11,6 +12,7 @@ import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.terminal.StyleConstants;
 import io.netnotes.terminal.TerminalCommands;
 import io.netnotes.terminal.TerminalContainerConfig;
@@ -41,8 +43,12 @@ public class ConsoleContainer extends Container<
     TerminalContainerConfig,
     ConsoleContainer
 > {
+    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
+
     private final TerminalRectanglePool regionPool;
     private TerminalRectangle contentBounds;
+    private TerminalRectangle prevContentBounds;
+
     // Cell buffers (indexed as [y][x] for natural row-major ordering)
     private Cell[][] cells;
     private Cell[][] prevCells;
@@ -88,11 +94,13 @@ public class ConsoleContainer extends Container<
         }
         this.contentBounds = pool.obtain();
         this.contentBounds.set(initialRegion);
-        int height = contentBounds.getHeight();
-        int width = contentBounds.getWidth();
-        // Allocate buffers
-        this.cells = new Cell[height][width];
-        this.prevCells = new Cell[height][width];
+
+        this.prevContentBounds = pool.obtain();
+        this.prevContentBounds.copyFrom(initialRegion);
+
+        this.allocatedBounds = pool.obtain();
+        this.allocatedBounds.copyFrom(initialRegion);
+
         rebuildBufferSize();
     }
 
@@ -157,7 +165,7 @@ public class ConsoleContainer extends Container<
     
     @Override
     protected CompletableFuture<Void> initializeRenderer() {
-        Log.logMsg("[ConsoleContainer] Renderer initialized: " + id);
+        Log.logMsg("[ConsoleContainer] Renderer initialized: " + id, LogLevel.GENERAL);
         return CompletableFuture.completedFuture(null);
     }
     
@@ -168,16 +176,40 @@ public class ConsoleContainer extends Container<
      * Called by renderer when it wants to render
      */
     public CompletableFuture<ConsoleRenderManager.RenderableState> getRenderableState() {
-        return containerExecutor.submit(() -> {
-            return new ConsoleRenderManager.RenderableState(
-                getHeight(), getWidth(),
-                cursorY, cursorX,
-                effectiveCursorVisible(),
-                cells,
-                prevCells
-            );
-        });
+        if(containerExecutor.isCurrentThread()){
+            return CompletableFuture.completedFuture(createStateSnapshot());
+        }else{
+            return containerExecutor.submit(() -> {
+              return createStateSnapshot();
+            });
+        }
+        
     }
+
+    private ConsoleRenderManager.RenderableState createStateSnapshot(){
+        int h = getHeight(), w = getWidth();
+        Cell[][] snapCells = new Cell[h][w];
+        Cell[][] snapPrev  = new Cell[h][w];
+        for (int y = 0; y < h; y++) {
+            for (int x = 0; x < w; x++) {
+                snapCells[y][x] = new Cell();
+                snapCells[y][x].copyFrom(cells[y][x]);
+                snapPrev[y][x]  = new Cell();
+                snapPrev[y][x].copyFrom(prevCells[y][x]);
+            }
+        }
+
+        return new ConsoleRenderManager.RenderableState(
+            h, w,
+            contentBounds.getX(),     contentBounds.getY(),
+            prevContentBounds.getHeight(), prevContentBounds.getWidth(),
+            prevContentBounds.getX(), prevContentBounds.getY(),
+            cursorY, cursorX,
+            effectiveCursorVisible(),
+            snapCells, snapPrev
+        );
+    }
+
 
     /** Cursor is only physically visible when this container is focused and the component wants it. */
     private boolean effectiveCursorVisible() {
@@ -252,53 +284,141 @@ public class ConsoleContainer extends Container<
         regionPool.recycle(region);
     }
 
+
+    /**
+     * Invalidates prevCells so the next differential render treats every cell 
+     * as changed. Called after an external screen clear (e.g. terminal resize)
+     * to force a full repaint without waiting for a new batch from the client.
+     */
+    public CompletableFuture<Void> invalidateRenderCache() {
+        return containerExecutor.execute(() -> {
+            int height = contentBounds.getHeight();
+            int width  = contentBounds.getWidth();
+            for (int y = 0; y < height; y++) {
+                for (int x = 0; x < width; x++) {
+                    prevCells[y][x].character = (char) 0xFFFF;
+                }
+            }
+        });
+    }
+
+     
+
+
+    @Override
+    protected TerminalRectangle[] handleBatchDamageRegions(NoteBytes damageRegionBytes) {
+        if(damageRegionBytes == null) return new TerminalRectangle[0];
+
+        if(damageRegionBytes.getType() != NoteBytesMetaData.NOTE_BYTES_ARRAY_TYPE){
+            Throwable ex = new IllegalArgumentException("damageRegionBytes array expected");
+            Log.logError("[ConsoleContainer:"+ getId() + "] handleBatchDamageRegions", ex);
+            throw new RuntimeException(ex);
+        }
+
+        return damageRegionBytes
+            .getAsNoteBytesArrayReadOnly()
+            .getAsReadOnlyStream()
+            .map(TerminalRectangle::fromNoteBytes)
+            .toArray(TerminalRectangle[]::new);
+
+    }
+
+    @Override
+    protected TerminalRectangle handleBatchContentBounds(NoteBytes contentBoundsBytes){
+        if(contentBoundsBytes == null){
+            return null;
+        }
+        return TerminalRectangle.fromNoteBytes(
+            contentBoundsBytes, 
+            regionPool
+        );
+    }
+
+    @Override
+    protected void handleBatchBounds(
+        TerminalRectangle newContentBounds,
+        TerminalRectangle[] damageRegions
+    ){
+        if(isBoundsManaged()){
+            newContentBounds.copyFrom(allocatedBounds);
+        }
+    
+        if(!newContentBounds.equals(contentBounds)){
+            handleContentBoundsInternal(newContentBounds);
+        }else{
+            invalidateDamageRegions(damageRegions);
+        }
+
+        recycleRegions(damageRegions);
+        regionPool.recycle(newContentBounds);
+    }
+
+    private void recycleRegions(TerminalRectangle[] damageRegions){
+        for(int i = 0; i < damageRegions.length ; i++){
+            TerminalRectangle region = damageRegions[i];
+            damageRegions[i] = null;
+            regionPool.recycle(region);
+        }
+    }
+
+    private void invalidateDamageRegions(TerminalRectangle[] damageRegions) {
+        int height = contentBounds.getHeight();
+        int width  = contentBounds.getWidth();
+        
+        for (TerminalRectangle damage : damageRegions) {
+            if (damage == null) continue;
+            
+            // No offset conversion needed — damage coords are already container-local
+            // matching cell buffer indices directly
+            int startY = Math.max(0, damage.getY());
+            int endY   = Math.min(height, damage.getY() + damage.getHeight());
+            int startX = Math.max(0, damage.getX());
+            int endX   = Math.min(width,  damage.getX() + damage.getWidth());
+            
+            if (endY <= startY || endX <= startX) {
+                regionPool.recycle(damage);
+                continue;
+            }
+            
+            for (int y = startY; y < endY; y++) {
+                for (int x = startX; x < endX; x++) {
+                    prevCells[y][x].character = (char) 0xFFFF;
+                }
+            }
+            
+            regionPool.recycle(damage);
+        }
+    }
+
+    private void handleContentBoundsInternal(TerminalRectangle newContentBounds) {
+        prevContentBounds.copyFrom(contentBounds);
+        contentBounds.copyFrom(newContentBounds);
+        rebuildBufferSize();
+    }
+
+
     /**
      * Rebuild clean buffer for complete render
      * @param width
      * @param height
      */
-    private void rebuildBufferSize(){
-        int width = contentBounds.getWidth();
-        int height = contentBounds.getHeight();
+    private void rebuildBufferSize() {
+        int newWidth  = contentBounds.getWidth();
+        int newHeight = contentBounds.getHeight();
 
-        Cell[][] newCells = new Cell[height][width];
-        Cell[][] newPrevCells = new Cell[height][width];
-        
-        // Initialize all cells
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                newCells[y][x] = new Cell();
+        Cell[][] newCells     = new Cell[newHeight][newWidth];
+        Cell[][] newPrevCells = new Cell[newHeight][newWidth];
+
+        for (int y = 0; y < newHeight; y++) {
+            for (int x = 0; x < newWidth; x++) {
+                newCells[y][x]     = new Cell();       // blank — client redraws everything
                 newPrevCells[y][x] = new Cell();
-                newPrevCells[y][x].character = (char) 0xFFFF; // Force render
+                newPrevCells[y][x].character = (char) 0xFFFF; // force repaint
             }
         }
-        
-        this.cells = newCells;
+
+        this.cells     = newCells;
         this.prevCells = newPrevCells;
-    }
-
-    private void handleContentBounds(NoteBytes contentBoundsBytes){
-        if(contentBoundsBytes == null){
-            return;
-        }
-        TerminalRectangle newContentBounds = TerminalRectangle.fromNoteBytes(
-            contentBoundsBytes, 
-            regionPool
-        );
-        if(isBoundsManaged()){
-            newContentBounds.copyFrom(allocatedBounds);
-        }
-        handleContentBoundsInternal(newContentBounds);
-        regionPool.recycle(newContentBounds);
-    }
-
-    private void handleContentBoundsInternal(TerminalRectangle newContentBounds){
-        if (newContentBounds.equals(contentBounds)) {
-            return;
-        }
-        
-        contentBounds.copyFrom(newContentBounds);
-        rebuildBufferSize();
     }
     
     /**
@@ -323,10 +443,7 @@ public class ConsoleContainer extends Container<
         }
     }
     
-    @Override
-    protected void onBatchContentBounds(NoteBytes contentBounds, NoteBytesMap batchCommand) {
-        handleContentBounds(contentBounds);
-    }
+  
 
     @Override
     protected void onBatchComplete() {
@@ -336,7 +453,7 @@ public class ConsoleContainer extends Container<
     // ===== INDIVIDUAL COMMAND HANDLERS =====
     
     public CompletableFuture<Void> handleClear(NoteBytesMap command) {
-        Log.logMsg("[ConsoleContainer.handleClear]");
+        Log.logMsg("[ConsoleContainer.handleClear]", LogLevel.GENERAL);
         return containerExecutor.execute(() -> {
             clearInternal();
             requestRenderInternal();
@@ -609,7 +726,7 @@ public class ConsoleContainer extends Container<
     private void clearInternal() {
         Log.logMsg("[ConsoleContainer] CLEAR - prevCells[0][0]: '" + 
         prevCells[0][0].character + "' -> cells[0][0]: '" + 
-        cells[0][0].character + "' after clear");
+        cells[0][0].character + "' after clear", LOG_LEVEL);
 
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
@@ -621,7 +738,7 @@ public class ConsoleContainer extends Container<
         }
         Log.logMsg("[ConsoleContainer] CLEAR executed - prevCells[0][0]: '" + 
         prevCells[0][0].character + "' -> cells[0][0]: '" + 
-        cells[0][0].character + "' after clear");
+        cells[0][0].character + "' after clear", LOG_LEVEL);
 
         cursorX = 0;
         cursorY = 0;
@@ -651,6 +768,7 @@ public class ConsoleContainer extends Container<
     }
     
     private void printAtInternal(int x, int y, String text, TextStyle style) {
+        Log.logMsg("[ConsoleContainer] printAt:" + x + "," + y + " " + text + " \n\t" + style.toString(), LOG_LEVEL);
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
 
@@ -1423,6 +1541,9 @@ private String[] wrapText(String text, int maxWidth) {
     protected void onEventStreamClosed() {
         destroyNow();
     }
+
+
+   
 
     
 }

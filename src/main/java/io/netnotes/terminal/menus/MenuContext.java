@@ -34,6 +34,7 @@ public class MenuContext {
     // Callbacks
     private Consumer<String> onItemSelected;
     private Runnable onBack;
+    private Consumer<MenuContext> onChanged;
     
     public MenuContext(ContextPath path, String title) {
         this(path, title, null, null);
@@ -57,6 +58,7 @@ public class MenuContext {
      */
     public MenuContext addItem(String name, String description, Runnable action) {
         items.put(name, new MenuItem(name, description, MenuItemType.ACTION, action));
+        notifyChanged();
         return this;
     }
     
@@ -67,6 +69,7 @@ public class MenuContext {
         MenuItem item = new MenuItem(name, description, MenuItemType.ACTION, action);
         item.badge = badge;
         items.put(name, item);
+        notifyChanged();
         return this;
     }
     
@@ -81,8 +84,9 @@ public class MenuContext {
         ContextPath subPath = currentPath.append(name);
         MenuContext subMenu = new MenuContext(subPath, description, this);
         builder.apply(subMenu);
-        
+
         items.put(name, new MenuItem(name, description, MenuItemType.SUBMENU, subMenu));
+        notifyChanged();
         return this;
     }
     
@@ -92,6 +96,7 @@ public class MenuContext {
      */
     public MenuContext addInfoItem(String name, String description) {
         items.put(name, new MenuItem(name, description, MenuItemType.INFO, null));
+        notifyChanged();
         return this;
     }
     
@@ -101,6 +106,7 @@ public class MenuContext {
     public MenuContext addSeparator(String label) {
         String sepId = "separator-" + items.size();
         items.put(sepId, new MenuItem(sepId, label, MenuItemType.SEPARATOR, null));
+        notifyChanged();
         return this;
     }
     
@@ -111,6 +117,7 @@ public class MenuContext {
     public MenuContext addBackItem(String description) {
         items.put("back", new MenuItem("back", description != null ? description : "Back", 
             MenuItemType.BACK, null));
+        notifyChanged();
         return this;
     }
     
@@ -241,6 +248,20 @@ public class MenuContext {
      */
     public void setOnBack(Runnable callback) {
         this.onBack = callback;
+    }
+
+    /**
+     * Set callback to notify when the menu structure changes so renderables
+     * can trigger invalidation/redraw.
+     */
+    public void setOnChanged(Consumer<MenuContext> onChanged) {
+        this.onChanged = onChanged;
+    }
+
+    private void notifyChanged() {
+        if (onChanged != null) {
+            onChanged.accept(this);
+        }
     }
     
     // ===== GETTERS =====

@@ -6,7 +6,6 @@ import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRenderable.TerminalGroupStateEntry;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.renderer.RenderableLayoutManager;
-import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
  * TerminalLayoutManager - Manages layout tree for terminal renderables
@@ -88,8 +87,6 @@ public class TerminalLayoutManager extends RenderableLayoutManager<
      @Override
      protected TerminalLayoutGroup createEmptyGroup(String groupId) {
         TerminalLayoutGroup group = new TerminalLayoutGroup(groupId);
-        Log.logMsg("[TerminalLayoutManager] createEmptyGroup:" + group.getGroupId());
-       
         return group;
      }
 

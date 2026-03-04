@@ -35,7 +35,7 @@ public class TerminalEventsFactory extends ContainerEventsFactory<
         if(regionPool == null){
             throw new NullPointerException("[TerminalEventsFactory] regionPool became null");
         }
-
+     
         TerminalRectangle rectangle = TerminalRectangle.fromNoteBytes(payload, regionPool);
         return new TerminalRegionChangedEvent(sourcePath, type, flags, rectangle);
     }

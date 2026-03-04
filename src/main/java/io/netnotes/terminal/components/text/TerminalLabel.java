@@ -3,6 +3,8 @@ package io.netnotes.terminal.components.text;
 import io.netnotes.engine.ui.LabelTruncation;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
+import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.components.TerminalRegion;
@@ -21,7 +23,7 @@ public class TerminalLabel extends TerminalRegion {
 
     
     private String text;
-    private TextStyle style = TextStyle.NORMAL;
+    private TextStyle style;
     private TextAlignment alignment = TextAlignment.LEFT;
     private LabelTruncation truncation = LabelTruncation.END;
     private boolean wordWrap = false;
@@ -31,18 +33,19 @@ public class TerminalLabel extends TerminalRegion {
     }
 
     public TerminalLabel(String name, TextStyle style){
-        this(name, "");
-        this.style = style;
+        this(name, "", style);
     }
     public TerminalLabel(String name, String text) {
-        super(name);
-        this.text = text;
+        this(name, text, TextStyle.NORMAL);
+   
     }
     
     public TerminalLabel(String name, String text, TextStyle style) {
         super(name);
         this.text = text;
         this.style = style;
+        this.setWidthPreference(SizePreference.FIT_CONTENT);
+        this.setHeightPreference(SizePreference.FIT_CONTENT);
     }
     
     // ===== CONFIGURATION =====
@@ -51,7 +54,7 @@ public class TerminalLabel extends TerminalRegion {
         if ((this.text == null && text != null) || 
             (this.text != null && !this.text.equals(text))) {
             this.text = text;
-            invalidate();
+            requestLayoutUpdate();
         }
     }
     
@@ -65,21 +68,21 @@ public class TerminalLabel extends TerminalRegion {
     public void setTextAlignment(TextAlignment alignment) {
         if (this.alignment != alignment) {
             this.alignment = alignment;
-            invalidate();
+            requestLayoutUpdate();
         }
     }
     
     public void setTextTruncation(LabelTruncation truncation) {
         if (this.truncation != truncation) {
             this.truncation = truncation;
-            invalidate();
+            requestLayoutUpdate();
         }
     }
     
     public void setWordWrap(boolean wordWrap) {
         if (this.wordWrap != wordWrap) {
             this.wordWrap = wordWrap;
-            invalidate();
+            requestLayoutUpdate();
         }
     }
     
@@ -88,7 +91,7 @@ public class TerminalLabel extends TerminalRegion {
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
         if (text == null || text.isEmpty()) return;
-        
+        Log.logMsg("[TerminalLabel] rendering: " + text, LogLevel.IMPORTANT);
         int width = getWidth();
         int height = getHeight();
         if (width <= 0 || height <= 0) return;

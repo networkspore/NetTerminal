@@ -8,9 +8,11 @@ import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 import io.netnotes.terminal.components.TerminalRegion;
+import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.SizePreference;
 
 /**
  * TerminalTextBox - Scrollable text display with focus support
@@ -53,7 +55,7 @@ public class TerminalTextBox extends TerminalRegion {
     private final List<String> lines = new ArrayList<>();
     private final List<TextStyle> lineStyles = new ArrayList<>(); // Per-line styling
     private ContentAlignment alignment = ContentAlignment.LEFT;
-    private int padding = 1;
+
     
     // Features
     private boolean showLineNumbers = false;
@@ -89,7 +91,7 @@ public class TerminalTextBox extends TerminalRegion {
         this.titlePlacement = builder.titlePlacement;
         this.lines.addAll(builder.lines);
         this.alignment = builder.alignment;
-        this.padding = builder.padding;
+        getInsets().copyFrom(builder.insets);
         this.scrollable = builder.scrollable;
         this.overflow = builder.overflow;
         this.showLineNumbers = builder.showLineNumbers;
@@ -105,7 +107,7 @@ public class TerminalTextBox extends TerminalRegion {
         lines.add(text);
         lineStyles.add(textStyle);
         verticalScroll = 0;
-        invalidate();
+        notifyContentChanged();
     }
     
     public void setLines(List<String> newLines) {
@@ -116,8 +118,8 @@ public class TerminalTextBox extends TerminalRegion {
         for (int i = 0; i < newLines.size(); i++) {
             lineStyles.add(textStyle);
         }
-        verticalScroll = Math.min(verticalScroll, Math.max(0, lines.size() - getContentHeight()));
-        invalidate();
+        verticalScroll = Math.min(verticalScroll, Math.max(0, lines.size() - getViewportHeight()));
+        notifyContentChanged();
     }
     
     public void addLine(String line) {
@@ -127,12 +129,20 @@ public class TerminalTextBox extends TerminalRegion {
     public void addLine(String line, TextStyle style) {
         lines.add(line);
         lineStyles.add(style != null ? style : textStyle);
-        invalidateContent();
+        notifyContentChanged();
     }
     
     public void setLineStyle(int index, TextStyle style) {
         if (index >= 0 && index < lines.size()) {
             lineStyles.set(index, style != null ? style : textStyle);
+            notifyContentChanged();
+        }
+    }
+
+    public void renderOrLayout(){
+        if(isSizedByContent()){
+            requestLayoutUpdate();
+        }else{
             invalidateContent();
         }
     }
@@ -144,15 +154,15 @@ public class TerminalTextBox extends TerminalRegion {
     public void insertLine(int index, String line, TextStyle style) {
         lines.add(Math.min(index, lines.size()), line);
         lineStyles.add(Math.min(index, lineStyles.size()), style != null ? style : textStyle);
-        invalidateContent();
+        notifyContentChanged();
     }
     
     public void removeLine(int index) {
         if (index >= 0 && index < lines.size()) {
             lines.remove(index);
             lineStyles.remove(index);
-            verticalScroll = Math.min(verticalScroll, Math.max(0, lines.size() - getContentHeight()));
-            invalidateContent();
+            verticalScroll = Math.min(verticalScroll, Math.max(0, lines.size() - getViewportHeight()));
+            notifyContentChanged();
         }
     }
     
@@ -162,7 +172,7 @@ public class TerminalTextBox extends TerminalRegion {
             lineStyles.clear();
             verticalScroll = 0;
             horizontalScroll = 0;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -170,7 +180,7 @@ public class TerminalTextBox extends TerminalRegion {
         if ((this.title == null && title != null) || 
             (this.title != null && !this.title.equals(title))) {
             this.title = title;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -227,7 +237,7 @@ public class TerminalTextBox extends TerminalRegion {
     public void scrollVertical(int delta) {
         if (!scrollable || lines.isEmpty()) return;
         
-        int contentHeight = getContentHeight();
+        int contentHeight = getViewportHeight();
         int maxScroll = Math.max(0, lines.size() - contentHeight);
         int newScroll = Math.max(0, Math.min(maxScroll, verticalScroll + delta));
         
@@ -241,7 +251,7 @@ public class TerminalTextBox extends TerminalRegion {
         if (overflow != TextOverflow.SCROLL) return;
         
         int maxWidth = lines.stream().mapToInt(String::length).max().orElse(0);
-        int contentWidth = getContentWidth();
+        int contentWidth = getViewportWidth();
         int maxScroll = Math.max(0, maxWidth - contentWidth);
         int newScroll = Math.max(0, Math.min(maxScroll, horizontalScroll + delta));
         
@@ -253,7 +263,7 @@ public class TerminalTextBox extends TerminalRegion {
     
     public void scrollToTop() { verticalScroll = 0; invalidateContent(); }
     public void scrollToBottom() { 
-        verticalScroll = Math.max(0, lines.size() - getContentHeight()); 
+        verticalScroll = Math.max(0, lines.size() - getViewportHeight()); 
         invalidateContent();
     }
     
@@ -269,9 +279,9 @@ public class TerminalTextBox extends TerminalRegion {
             } else if (kd.getKeyCodeBytes().equals(KeyCodeBytes.DOWN)) {
                 scrollVertical(1);
             } else if (kd.getKeyCodeBytes().equals(KeyCodeBytes.PAGE_UP)) {
-                scrollVertical(-getContentHeight());
+                scrollVertical(-getViewportHeight());
             } else if (kd.getKeyCodeBytes().equals(KeyCodeBytes.PAGE_DOWN)) {
-                scrollVertical(getContentHeight());
+                scrollVertical(getViewportHeight());
             } else if (kd.getKeyCodeBytes().equals(KeyCodeBytes.HOME)) {
                 scrollToTop();
             } else if (kd.getKeyCodeBytes().equals(KeyCodeBytes.END)) {
@@ -317,15 +327,26 @@ public class TerminalTextBox extends TerminalRegion {
         }
         
         // Scroll indicators
-        if (scrollable && lines.size() > getContentHeight()) {
+        if (scrollable && lines.size() > getViewportHeight()) {
             renderScrollIndicators(batch, width, height);
         }
     }
+
+    private int getViewportStartX() {
+        return 1 + getInsets().getLeft();
+    }
+
+    private int getViewportStartY(){
+        return 1 + getInsets().getTop();
+    }
+
     
     private void renderContent(TerminalBatchBuilder batch, int width, int height) {
-        int contentStartRow = getContentStartRow();
-        int contentHeight = getContentHeight();
-        int contentWidth = getContentWidth();
+        int startX = getViewportStartX();
+        int startY = getViewportStartY();
+
+        int contentHeight = getViewportHeight();
+        int contentWidth = getViewportWidth();
         
         int startLine = verticalScroll;
         int endLine = Math.min(lines.size(), startLine + contentHeight);
@@ -333,8 +354,8 @@ public class TerminalTextBox extends TerminalRegion {
         for (int i = startLine; i < endLine; i++) {
             String line = lines.get(i);
             TextStyle lineStyle = lineStyles.get(i);
-            int row = contentStartRow + (i - startLine);
-            int col = padding + 1;
+            int row = startY + (i - startLine);
+            int col = startX;
             
             // Line numbers
             if (showLineNumbers) {
@@ -349,7 +370,7 @@ public class TerminalTextBox extends TerminalRegion {
             // Apply alignment
             int textCol = switch (alignment) {
                 case CENTER -> col + (contentWidth - displayLine.length()) / 2;
-                case RIGHT -> width - padding - 1 - displayLine.length();
+                case RIGHT -> width - getInsets().getRight() - 1 - displayLine.length();
                 default -> col;
             };
             
@@ -388,8 +409,8 @@ public class TerminalTextBox extends TerminalRegion {
     }
     
     private void renderScrollIndicators(TerminalBatchBuilder batch, int width, int height) {
-        int contentStartRow = getContentStartRow();
-        int contentHeight = getContentHeight();
+        int contentStartRow = getViewportStartY();
+        int contentHeight = getViewportHeight();
         int indicatorCol = width - 2;
         
         // Up indicator
@@ -417,7 +438,7 @@ public class TerminalTextBox extends TerminalRegion {
             }
             
             int maxWidth = lines.stream().mapToInt(String::length).max().orElse(0);
-            if (horizontalScroll + getContentWidth() < maxWidth) {
+            if (horizontalScroll + getViewportWidth() < maxWidth) {
                 printAt(batch, width - 2, midRow, "►", scrollIndicatorStyle);
             }
         }
@@ -440,22 +461,19 @@ public class TerminalTextBox extends TerminalRegion {
         };
     }
     
-    private int getContentStartRow() {
-        return 1 + padding;
-    }
-    
-    private int getContentHeight() {
-        int reserved = 2 + (2 * padding);
+
+    private int getViewportHeight() {
+        int reserved = 2 + getInsets().getVertical();
         return Math.max(1, getHeight() - reserved);
     }
     
-    private int getContentWidth() {
-        return Math.max(1, getWidth() - 2 - (2 * padding));
+    private int getViewportWidth() {
+        return Math.max(1, getWidth() - 2 - getInsets().getHorizontal());
     }
     
     private void invalidateContent() {
-        int contentStartRow = getContentStartRow();
-        int contentHeight = getContentHeight();
+        int contentStartRow = getViewportStartY();
+        int contentHeight = getViewportHeight();
         invalidateRegion(1, contentStartRow, getWidth() - 2, contentHeight);
     }
     
@@ -471,37 +489,76 @@ public class TerminalTextBox extends TerminalRegion {
 
     @Override
     public int getPreferredWidth() {
-        int maxLine = lines.stream().mapToInt(String::length).max().orElse(0);
+        SizePreference pref = getWidthPreference();
+
+        if (pref == SizePreference.STATIC) {
+            return region.getWidth();
+        }
+
+        if (pref == SizePreference.PERCENT) {
+            return getMinWidth();
+        }
+
+        int maxLineLength = lines.stream()
+            .mapToInt(String::length)
+            .max()
+            .orElse(0);
+
         if (showLineNumbers) {
-            maxLine += lineNumberWidth + 1;
+            maxLineLength += lineNumberWidth + 1;
         }
 
-        if (title != null) {
-            maxLine = Math.max(maxLine, title.length());
+        if (title != null && !title.isEmpty()) {
+            maxLineLength = Math.max(maxLineLength, title.length());
         }
 
-        int preferred = maxLine + (2 * padding) + 2;
-        return Math.max(getMinWidth(), preferred);
+        int contentWidth = Math.max(2, maxLineLength);
+
+        return Math.max(
+            getMinWidth(),
+            contentWidth + getInsets().getHorizontal()
+        );
     }
 
     @Override
     public int getPreferredHeight() {
-        int contentLines = Math.max(1, lines.size());
-        int preferred = contentLines + (2 * padding) + 2;
-        return Math.max(getMinHeight(), preferred);
+        SizePreference pref = getHeightPreference();
+
+        if (pref == SizePreference.STATIC) {
+            return region.getHeight();
+        }
+
+        if (pref == SizePreference.PERCENT) {
+            return getMinHeight();
+        }
+
+        int contentRows = Math.max(1, lines.size());
+
+        return Math.max(
+            getMinHeight(),
+            contentRows + getInsets().getVertical() + 2
+        );
     }
 
     @Override
     public int getMinWidth() {
-        int paddedMin = (2 * padding) + 2;
-        return Math.max(super.getMinWidth(), Math.max(3, paddedMin));
+        int minContent = 1;
+
+        int total =
+            2 +                 // border
+            getInsets().getHorizontal() +
+            minContent;
+
+        return Math.max(super.getMinWidth(), total);
     }
 
     @Override
     public int getMinHeight() {
-        int paddedMin = (2 * padding) + 2;
+        int paddedMin = getInsets().getVertical() + 2;
         return Math.max(super.getMinHeight(), Math.max(3, paddedMin));
     }
+
+    
     
     // ===== ENUMS =====
     
@@ -523,7 +580,7 @@ public class TerminalTextBox extends TerminalRegion {
         private Position titlePlacement = Position.TOP_CENTER;
         private List<String> lines = new ArrayList<>();
         private ContentAlignment alignment = ContentAlignment.LEFT;
-        private int padding = 1;
+        private TerminalInsets insets = new TerminalInsets();
         private boolean scrollable = false;
         private boolean showLineNumbers = false;
         private TextOverflow overflow = TextOverflow.TRUNCATE;
@@ -545,7 +602,7 @@ public class TerminalTextBox extends TerminalRegion {
         }
         public Builder addLine(String line) { this.lines.add(line); return this; }
         public Builder alignment(ContentAlignment align) { this.alignment = align; return this; }
-        public Builder padding(int padding) { this.padding = padding; return this; }
+        public Builder insets(TerminalInsets insets) { this.insets = insets; return this; }
         public Builder scrollable(boolean scrollable) { this.scrollable = scrollable; return this; }
         public Builder showLineNumbers(boolean show) { this.showLineNumbers = show; return this; }
         public Builder overflow(TextOverflow overflow) { this.overflow = overflow; return this; }

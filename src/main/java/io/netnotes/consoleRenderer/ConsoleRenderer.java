@@ -2,7 +2,7 @@ package io.netnotes.consoleRenderer;
 
 
 import io.netnotes.engine.ui.Point2D;
-
+import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerCommands;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.ui.renderer.Renderer;
@@ -19,6 +19,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
 import io.netnotes.terminal.TerminalContainerConfig;
 import io.netnotes.terminal.TerminalRectangle;
@@ -52,10 +53,11 @@ public final class ConsoleRenderer extends Renderer<
     TerminalContainerConfig,
     ConsoleContainer
 > {
+    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
 
     public static final NoteBytesReadOnly DEFAULT_RENDERER_ID = new NoteBytesReadOnly("JLINE3");
-    private static final int MIN_TERM_WIDTH = 80;
-    private static final int MIN_TERM_HEIGHT = 24;
+    public static final int MIN_TERM_WIDTH = 40;
+    public static final int MIN_TERM_HEIGHT = 24;
 
     public static final int RENDERER_INITIALIZING    = 0;
     public static final int RENDERER_READY           = 1;
@@ -130,7 +132,7 @@ public final class ConsoleRenderer extends Renderer<
         registerSystemHotkeys();
         setupRendererStateTransitions();
         
-        Log.logMsg("[ConsoleUIRenderer] Terminal created: " + termWidth + "x" + termHeight);
+        Log.logMsg("[ConsoleUIRenderer] Terminal created: " + termWidth + "x" + termHeight, LOG_LEVEL);
     }
 
     private void setTermWidth(int w){
@@ -181,11 +183,11 @@ public final class ConsoleRenderer extends Renderer<
     @Override
     protected void setupRendererStateTransitions() {
         state.onStateAdded(RendererStates.HAS_ACTIVE, (old, now, bit) -> {
-            Log.logMsg("[ConsoleUIRenderer] Active container set");
+            Log.logMsg("[ConsoleUIRenderer] Active container set", LOG_LEVEL);
         });
         
         state.onStateRemoved(RendererStates.HAS_ACTIVE, (old, now, bit) -> {
-            Log.logMsg("[ConsoleUIRenderer] No active container");
+            Log.logMsg("[ConsoleUIRenderer] No active container", LOG_LEVEL);
             
             if (!state.hasState(RendererStates.SWITCHING_FOCUS)) {
                 state.addState(RendererStates.CLEARING_SCREEN);
@@ -198,11 +200,11 @@ public final class ConsoleRenderer extends Renderer<
         });
         
         state.onStateAdded(RendererStates.HANDLING_RESIZE, (old, now, bit) -> {
-            Log.logMsg("[ConsoleUIRenderer] Handling resize");
+            Log.logMsg("[ConsoleUIRenderer] Handling resize", LOG_LEVEL);
         });
         
         state.onStateRemoved(RendererStates.HANDLING_RESIZE, (old, now, bit) -> {
-            Log.logMsg("[ConsoleUIRenderer] Resize complete");
+            Log.logMsg("[ConsoleUIRenderer] Resize complete", LOG_LEVEL);
         });
     }
 
@@ -241,7 +243,7 @@ public final class ConsoleRenderer extends Renderer<
      */
     private void handleInputEvent(NoteBytesMap event) {
         if (focusedContainerId == null) {
-            Log.logMsg("[ConsoleUIRenderer] No focused container, dropping event");
+            Log.logMsg("[ConsoleUIRenderer] No focused container, dropping event", LOG_LEVEL);
             return;
         }
         
@@ -279,10 +281,10 @@ public final class ConsoleRenderer extends Renderer<
             
             state.addState(RENDERER_READY);
 
-            Log.logMsg("[ConsoleUIRenderer] Terminal initialized");
+            Log.logMsg("[ConsoleUIRenderer] Terminal initialized", LOG_LEVEL);
 
             inputCapture.run().thenRun(() -> {
-                Log.logMsg("[ConsoleUIRenderer] Input capture started");
+                Log.logMsg("[ConsoleUIRenderer] Input capture started", LOG_LEVEL);
             }).exceptionally(ex -> {
                 Log.logError("[ConsoleUIRenderer] Failed to start input capture: " + ex.getMessage());
                 return null;
@@ -303,7 +305,7 @@ public final class ConsoleRenderer extends Renderer<
             };
             
             terminal.handle(Signal.WINCH, resizeHandler);
-            Log.logMsg("[ConsoleUIRenderer] Resize handler registered");
+            Log.logMsg("[ConsoleUIRenderer] Resize handler registered", LOG_LEVEL);
             return true;
         } catch (Exception e) {
             Log.logError("[ConsoleUIRenderer] Failed to register resize signal: " + e.getMessage());
@@ -318,12 +320,12 @@ public final class ConsoleRenderer extends Renderer<
         boolean signalRegistered = registerTerminalHandlers();
         
         if (signalRegistered) {
-            Log.logMsg("[ConsoleUIRenderer] Signal-based resize registered, starting test period...");
+            Log.logMsg("[ConsoleUIRenderer] Signal-based resize registered, starting test period...", LOG_LEVEL);
             startResizePolling();
             scheduledExecutor.schedule(this::evaluateResizeMethod, 
                 SIGNAL_TEST_DURATION_MS, TimeUnit.MILLISECONDS);
         } else {
-            Log.logMsg("[ConsoleUIRenderer] Signal-based resize not available, using polling");
+            Log.logMsg("[ConsoleUIRenderer] Signal-based resize not available, using polling", LOG_LEVEL);
             startResizePolling();
         }
     }
@@ -333,10 +335,10 @@ public final class ConsoleRenderer extends Renderer<
      */
     private void evaluateResizeMethod() {
         if (signalBasedResizeWorking) {
-            Log.logMsg("[ConsoleUIRenderer] Signal-based resize working, stopping poll");
+            Log.logMsg("[ConsoleUIRenderer] Signal-based resize working, stopping poll", LOG_LEVEL);
             stopResizePolling();
         } else {
-            Log.logMsg("[ConsoleUIRenderer] Signal-based resize not detected, continuing with poll");
+            Log.logMsg("[ConsoleUIRenderer] Signal-based resize not detected, continuing with poll", LOG_LEVEL);
         }
     }
 
@@ -355,7 +357,7 @@ public final class ConsoleRenderer extends Renderer<
             TimeUnit.MILLISECONDS
         );
         
-        Log.logMsg("[ConsoleUIRenderer] Resize polling started (100ms interval)");
+        Log.logMsg("[ConsoleUIRenderer] Resize polling started (100ms interval)", LOG_LEVEL);
     }
 
     /**
@@ -365,23 +367,23 @@ public final class ConsoleRenderer extends Renderer<
         if (resizePollFuture != null) {
             resizePollFuture.cancel(false);
             resizePollFuture = null;
-            Log.logMsg("[ConsoleUIRenderer] Resize polling stopped");
+            Log.logMsg("[ConsoleUIRenderer] Resize polling stopped", LOG_LEVEL);
         }
     }
 
     /**
-     * Check for terminal size changes (polling method)
+     * Check for terminal size changes (polling method).
+     * NOTE: do NOT call setTermWidth/Height here — doHandleTerminalResize uses the
+     * detectedWidth/Height delta to gate its work. Pre-updating them causes an immediate
+     * early-return there, making the polling path a no-op.
      */
     private void checkForResize() {
         try {
-            int newWidth =  terminal.getWidth();
+            int newWidth  = terminal.getWidth();
             int newHeight = terminal.getHeight();
-            
             if (newWidth != detectedWidth || newHeight != detectedHeight) {
-                setTermWidth(newWidth);
-                setTermHeight(newHeight);
-                Log.logMsg("[ConsoleUIRenderer] Size change detected via polling: " + 
-                    termWidth + "x" + termHeight + " -> " + newWidth + "x" + newHeight);
+                Log.logMsg("[ConsoleUIRenderer] Size change detected via polling: " +
+                    detectedWidth + "x" + detectedHeight + " -> " + newWidth + "x" + newHeight, LOG_LEVEL);
                 resizeDebouncer.submit(this::handleTerminalResize);
             }
         } catch (Exception e) {
@@ -396,14 +398,14 @@ public final class ConsoleRenderer extends Renderer<
         if (resizeHandler != null) {
             terminal.handle(Signal.WINCH, Terminal.SignalHandler.SIG_DFL);
             resizeHandler = null;
-            Log.logMsg("[ConsoleUIRenderer] Resize handler unregistered");
+            Log.logMsg("[ConsoleUIRenderer] Resize handler unregistered", LOG_LEVEL);
         }
         stopResizePolling();
     }
 
     @Override
     protected CompletableFuture<Void> doShutdown() {
-        Log.logMsg("[ConsoleUIRenderer] Shutdown starting");
+        Log.logMsg("[ConsoleUIRenderer] Shutdown starting", LOG_LEVEL);
         
         state.addState(RENDERER_SHUTTING_DOWN);
         
@@ -430,7 +432,7 @@ public final class ConsoleRenderer extends Renderer<
             terminal.setAttributes(originalAttributes);
             terminal.flush();
             terminal.close();
-            Log.logMsg("[ConsoleUIRenderer] Terminal closed");
+            Log.logMsg("[ConsoleUIRenderer] Terminal closed", LOG_LEVEL);
         } catch (Exception e) {
             Log.logError("[ConsoleUIRenderer] Error closing terminal: " + e.getMessage());
         }
@@ -453,7 +455,7 @@ public final class ConsoleRenderer extends Renderer<
 
      
         ConsoleContainer container = new ConsoleContainer(id, title, ownerPath, config, rendererId, regionPool);
-        Log.logMsg("[ConsoleUIRenderer] consoleContainer created: " + id);
+        Log.logMsg("[ConsoleUIRenderer] consoleContainer created: " + id, LOG_LEVEL);
 
         container.setOnRequestMade(c -> {
             if (c instanceof ConsoleContainer cc) {
@@ -470,9 +472,13 @@ public final class ConsoleRenderer extends Renderer<
     protected CompletableFuture<NoteBytesReadOnly> onContainerCreated(
         ConsoleContainer container
     ) {
+        
         return containerLayoutManager.onContainerAdded(container)
-            .thenCompose(v -> handleContainerAllocationResponse(container, true))
-            .exceptionallyCompose(ex -> handleContainerAllocationResponse(container, false));
+            .thenCompose(v ->{ 
+                boolean isManaged = container.getStateMachine().hasState(Container.STATE_LAYOUT_MANAGED);
+                return handleContainerAllocationResponse(container, isManaged);
+            })
+            .exceptionallyCompose(ex->createFailedResponse(ex));
     }
 
     private CompletableFuture<NoteBytesReadOnly> handleContainerAllocationResponse(
@@ -490,11 +496,24 @@ public final class ConsoleRenderer extends Renderer<
             });
     }
 
+    private CompletableFuture<NoteBytesReadOnly> createFailedResponse(
+        Throwable e
+    ){
+        Log.logError("[ConsoleUIRenderer]", "createFailedResponse", e); 
+     
+        NoteBytesMap responseMap = new NoteBytesMap();
+        responseMap.put(Keys.STATUS, ProtocolMesssages.ERROR);
+        responseMap.put(Keys.MSG, e.getMessage() != null ? e.getMessage() : "Unknown error");
+
+        NoteBytesReadOnly response = responseMap.toNoteBytesReadOnly();
+        
+        return CompletableFuture.completedFuture(response);
+    }
 
     private CompletableFuture<NoteBytesReadOnly> createCreationResponse(
         NoteBytes allocatedRegionBytes, boolean isManaged,  boolean isVisible)
     {
-         Log.logNoteBytes("[ConsoleUIRenderer] containerRegion: ",allocatedRegionBytes); 
+         Log.logNoteBytes("[ConsoleUIRenderer] containerRegion: ",allocatedRegionBytes, LOG_LEVEL); 
      
         
         NoteBytesMap responseMap = new NoteBytesMap();
@@ -508,50 +527,12 @@ public final class ConsoleRenderer extends Renderer<
 
         NoteBytesReadOnly response = responseMap.toNoteBytesReadOnly();
 
-        Log.logNoteBytes("[ConsoleRenderer.onContainerCreated]", response);
+        Log.logNoteBytes("[ConsoleRenderer.onContainerCreated]", response, LOG_LEVEL);
         
         return CompletableFuture.completedFuture(response);
     }
 
-    /*public ConsoleContainer createContainer(
-        ContainerId id,
-        String title,
-        ContextPath ownerPath,
-        ContainerConfig config,
-        String rendererId
-    ) {
-        state.addState(RendererStates.CREATING_CONTAINER);
-        
-        try {
-            ConsoleContainer container = new ConsoleContainer(
-                id, title, ownerPath, config,
-                rendererId,
-                termWidth,
-                termHeight
-            );
-            
-            containers.put(id, container);
-            
-            ownerContainers.computeIfAbsent(ownerPath, k -> new ArrayList<>())
-                .add(id);
-            
-            if (containers.size() == 1) {
-                state.addState(RendererStates.HAS_CONTAINERS);
-            }
-            
-            if (focusedContainerId == null) {
-                focusedContainerId = id;
-                state.addState(RendererStates.HAS_FOCUSED_CONTAINER);
-            }
-            
-            Log.logMsg("[ConsoleUIRenderer] Container created: " + id);
-            
-            return container;
-            
-        } finally {
-            state.removeState(RendererStates.CREATING_CONTAINER);
-        }
-    }*/
+  
 
     protected ConsoleContainer getConsoleContainer(ContainerId id) {
         return containers.get(id);
@@ -579,7 +560,7 @@ public final class ConsoleRenderer extends Renderer<
     
     @Override
     public void handleStreamChannel(StreamChannel channel, ContextPath fromPath) {
-        Log.logMsg("[ConsoleUIRenderer] Stream channel received from: " + fromPath);
+        Log.logMsg("[ConsoleUIRenderer] Stream channel received from: " + fromPath, LOG_LEVEL);
         
         ConsoleContainer targetContainer = findContainerByHandlePath(fromPath);
         
@@ -591,14 +572,14 @@ public final class ConsoleRenderer extends Renderer<
             return;
         }
         
-        Log.logMsg("[ConsoleUIRenderer] Routing stream to container: " + targetContainer.getId());
+        Log.logMsg("[ConsoleUIRenderer] Routing stream to container: " + targetContainer.getId(), LOG_LEVEL);
         
         targetContainer.handleRenderStream(channel, fromPath);
     }
 
     @Override
     public void handleEventStream(StreamChannel eventChannel, ContextPath fromPath) {
-        Log.logMsg("[ConsoleUIRenderer] Event Stream channel received from: " + fromPath);
+        Log.logMsg("[ConsoleUIRenderer] Event Stream channel received from: " + fromPath, LOG_LEVEL);
         
         ConsoleContainer targetContainer = findContainerByHandlePath(fromPath);
         
@@ -610,7 +591,7 @@ public final class ConsoleRenderer extends Renderer<
             return;
         }
         
-        Log.logMsg("[ConsoleUIRenderer] Routing event stream to container: " + targetContainer.getId());
+        Log.logMsg("[ConsoleUIRenderer] Routing event stream to container: " + targetContainer.getId(), LOG_LEVEL);
 
         targetContainer.handleEventStream(eventChannel, fromPath);
     }
@@ -642,7 +623,7 @@ public final class ConsoleRenderer extends Renderer<
     public void renderState(ConsoleRenderManager.RenderableState state, long generation) {
         try {
             StringBuilder updates = RENDER_BUFFER.get();
-            int estimatedSize = state.rows * state.cols * 8;
+            int estimatedSize = state.rows() * state.cols() * 8;
             
             if (updates.capacity() < estimatedSize) {
                 updates.ensureCapacity(estimatedSize);
@@ -655,21 +636,27 @@ public final class ConsoleRenderer extends Renderer<
             // unfocused container's render from clobbering the focused container's cursor.
             updates.append("\033[?25l");
             
+            if (state.hasBoundsChanged()) { 
+                clearGhostRegion(updates, state);
+            }
+
             // Differential rendering
             TextStyle currentStyle = new TextStyle();
             int changedCells = 0;
             
-            for (int row = 0; row < state.rows; row++) {
-                for (int col = 0; col < state.cols; col++) {
-                    Cell current = state.cells[row][col];
-                    Cell previous = state.prevCells[row][col];
+            for (int row = 0; row < state.rows(); row++) {
+                for (int col = 0; col < state.cols(); col++) {
+                    Cell current = state.cells()[row][col];
+                    Cell previous = state.prevCells()[row][col];
                     
                     if (current.equals(previous)) {
                         continue;
                     }
                     
                     changedCells++;
-                    updates.append(String.format("\033[%d;%dH", row + 1, col + 1));
+                    updates.append(String.format("\033[%d;%dH",
+                        state.offsetY() + row + 1,
+                        state.offsetX() + col + 1));
                     
                     if (!current.style.equals(currentStyle)) {
                         updates.append("\033[0m");
@@ -695,6 +682,26 @@ public final class ConsoleRenderer extends Renderer<
             Log.logError("[ConsoleUIRenderer] Render error: " + e.getMessage());
             e.printStackTrace();
             throw e;
+        }
+    }
+
+      private void clearGhostRegion(StringBuilder updates, ConsoleRenderManager.RenderableState state) {
+        int prevRight  = state.prevOffsetX() + state.prevCols();
+        int curRight   = state.offsetX()    + state.cols();
+        int prevBottom = state.prevOffsetY() + state.prevRows();
+        int curBottom  = state.offsetY()    + state.rows();
+
+        // Rows below the new bottom that existed before
+        for (int row = curBottom; row < prevBottom; row++) {
+            updates.append(String.format("\033[%d;%dH\033[2K", row + 1, 1));
+        }
+
+        // Columns to the right of the new width on rows that still exist
+        if (prevRight > curRight) {
+            String spaces = " ".repeat(prevRight - curRight);
+            for (int row = state.offsetY(); row < curBottom; row++) {
+                updates.append(String.format("\033[%d;%dH%s", row + 1, curRight + 1, spaces));
+            }
         }
     }
 
@@ -824,10 +831,8 @@ public final class ConsoleRenderer extends Renderer<
     private void doHandleTerminalResize() {
         try {
             state.addState(RENDERER_HANDLING_RESIZE);
-            
-            int newWidth = terminal.getWidth();
+            int newWidth  = terminal.getWidth();
             int newHeight = terminal.getHeight();
-            
             if (newWidth == detectedWidth && newHeight == detectedHeight) {
                 state.removeState(RENDERER_HANDLING_RESIZE);
                 return;
@@ -835,17 +840,15 @@ public final class ConsoleRenderer extends Renderer<
             setTermWidth(newWidth);
             setTermHeight(newHeight);
             Log.logMsg(String.format("[ConsoleUIRenderer] Resize: %dx%d -> %dx%d",
-                termWidth, termHeight, newWidth, newHeight));
-            clearScreen();
-            
-            // Delegate to render manager
-            //renderManager.onResize(newWidth, newHeight);
+                detectedWidth, detectedHeight, newWidth, newHeight), LOG_LEVEL);
+
             TerminalRectangle viewPort = regionPool.obtain();
             viewPort.set(0, 0, newWidth, newHeight);
             containerLayoutManager.onViewportResized(viewPort);
             regionPool.recycle(viewPort);
+
+            renderManager.markDirty();
             state.removeState(RENDERER_HANDLING_RESIZE);
-            
         } catch (Exception e) {
             Log.logError("[ConsoleUIRenderer] Resize error: " + e.getMessage());
             state.removeState(RENDERER_HANDLING_RESIZE);
@@ -885,7 +888,7 @@ public final class ConsoleRenderer extends Renderer<
 
     @Override
     protected void onContainerUnregistered(ConsoleContainer container) {
-        Log.logMsg("[ConsoleUIRenderer] Container cleanup complete: " + container.getId());
+        Log.logMsg("[ConsoleUIRenderer] Container cleanup complete: " + container.getId(), LOG_LEVEL);
         containerLayoutManager.onContainerRemoved(container);
     }
 
@@ -894,6 +897,7 @@ public final class ConsoleRenderer extends Renderer<
         rect.set(0, 0, termWidth, termHeight);
         return rect;
     }
+
     @Override
     protected TerminalContainerConfig createContainerConfig() {
         TerminalContainerConfig defaultConfig = new TerminalContainerConfig();

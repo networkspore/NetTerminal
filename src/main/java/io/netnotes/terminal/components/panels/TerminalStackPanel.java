@@ -179,8 +179,7 @@ public class TerminalStackPanel extends TerminalRegion
             }
             throw new IllegalArgumentException("Renderable with name '" + name + "' already exists in stack");
         }
-        Log.logMsg("[TerminalStackPanel] addToStack addedChild:" + renderable.getName());
-       
+
         stack.add(renderable);
         nameToRenderable.put(name, renderable);
         addChild(renderable);
@@ -369,14 +368,14 @@ public class TerminalStackPanel extends TerminalRegion
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
     ) {
         if (contexts.length == 0){ 
-            Log.logMsg("[TerminalStackPanel] contexts: 0");
+            Log.logError("[TerminalStackPanel] contexts: 0");
             return;
         }
         
         TerminalRectangle parentPanel = contexts[0].getParentRegion();
-        Log.logMsg("[TerminalStackPanel:" + getName() + "] layoutAllPanels parentRegion=" + parentPanel);
+
         if (parentPanel == null){
-            Log.logMsg("[TerminalBorderPanel] layoutStack: parent region is null" +
+            Log.logError("[TerminalBorderPanel] layoutStack: childs parent region is null" +
                 "this.Region:" + (this.region != null ? this.region.toString() : "null")
             );
             
@@ -385,12 +384,6 @@ public class TerminalStackPanel extends TerminalRegion
 
         int viewportWidth = parentPanel.getWidth() - padding.getHorizontal();
         int viewportHeight = parentPanel.getHeight() -  padding.getVertical();
-        
-        Log.logMsg("[TerminalStackPanel] parent: \n\tWidth: " + viewportWidth
-            + "\n\tpanelHeight: " + viewportHeight
-        );
-
-    
         
         // Determine content dimensions
         int contentWidth;
@@ -411,14 +404,12 @@ public class TerminalStackPanel extends TerminalRegion
             contentHeight = viewportHeight;
         }
 
-        Log.logMsg("[TerminalStackPanel] layoutStack: contentWidth: " + contentWidth + " contentHeight: " + contentHeight);
-        
         // All items in the stack get the same layout with scroll offset applied
         for (TerminalLayoutContext context : contexts) {
             TerminalRenderable child = context.getRenderable();
             
             if (!stack.contains(child)) {
-                Log.logMsg("[TerminalStackPanel] layoutStack: skipping child: " + child.getName());
+                Log.logError("[TerminalStackPanel] layoutStack: skipping child not in stack: " + child.getName());
                 continue; // Skip if not in our stack
             }
             
@@ -444,27 +435,7 @@ public class TerminalStackPanel extends TerminalRegion
         }
     }
 
-    private int resolveContentDimension(
-        TerminalRenderable child,
-        int viewport,
-        float percent,
-        SizePreference pref,
-        boolean isWidth
-    ) {
-        Log.logMsg("[TerminalStackPanel] layoutStack: child: " +child.getName()+ " Pref: " + pref);
-        return switch (pref) {
-            case FILL    -> viewport;
-            case PERCENT -> Math.round(viewport * (percent / 100f));
-            case STATIC  -> isWidth ? child.getRegion().getWidth() 
-                                    : child.getRegion().getHeight();
-            case FIT_CONTENT -> child instanceof TerminalSizeable s 
-                                    ? ( isWidth 
-                                            ? Math.max(s.getMinWidth(),  s.getPreferredWidth())
-                                            : Math.max(s.getMinHeight(), s.getPreferredHeight())) 
-                                    : viewport;
-            default -> viewport;
-        };
-    }
+  
     
     private boolean shouldManageHidden(TerminalRenderable child) {
         if (child instanceof TerminalSizeable sizable) {

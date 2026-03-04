@@ -6,27 +6,36 @@ import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalSizeable;
 
 public class TerminalRegion extends TerminalRenderable implements TerminalSizeable {
-    private final TerminalInsets insets = new TerminalInsets();
-    private SizePreference widthPreference = SizePreference.FIT_CONTENT;
-    private SizePreference heightPreference = SizePreference.FIT_CONTENT;
+    protected final TerminalInsets insets;
+    private SizePreference widthPreference = SizePreference.STATIC;
+    private SizePreference heightPreference = SizePreference.STATIC;
     private float percentWidth = 0f;
     private float percentHeight = 0f;
-    private int minWidth = 0;
-    private int minHeight = 0;
+    private int minWidth = 1;
+    private int minHeight = 1;
     private boolean isHiddenManaged = true;
 
     public TerminalRegion(String regionName){
         super(regionName);
+        insets = new TerminalInsets();
+        insets.setOnChanged(this::handleInsetsChanged);
     }
 
+    private void handleInsetsChanged(TerminalInsets insets){
+        onInsetsChanged(insets);
+        requestLayoutUpdate();
+    }
+
+    protected void onInsetsChanged(TerminalInsets insets){}
+
     public void setMinWidth(int minWidth){
-        this.minWidth = Math.max(0, minWidth);
-        invalidate();
+        this.minWidth = Math.max(1, minWidth);
+        requestLayoutUpdate();
     }
 
     public void setMinHeight(int minHeight){
-        this.minHeight = Math.max(0, minHeight);
-        invalidate();
+        this.minHeight = Math.max(1, minHeight);
+        requestLayoutUpdate();
     }
 
     public int getMinWidth(){
@@ -37,17 +46,8 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         return minHeight + getInsets().getVertical();
     }
 
-    @Override
-    public boolean isHiddenManaged(){
-        return isHiddenManaged;
-    }
+    
 
-    public void setIsHiddenManaged(boolean isHiddenManaged){
-        if(this.isHiddenManaged != isHiddenManaged ){
-            this.isHiddenManaged = isHiddenManaged;
-            requestLayoutUpdate();
-        }
-    }
 
     @Override
     public SizePreference getWidthPreference() {
@@ -61,12 +61,12 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
 
     public void setWidthPreference(SizePreference widthPreference) {
         this.widthPreference = widthPreference != null ? widthPreference : SizePreference.FIT_CONTENT;
-        invalidate();
+        requestLayoutUpdate();
     }
 
     public void setHeightPreference(SizePreference heightPreference) {
         this.heightPreference = heightPreference != null ? heightPreference : SizePreference.FIT_CONTENT;
-        invalidate();
+        requestLayoutUpdate();
     }
  
     @Override
@@ -93,6 +93,18 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         }
         return Math.max(getMinWidth(), maxPrefWidth + getInsets().getHorizontal());
     
+    }
+
+    @Override
+    public boolean isHiddenManaged(){
+        return isHiddenManaged;
+    }
+
+    public void setIsHiddenManaged(boolean isHiddenManaged){
+        if(this.isHiddenManaged != isHiddenManaged ){
+            this.isHiddenManaged = isHiddenManaged;
+            requestLayoutUpdate();
+        }
     }
 
     @Override
@@ -126,6 +138,22 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         return insets;
     }
 
+    public void setInsets(int all) {
+        this.insets.setAll(all);
+    }
+    public void setInsets(TerminalInsets padding) {
+        if (padding == null) {
+            if (!this.insets.isZero()) {
+                this.insets.clear();
+            }
+            return;
+        }
+
+        if (!this.insets.equals(padding)) {
+            this.insets.copyFrom(padding);
+        }
+    }
+
     @Override
     public float getPercentWidth() {
         return percentWidth;
@@ -134,7 +162,7 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     @Override
     public void setPercentWidth(float percent) {
         this.percentWidth = percent;
-        invalidate();
+        requestLayoutUpdate();
     }
 
     @Override
@@ -145,7 +173,7 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     @Override
     public void setPercentHeight(float percent) {
         this.percentHeight = percent;
-        invalidate();
+        requestLayoutUpdate();
     }
 
     @Override
@@ -180,4 +208,42 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         }
         throw new IllegalArgumentException("getSizePreference TerminalRegion does not have: " + axis + " axis");
     }
+
+    @Override
+    public boolean isSizedByContent() {
+        return widthPreference == SizePreference.FIT_CONTENT 
+            || heightPreference == SizePreference.FIT_CONTENT;
+    }
+
+    @Override
+    public boolean isSizedByParent() {
+        return widthPreference == SizePreference.FILL
+            || widthPreference == SizePreference.PERCENT
+            || heightPreference == SizePreference.FILL
+            || heightPreference == SizePreference.PERCENT;
+    }
+
+    public static int resolveContentDimension(
+        TerminalRenderable child,
+        int viewport,
+        float percent,
+        SizePreference pref,
+        boolean isWidth
+    ) {
+
+        return switch (pref) {
+            case FILL    -> viewport;
+            case PERCENT -> Math.round(viewport * (percent / 100f));
+            case STATIC  -> isWidth ? child.getRegion().getWidth() 
+                                    : child.getRegion().getHeight();
+            case FIT_CONTENT -> child instanceof TerminalSizeable s 
+                                    ? ( isWidth 
+                                            ? Math.max(s.getMinWidth(),  s.getPreferredWidth())
+                                            : Math.max(s.getMinHeight(), s.getPreferredHeight())) 
+                                    : viewport;
+            default -> viewport;
+        };
+    }
+
+
 }

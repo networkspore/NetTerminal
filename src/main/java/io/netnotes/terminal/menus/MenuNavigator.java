@@ -9,6 +9,7 @@ import io.netnotes.engine.io.input.ephemeralEvents.*;
 import io.netnotes.engine.io.input.events.*;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
@@ -62,6 +63,8 @@ public class MenuNavigator extends TerminalRegion {
     public MenuNavigator(String name) {
         super(name);
         stateMachine.addState(IDLE);
+        setWidthPreference(SizePreference.FIT_CONTENT);
+        setHeightPreference(SizePreference.FIT_CONTENT);
     }
     
     @Override
@@ -538,6 +541,7 @@ public class MenuNavigator extends TerminalRegion {
         } else {
             MenuContext previousMenu = navigationStack.pop();
             currentMenu = previousMenu;
+            currentMenu.setOnChanged(this::onMenuChanged);
             selectedIndex = 0;
             scrollOffset = 0;
             
@@ -663,10 +667,12 @@ public class MenuNavigator extends TerminalRegion {
         if (menu == null) return;
         
         if (currentMenu != null && currentMenu != menu) {
+            currentMenu.setOnChanged(null); // detach old listener
             navigationStack.push(currentMenu);
         }
         
         currentMenu = menu;
+        currentMenu.setOnChanged(this::onMenuChanged);
         selectedIndex = 0;
         scrollOffset = 0;
         
@@ -675,7 +681,7 @@ public class MenuNavigator extends TerminalRegion {
         stateMachine.removeState(EXECUTING_ACTION);
         stateMachine.addState(DISPLAYING_MENU);
         
-        invalidate(); // Full invalidation on menu change
+        notifyContentChanged(); // Full invalidation on menu change
     }
     
     public void refreshMenu() {
@@ -713,6 +719,104 @@ public class MenuNavigator extends TerminalRegion {
     
     public void cleanup() {
         removeKeyboardHandler();
+    }
+
+
+    @Override
+    public int getMinHeight(){
+        return Math.max(super.getMinHeight(), 6) + getInsets().getHorizontal();
+    }
+
+    @Override
+    public int getMinWidth(){
+        return Math.max(super.getMinWidth(), 1) + getInsets().getVertical();
+    }
+
+    @Override
+    public int getPreferredHeight() {
+        SizePreference pref = getHeightPreference();
+
+        if (pref == SizePreference.STATIC) {
+            return region.getHeight();
+        }
+
+        if (pref == SizePreference.PERCENT) {
+            return getMinHeight();
+        }
+
+        if (pref != SizePreference.FIT_CONTENT || currentMenu == null) {
+            return getMinHeight();
+        }
+
+        int height = 0;
+
+        // Header
+        height += 3;
+
+        // Breadcrumb
+        if (!navigationStack.isEmpty()) {
+            height += 2;
+        }
+
+        // Description
+        String description = currentMenu.getDescription();
+        if (description != null && !description.isEmpty()) {
+            int lines = description.split("\n").length;
+            height += Math.min(lines, 8) + 1;
+        }
+
+        // Items
+        int itemCount = currentMenu.getItems().size();
+        height += Math.min(itemCount, MAX_VISIBLE_ITEMS);
+
+        // Footer
+        height += 2;
+
+        return Math.max(getMinHeight(), height);
+    }
+
+    @Override
+    public int getPreferredWidth() {
+        SizePreference pref = getWidthPreference();
+
+        if (pref == SizePreference.STATIC) {
+            return region.getWidth();
+        }
+
+        if (pref == SizePreference.PERCENT) {
+            return getMinWidth();
+        }
+
+        if (pref != SizePreference.FIT_CONTENT || currentMenu == null) {
+            return getMinWidth();
+        }
+
+        int maxTextLength = currentMenu.getTitle() != null
+            ? currentMenu.getTitle().length()
+            : 0;
+
+        for (MenuContext.MenuItem item : currentMenu.getItems()) {
+            int len = item.description != null
+                ? item.description.length()
+                : 0;
+
+            if (item.badge != null) {
+                len += item.badge.length() + 3; // " [badge]"
+            }
+
+            maxTextLength = Math.max(maxTextLength, len);
+        }
+
+        int contentWidth = maxTextLength + 8;
+        int boxWidth = Math.max(40, contentWidth);
+
+        return Math.max(getMinWidth(), boxWidth);
+    }
+    
+    private void onMenuChanged(MenuContext menu) {
+        if (menu == currentMenu) {
+            notifyContentChanged(); // trigger full redraw; MenuNavigator handles diffing
+        }
     }
     
     // ===== GETTERS =====

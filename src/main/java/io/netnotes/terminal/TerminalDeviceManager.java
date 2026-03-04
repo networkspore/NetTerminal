@@ -1,5 +1,6 @@
 package io.netnotes.terminal;
-import io.netnotes.engine.ui.containers.DeviceManager;
+
+import io.netnotes.engine.ui.renderer.DeviceManager;
 import io.netnotes.noteBytes.NoteBytes;
 
 public abstract class TerminalDeviceManager extends DeviceManager

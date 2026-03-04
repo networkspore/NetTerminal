@@ -83,13 +83,13 @@ public class TerminalMessageBox extends TerminalRegion {
         if ((this.title == null && title != null) || 
             (this.title != null && !this.title.equals(title))) {
             this.title = title;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
     public void setMessages(String... messages) {
         this.messages = messages != null ? messages : new String[0];
-        invalidate();
+        notifyContentChanged();
     }
     
     public void setMessage(String message) {
@@ -100,7 +100,7 @@ public class TerminalMessageBox extends TerminalRegion {
         if ((this.footer == null && footer != null) || 
             (this.footer != null && !this.footer.equals(footer))) {
             this.footer = footer;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -114,7 +114,7 @@ public class TerminalMessageBox extends TerminalRegion {
     public void setShowIcon(boolean show) {
         if (this.showIcon != show) {
             this.showIcon = show;
-            invalidate();
+            notifyContentChanged();
         }
     }
     

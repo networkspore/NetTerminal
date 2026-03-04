@@ -427,7 +427,7 @@ public class ScrollableTextViewer extends TerminalRegion {
             getWidth(),
             Math.min(3, contentHeight) // Last 3 lines
         );
-        invalidate();
+        notifyContentChanged();
     }
     
     /**
@@ -444,7 +444,7 @@ public class ScrollableTextViewer extends TerminalRegion {
             getWidth(),
             contentHeight
         );
-        invalidate();
+        notifyContentChanged();
     }
     
     public void setMaxLines(int maxLines) {
@@ -455,7 +455,7 @@ public class ScrollableTextViewer extends TerminalRegion {
                 lines.remove(0);
             }
         }
-        invalidate();
+        notifyContentChanged();
     }
     
     private String truncateLine(String line, int maxWidth) {

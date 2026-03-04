@@ -6,6 +6,7 @@ import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
+import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -24,6 +25,8 @@ import java.util.concurrent.locks.LockSupport;
  * - Error states directly prevent rendering via shouldRender()
  */
 public class ConsoleRenderManager {
+
+    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
     
     private final ConsoleRenderer renderer;
     private final AtomicLong generation = new AtomicLong(0);
@@ -97,7 +100,7 @@ public class ConsoleRenderManager {
         
         running = true;
         renderLoop = CompletableFuture.runAsync(this::renderLoopImpl, VirtualExecutors.getVirtualExecutor());
-        Log.logMsg("[ConsoleRenderManager] Render loop started");
+        Log.logMsg("[ConsoleRenderManager] Render loop started", LOG_LEVEL);
     }
     
     /**
@@ -108,7 +111,7 @@ public class ConsoleRenderManager {
         if (renderLoop != null) {
             renderLoop.cancel(false);
         }
-        Log.logMsg("[ConsoleRenderManager] Render loop stopped");
+        Log.logMsg("[ConsoleRenderManager] Render loop stopped", LOG_LEVEL);
     }
     
     /**
@@ -137,8 +140,10 @@ public class ConsoleRenderManager {
     private void tick(long frameTime) throws InterruptedException {
         processQueuedRequests();
         
-        // Render if dirty for current generation
         if (isDirtyForCurrentGen()) {
+            // Consume dirty before rendering. markDirty() during an in-flight render
+            // will re-set dirtyGen, triggering a follow-up render on the next tick.
+            dirtyGen = -1;
             renderVisibleContainers(frameTime);
         }
     }
@@ -157,7 +162,7 @@ public class ConsoleRenderManager {
      * Enqueue container for request processing
      */
     public void enqueueRequest(ConsoleContainer container) {
-        Log.logMsg("[ConsoleRenderManager] Enqueuing container request");
+        Log.logMsg("[ConsoleRenderManager] Enqueuing container request", LOG_LEVEL);
         if (!requestQueue.contains(container)) {
             requestQueue.offer(container);
         }
@@ -169,7 +174,7 @@ public class ConsoleRenderManager {
     private void processContainerRequests(ConsoleContainer container) {
        
 
-        Log.logMsg("[ConsoleRenderManager] processing container requests");
+        Log.logMsg("[ConsoleRenderManager] processing container requests", LOG_LEVEL);
         
         StateSnapshot snap = container.getState();
         
@@ -286,7 +291,7 @@ public class ConsoleRenderManager {
         container.grantFocus().thenRun(() -> {
             renderer.onFocusGranted(container);             // sets Renderer.focusedContainerId
             renderer.getLayoutManager().onFocusGranted(container.getId()); // updates focusedIndex, reflows
-            Log.logMsg("[ConsoleRenderManager] Focus granted to: " + container.getId());
+            Log.logMsg("[ConsoleRenderManager] Focus granted to: " + container.getId(), LOG_LEVEL);
         });
     }
         
@@ -298,7 +303,7 @@ public class ConsoleRenderManager {
         container.grantShow().thenRun(() -> {
             renderer.getLayoutManager().onContainerShown(container);
             markDirty();
-            Log.logMsg("[ConsoleRenderManager] Show granted: " + container.getId());
+            Log.logMsg("[ConsoleRenderManager] Show granted: " + container.getId(), LOG_LEVEL);
         });
     }
     
@@ -325,12 +330,12 @@ public class ConsoleRenderManager {
             container.grantMaximize().thenRun(() -> {
                 markDirty();
                 Log.logMsg("[ConsoleRenderManager] Maximize granted to: " + 
-                    container.getId());
+                    container.getId(), LOG_LEVEL);
             });
         } else {
             container.clearRequest(Container.STATE_MAXIMIZE_REQUESTED);
             Log.logMsg("[ConsoleRenderManager] Maximize denied for: " + 
-                container.getId() + " (not focused)");
+                container.getId() + " (not focused)", LOG_LEVEL);
         }
     }
     
@@ -346,12 +351,12 @@ public class ConsoleRenderManager {
             container.grantRestore().thenRun(() -> {
                 markDirty();
                 Log.logMsg("[ConsoleRenderManager] Restore granted to: " + 
-                    container.getId());
+                    container.getId(), LOG_LEVEL);
             });
         } else {
             container.clearRequest(Container.STATE_RESTORE_REQUESTED);
             Log.logMsg("[ConsoleRenderManager] Restore denied for: " + 
-                container.getId() + " (not maximized)");
+                container.getId() + " (not maximized)", LOG_LEVEL);
         }
     }
     
@@ -396,7 +401,12 @@ public class ConsoleRenderManager {
      */
     private void renderContainer(ConsoleContainer container, long frameTime) {
         ContainerId id = container.getId();
-        if (renderInFlight.containsKey(id)) return;
+
+        // If already in-flight, re-mark dirty so the next tick retries once this finishes.
+        if (renderInFlight.containsKey(id)) {
+            markDirty();
+            return;
+        }
 
         RenderFailureTracker tracker = failureTrackers.computeIfAbsent(id, k -> new RenderFailureTracker());
         if (tracker.shouldSkipRender(frameTime)) {
@@ -405,26 +415,34 @@ public class ConsoleRenderManager {
         }
 
         long currentGen = generation.get();
-      
-        CompletableFuture<Void> inFlight = container.getRenderableState()
+
+        // Guard is placed before any async work to eliminate the race where
+        // whenComplete fires renderInFlight.remove before put() executes.
+        CompletableFuture<Void> guard = new CompletableFuture<>();
+        renderInFlight.put(id, guard);
+
+        container.getRenderableState()
             .thenAccept(state -> {
-                if (!isGenerationCurrent(currentGen)) return;
+                if (!isGenerationCurrent(currentGen)) {
+                    // Generation advanced; skip this stale render.
+                    return;
+                }
                 renderer.renderState(state, currentGen);
                 container.commitRender();
-                if (dirtyGen == currentGen) dirtyGen = -1;
                 tracker.recordSuccess(System.nanoTime());
                 container.getStateMachine().removeState(Container.STATE_RENDER_ERROR);
             })
             .whenComplete((v, ex) -> {
                 renderInFlight.remove(id);
+                guard.complete(null);
                 if (ex != null) {
+                    Log.logError("[ConsoleRenderManager] Render failed for " + id + ": " + ex.getMessage());
+                    ex.printStackTrace();
                     tracker.recordFailure(System.nanoTime());
                     container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
                     escalateContainerError(tracker, container);
                 }
             });
-
-        renderInFlight.put(id, inFlight);
     }
 
     private void escalateContainerError(RenderFailureTracker tracker, ConsoleContainer focused){
@@ -441,10 +459,12 @@ public class ConsoleRenderManager {
     /**
      * Mark as dirty for current generation (content change)
      */
-    private void markDirty() {
+    public void markDirty() {
         dirtyGen = generation.get();
     }
-    
+
+
+
     /**
      * Mark dirty with new generation (layout/focus change)
     
@@ -496,35 +516,31 @@ public class ConsoleRenderManager {
         RenderFailureTracker tracker = failureTrackers.get(containerId);
         if (tracker != null) {
             tracker.consecutiveFailures = 0;
-            Log.logMsg("[ConsoleRenderManager] Reset render failures for: " + containerId);
+            Log.logMsg("[ConsoleRenderManager] Reset render failures for: " + containerId, LOG_LEVEL);
         }
     }
     
     // ===== RENDERABLE STATE =====
     
-    public static class RenderableState {
-        public final int rows;
-        public final int cols;
-        public final int cursorRow;
-        public final int cursorCol;
-        public final boolean cursorVisible;
-        public final Cell[][] cells;
-        public final Cell[][] prevCells;
-        
-        public RenderableState(
-            int rows, int cols,
-            int cursorRow, int cursorCol,
+    public record RenderableState(
+            int rows,
+            int cols,
+            int offsetX,      // contentBounds.x
+            int offsetY,      // contentBounds.y
+            int prevRows,     // bounds before last resize
+            int prevCols,
+            int prevOffsetX,
+            int prevOffsetY,
+            int cursorRow,
+            int cursorCol,
             boolean cursorVisible,
             Cell[][] cells,
             Cell[][] prevCells
-        ) {
-            this.rows = rows;
-            this.cols = cols;
-            this.cursorRow = cursorRow;
-            this.cursorCol = cursorCol;
-            this.cursorVisible = cursorVisible;
-            this.cells = cells;
-            this.prevCells = prevCells;
+        ) 
+    {
+        public boolean hasBoundsChanged() {
+            return rows != prevRows || cols != prevCols
+                || offsetX != prevOffsetX || offsetY != prevOffsetY;
         }
     }
 }

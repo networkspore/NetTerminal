@@ -101,7 +101,7 @@ public class TerminalTextField extends TerminalRegion {
         super.onFocusGained();
         // Restore cursor position when gaining focus
         ensureCursorVisible();
-        invalidate();
+        notifyContentChanged();
     }
     
     @Override
@@ -182,7 +182,7 @@ public class TerminalTextField extends TerminalRegion {
             cursorPos = buffer.size();
             scrollOffset = 0;
             ensureCursorVisible();
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -191,7 +191,7 @@ public class TerminalTextField extends TerminalRegion {
             buffer.clear();
             cursorPos = 0;
             scrollOffset = 0;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -384,7 +384,7 @@ public class TerminalTextField extends TerminalRegion {
             buffer.insertCodePoint(cursorPos, codepoint);
             cursorPos++;
             ensureCursorVisible();
-            invalidate();
+            notifyContentChanged();
             fireOnChange();
         }
     }
@@ -406,7 +406,7 @@ public class TerminalTextField extends TerminalRegion {
             buffer.deleteCodePointAt(cursorPos - 1);
             cursorPos--;
             ensureCursorVisible();
-            invalidate();
+            notifyContentChanged();
             fireOnChange();
         }
     }
@@ -415,7 +415,7 @@ public class TerminalTextField extends TerminalRegion {
         if (cursorPos < buffer.size()) {
             buffer.deleteCodePointAt(cursorPos);
             ensureCursorVisible();
-            invalidate();
+            notifyContentChanged();
             fireOnChange();
         }
     }

@@ -314,7 +314,7 @@ public class TerminalPanel extends TerminalRegion {
 
     public void setAxis(Axis axis) {
         this.axis = axis;
-        invalidate();
+        notifyContentChanged();
     }
 
     public boolean isWrap() {
@@ -323,7 +323,7 @@ public class TerminalPanel extends TerminalRegion {
 
     public void setWrap(boolean wrap) {
         this.wrap = wrap;
-        invalidate();
+        notifyContentChanged();
     }
 
     public CrossAlignment getCrossAlignment() {
@@ -332,13 +332,13 @@ public class TerminalPanel extends TerminalRegion {
 
     public void setCrossAlignment(CrossAlignment crossAlignment) {
         this.crossAlignment = crossAlignment;
-        invalidate();
+        notifyContentChanged();
     }
 
     public void setBorder(boolean enabled) {
         if (this.drawBorder != enabled) {
             this.drawBorder = enabled;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -346,7 +346,7 @@ public class TerminalPanel extends TerminalRegion {
         if (this.borderStyle != style) {
             this.borderStyle = style;
             if (drawBorder) {
-                invalidate();
+                notifyContentChanged();
             }
         }
     }
@@ -356,7 +356,7 @@ public class TerminalPanel extends TerminalRegion {
             (this.title != null && !this.title.equals(title))) {
             this.title = title;
             if (drawBorder) {
-                invalidate();
+                notifyContentChanged();
             }
         }
     }
@@ -381,7 +381,7 @@ public class TerminalPanel extends TerminalRegion {
 
     public void setTitlePosition(Position titlePosition) {
         this.titlePosition = titlePosition;
-        invalidate();
+        notifyContentChanged();
     }
 
     @Override
@@ -480,7 +480,7 @@ public class TerminalPanel extends TerminalRegion {
 
     public void setSpacing(int spacing) {
         this.spacing = spacing;
-        invalidate();
+        notifyContentChanged();
     }
 
     public boolean isPaddingLessThan1(){

@@ -91,7 +91,7 @@ public class TerminalTextInput extends TerminalRegion {
         if (!buffer.isEmpty() || cursorPos != 0) {
             buffer.clear();
             cursorPos = 0;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -104,7 +104,7 @@ public class TerminalTextInput extends TerminalRegion {
             buffer.clear();
             buffer.append(text);
             cursorPos = buffer.size();
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -176,7 +176,7 @@ public class TerminalTextInput extends TerminalRegion {
             !Character.isISOControl(codepoint)) {
             buffer.insertCodePoint(cursorPos, codepoint);
             cursorPos++;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -199,7 +199,7 @@ public class TerminalTextInput extends TerminalRegion {
         if (cursorPos > 0) {
             buffer.deleteCodePointAt(cursorPos - 1);
             cursorPos--;
-            invalidate();
+            notifyContentChanged();
         }
     }
     
@@ -209,7 +209,7 @@ public class TerminalTextInput extends TerminalRegion {
     private void handleDelete() {
         if (cursorPos < buffer.size()) {
             buffer.deleteCodePointAt(cursorPos);
-            invalidate();
+            notifyContentChanged();
         }
     }
     
