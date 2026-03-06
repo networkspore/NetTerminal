@@ -55,6 +55,7 @@ public final class ConsoleRenderer extends Renderer<
 > {
     private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
 
+
     public static final NoteBytesReadOnly DEFAULT_RENDERER_ID = new NoteBytesReadOnly("JLINE3");
     public static final int MIN_TERM_WIDTH = 40;
     public static final int MIN_TERM_HEIGHT = 24;
@@ -67,7 +68,9 @@ public final class ConsoleRenderer extends Renderer<
     public static final int RENDERER_HANDLING_RESIZE = 5;
     public static final int RENDERER_SHUTTING_DOWN   = 6;
 
-    private static final ThreadLocal<StringBuilder> RENDER_BUFFER = ThreadLocal.withInitial(() -> new StringBuilder(8192));
+    private static final ThreadLocal<StringBuilder> RENDER_BUFFER = ThreadLocal.withInitial(() -> 
+        new StringBuilder(8192));
+
 
     private static final long RESIZE_DEBOUNCE_MS = 80;
 
@@ -614,94 +617,145 @@ public final class ConsoleRenderer extends Renderer<
     }
     
     // ===== RENDERING =====
-    
+   
     /**
      * Render a container's state
      * PURE RENDERING - doesn't know about containers or lifecycle
      * RenderManager commits the render after this succeeds
      */
-    public void renderState(ConsoleRenderManager.RenderableState state, long generation) {
-        try {
-            StringBuilder updates = RENDER_BUFFER.get();
-            int estimatedSize = state.rows() * state.cols() * 8;
-            
-            if (updates.capacity() < estimatedSize) {
-                updates.ensureCapacity(estimatedSize);
-            }
-            updates.setLength(0);
-            
-            // Cursor is hidden for the duration of cell writes to prevent flicker.
-            // Cursor positioning and show/hide for the frame is done once, after all
-            // containers have rendered, via applyCursorState(). This prevents any
-            // unfocused container's render from clobbering the focused container's cursor.
-            updates.append("\033[?25l");
-            
-            if (state.hasBoundsChanged()) { 
-                clearGhostRegion(updates, state);
-            }
+    public void renderState(RenderableState state, long generation) {
+        StringBuilder sb = RENDER_BUFFER.get();
+        sb.setLength(0);
+        sb.append("\033[?25l");
+        TextStyle currentStyle = new TextStyle();
 
-            // Differential rendering
-            TextStyle currentStyle = new TextStyle();
-            int changedCells = 0;
-            
-            for (int row = 0; row < state.rows(); row++) {
-                for (int col = 0; col < state.cols(); col++) {
-                    Cell current = state.cells()[row][col];
-                    Cell previous = state.prevCells()[row][col];
-                    
-                    if (current.equals(previous)) {
-                        continue;
-                    }
-                    
-                    changedCells++;
-                    updates.append(String.format("\033[%d;%dH",
-                        state.offsetY() + row + 1,
-                        state.offsetX() + col + 1));
-                    
-                    if (!current.style.equals(currentStyle)) {
-                        updates.append("\033[0m");
-                        appendStyleCodes(updates, current.style);
-                        currentStyle = current.style.copy();
-                    }
-                    
-                    updates.append(current.character != '\0' ? current.character : ' ');
-                }
-            }
-            
-            updates.append("\033[0m");
-            
-            // NOTE: No cursor show/position here. applyCursorState() handles that
-            // once after the full frame, using only the focused container's state.
-            
-            if (changedCells > 0) {
-                terminal.writer().write(updates.toString());
-                terminal.flush();
-            }
-            
-        } catch (Exception e) {
-            Log.logError("[ConsoleUIRenderer] Render error: " + e.getMessage());
-            e.printStackTrace();
-            throw e;
+        if (state.hasBoundsChanged()) {
+            fullRepaintRegion(sb, state, currentStyle);
+        } else {
+            differentialRepaintRegion(sb, state, currentStyle);
+        }
+
+        appendCursor(sb, state);
+
+        if (!sb.isEmpty()) {
+            terminal.writer().write(sb.toString());
+            terminal.flush();
         }
     }
 
-      private void clearGhostRegion(StringBuilder updates, ConsoleRenderManager.RenderableState state) {
-        int prevRight  = state.prevOffsetX() + state.prevCols();
-        int curRight   = state.offsetX()    + state.cols();
-        int prevBottom = state.prevOffsetY() + state.prevRows();
-        int curBottom  = state.offsetY()    + state.rows();
 
-        // Rows below the new bottom that existed before
-        for (int row = curBottom; row < prevBottom; row++) {
-            updates.append(String.format("\033[%d;%dH\033[2K", row + 1, 1));
+    /**
+     * Full repaint of this container's current region.
+     * 
+     * Two passes:
+     *   1. Blank every row in the container's region (space fill, single cursor move per row)
+     *   2. Write non-blank cells on top
+     * 
+     * This correctly overwrites any stale content from a prior render without
+     * touching cells outside this container's bounds.
+     */
+    private void fullRepaintRegion(StringBuilder sb, RenderableState state, TextStyle currentStyle) {
+        // Pass 1: blank the region row by row — confined to our bounds
+        for (int row = 0; row < state.rows(); row++) {
+            sb.append(String.format("\033[%d;%dH",
+                state.offsetY() + row + 1,
+                state.offsetX() + 1));
+            sb.append(Cell.SPACE_STR.repeat(state.cols()));
         }
 
-        // Columns to the right of the new width on rows that still exist
-        if (prevRight > curRight) {
-            String spaces = " ".repeat(prevRight - curRight);
-            for (int row = state.offsetY(); row < curBottom; row++) {
-                updates.append(String.format("\033[%d;%dH%s", row + 1, curRight + 1, spaces));
+        sb.append("\033[0m");
+
+        // Pass 2: write non-blank cells — blank cells are already correct from pass 1
+        for (int row = 0; row < state.rows(); row++) {
+            for (int col = 0; col < state.cols(); col++) {
+                Cell current = state.cells()[row][col];
+                if (current.isBlank() || current.isContinuation()) continue; // already space from pass 1
+
+                sb.append(String.format("\033[%d;%dH",
+                    state.offsetY() + row + 1,
+                    state.offsetX() + col + 1));
+
+                if (!current.style.equals(currentStyle)) {
+                    sb.append("\033[0m");
+                    appendStyleCodes(sb, current.style);
+            
+                    currentStyle.copyFrom(current.style);
+                }
+
+                sb.appendCodePoint(current.codepoint);
             }
+        }
+    }
+
+    /**
+     * Differential repaint — only emit cells that differ from prevCells.
+     * Blank cells that changed to blank must emit a space (not skip)
+     * because prevCells may have had a non-space character there.
+     */
+    private void differentialRepaintRegion(StringBuilder sb, RenderableState state, TextStyle currentStyle) {
+        TerminalRectangle[] damage = state.damageRects();
+        if (damage != null && damage.length > 0) {
+            for (int i = 0; i < damage.length ; i++) {
+                TerminalRectangle rect = damage[i];
+                if(rect == null) continue;
+                damage[i] = null;
+                int x = rect.getX();
+                int y = rect.getY();
+                int width = rect.getWidth();
+                int height = rect.getHeight();
+                regionPool.recycle(rect);
+
+                int startCol = Math.max(0, x);
+                int startRow = Math.max(0, y);
+                int endCol   = Math.min(state.cols(), x + width);
+                int endRow   = Math.min(state.rows(), y + height);
+                paintDifferential(sb, state, currentStyle, startRow, endRow, startCol, endCol);
+            }
+        } else {
+            // fallback: full scan (e.g. focus change with no damage regions)
+            paintDifferential(sb, state, currentStyle, 0, state.rows(), 0, state.cols());
+        }
+    }
+
+    private void paintDifferential(
+        StringBuilder sb, 
+        RenderableState state, 
+        TextStyle currentStyle,
+        int rowStart, 
+        int rowEnd, 
+        int colStart, 
+        int colEnd
+    ) {
+        for (int row = rowStart; row < rowEnd; row++) {
+            for (int col = colStart; col < colEnd; col++) {
+                Cell current  = state.cells()[row][col];
+                Cell previous = state.prevCells()[row][col];
+                if (current.equals(previous)) continue;
+                if (current.isContinuation()) continue;
+
+                sb.append(String.format("\033[%d;%dH",
+                    state.offsetY() + row + 1,
+                    state.offsetX() + col + 1));
+
+                if (!current.style.equals(currentStyle)) {
+                    sb.append("\033[0m");
+                    appendStyleCodes(sb, current.style);
+                    currentStyle.copyFrom(current.style);
+                }
+
+                if (current.isBlank()) sb.append(' ');
+                else sb.appendCodePoint(current.codepoint);
+            }
+        }
+    }
+
+    private void appendCursor(StringBuilder sb, RenderableState state) {
+        sb.append("\033[0m");
+        if (state.cursorVisible()) {
+            sb.append(String.format("\033[%d;%dH",
+                state.offsetY() + state.cursorRow() + 1,
+                state.offsetX() + state.cursorCol() + 1));
+            sb.append("\033[?25h");
         }
     }
 
@@ -817,7 +871,7 @@ public final class ConsoleRenderer extends Renderer<
         };
     }
     
-    private void clearScreen() {
+    void clearScreen() {
         terminal.writer().print("\033[2J\033[H");
         terminal.flush();
     }

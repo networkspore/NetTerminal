@@ -1034,6 +1034,30 @@ public class TextStyle {
         return textStyle;
     }
 
+    public void copyFrom(TextStyle textStyle){
+
+        // Copy color state
+        this.fgMode = textStyle.fgMode;
+        this.foreground = textStyle.foreground;
+        this.fgIndexed = textStyle.fgIndexed;
+        this.fgRgb = textStyle.fgRgb;
+        
+        this.bgMode = textStyle.bgMode;
+        this.background = textStyle.background;
+        this.bgIndexed = textStyle.bgIndexed;
+        this.bgRgb = textStyle.bgRgb;
+        
+        // Copy attributes
+        this.bold = textStyle.bold;
+        this.faint = textStyle.faint;
+        this.italic = textStyle.italic;
+        this.underline = textStyle.underline;
+        this.blink = textStyle.blink;
+        this.inverse = textStyle.inverse;
+        this.hidden = textStyle.hidden;
+        this.strikethrough = textStyle.strikethrough;
+    }
+
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;

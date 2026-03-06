@@ -1,5 +1,6 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.consoleRenderer.Cell;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.TextAlignment;
@@ -375,7 +376,7 @@ public class TerminalCommands {
      * @param style text style (typically just background color)
      */
     public static NoteBytesObject fillBackground(TerminalRectangle region,TerminalRectangle renderRegion, TextStyle style) {
-        return fillRegion(region, renderRegion, " ", style);
+        return fillRegion(region, renderRegion, Cell.SPACE_STR, style);
     }
 
     // ===== COMPONENT RENDERING HELPERS =====
@@ -521,7 +522,7 @@ public class TerminalCommands {
      * Block characters for progress bars (1/8 resolution)
      */
     public static final String[] PROGRESS_BLOCKS = {
-        " ",    // U+0020 (empty)
+        Cell.SPACE_STR,    // U+0020 (empty)
         "▏",    // U+258F (1/8)
         "▎",    // U+258E (2/8)
         "▍",    // U+258D (3/8)

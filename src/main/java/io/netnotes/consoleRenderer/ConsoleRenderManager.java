@@ -8,6 +8,9 @@ import io.netnotes.engine.ui.containers.ContainerId;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+
+import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,7 +43,7 @@ public class ConsoleRenderManager {
     
     // Generation-based dirty tracking
     private volatile long dirtyGen = -1;
-    
+
     // Render loop control
     private volatile boolean running = false;
     private CompletableFuture<Void> renderLoop;
@@ -384,25 +387,66 @@ public class ConsoleRenderManager {
     }
 
     private void renderVisibleContainers(long frameTime) {
-        renderer.getAllContainers().stream()
-            .filter(ConsoleContainer::shouldRender)
-            .forEach(c -> renderContainer(c, frameTime));
+        long currentGen = generation.get();
         
-        // After all cell content has been written, emit the final cursor state once.
-        // Using the focused container's desired cursor state (via effectiveCursorVisible)
-        // ensures no unfocused container can stomp the cursor position or visibility.
-        renderer.applyCursorState(
-            (ConsoleContainer) renderer.getFocusedContainer()
-        );
+
+        List<ConsoleContainer> all = renderer.getLayoutManager().getVisibleContainers();
+        List<ConsoleContainer> toRender = new ArrayList<>(all.size());
+
+        for (ConsoleContainer c : all) {
+            if (c.shouldRender() && !renderInFlight.containsKey(c.getId())) {
+                toRender.add(c);
+            }
+        }
+ 
+        if (toRender.isEmpty()) {
+            renderer.clearScreen();
+            return;
+        }
+
+        int size = toRender.size();
+        RenderableState[] states = new RenderableState[size];
+        CompletableFuture<?>[] futureArray = new CompletableFuture<?>[size];
+
+        for (int i = 0; i < size; i++) {
+            final int idx = i;
+            futureArray[i] = toRender.get(i).getRenderableState()
+                .thenAccept(s -> states[idx] = s);
+        }
+
+        CompletableFuture.allOf(futureArray).thenRun(() -> {
+            if (!isGenerationCurrent(currentGen)) return;
+
+            boolean boundsChanged = false;
+            for (RenderableState s : states) {
+                if (s != null && s.hasBoundsChanged()) {
+                    boundsChanged = true;
+                    break;
+                }
+            }
+
+            if (boundsChanged) renderer.clearScreen();
+
+            for (int i = 0; i < size; i++) {
+                if (states[i] != null) {
+                    renderWithState(toRender.get(i), states[i], currentGen, frameTime);
+                }
+            }
+
+            renderer.applyCursorState((ConsoleContainer) renderer.getFocusedContainer());
+        });
     }
     
     /**
      * Only renders if container.shouldRender() returns true
      */
-    private void renderContainer(ConsoleContainer container, long frameTime) {
+    private void renderWithState(
+        ConsoleContainer container, 
+        RenderableState state, 
+        long currentGen, 
+        long frameTime
+    ) {
         ContainerId id = container.getId();
-
-        // If already in-flight, re-mark dirty so the next tick retries once this finishes.
         if (renderInFlight.containsKey(id)) {
             markDirty();
             return;
@@ -414,35 +458,34 @@ public class ConsoleRenderManager {
             return;
         }
 
-        long currentGen = generation.get();
+        if (!isGenerationCurrent(currentGen)) return;
 
-        // Guard is placed before any async work to eliminate the race where
-        // whenComplete fires renderInFlight.remove before put() executes.
         CompletableFuture<Void> guard = new CompletableFuture<>();
         renderInFlight.put(id, guard);
 
-        container.getRenderableState()
-            .thenAccept(state -> {
-                if (!isGenerationCurrent(currentGen)) {
-                    // Generation advanced; skip this stale render.
-                    return;
-                }
-                renderer.renderState(state, currentGen);
-                container.commitRender();
-                tracker.recordSuccess(System.nanoTime());
-                container.getStateMachine().removeState(Container.STATE_RENDER_ERROR);
-            })
-            .whenComplete((v, ex) -> {
-                renderInFlight.remove(id);
-                guard.complete(null);
-                if (ex != null) {
-                    Log.logError("[ConsoleRenderManager] Render failed for " + id + ": " + ex.getMessage());
-                    ex.printStackTrace();
-                    tracker.recordFailure(System.nanoTime());
-                    container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
-                    escalateContainerError(tracker, container);
-                }
-            });
+        try {
+            renderer.renderState(state, currentGen);
+            tracker.recordSuccess(System.nanoTime());
+            container.getStateMachine().removeState(Container.STATE_RENDER_ERROR);
+        } catch (Exception ex) {
+            renderInFlight.remove(id);
+            guard.complete(null);
+            tracker.recordFailure(System.nanoTime());
+            container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
+            escalateContainerError(tracker, container);
+            return;
+        }
+
+        container.commitRender().whenComplete((v, ex) -> {
+            renderInFlight.remove(id);
+            guard.complete(null);
+            if (ex != null) {
+                Log.logError("[ConsoleRenderManager] commitRender failed for " + id + ": " + ex.getMessage());
+                tracker.recordFailure(System.nanoTime());
+                container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
+                escalateContainerError(tracker, container);
+            }
+        });
     }
 
     private void escalateContainerError(RenderFailureTracker tracker, ConsoleContainer focused){
@@ -464,15 +507,11 @@ public class ConsoleRenderManager {
     }
 
 
-
-    /**
-     * Mark dirty with new generation (layout/focus change)
-    
-    private void markDirtyForNewGeneration() {
+    public void markDirtyForNewGeneration() {
         long newGen = generation.incrementAndGet();
         dirtyGen = newGen;
-    } */
-    
+    }
+
     /**
      * Check if generation is still current
      */
@@ -520,27 +559,5 @@ public class ConsoleRenderManager {
         }
     }
     
-    // ===== RENDERABLE STATE =====
-    
-    public record RenderableState(
-            int rows,
-            int cols,
-            int offsetX,      // contentBounds.x
-            int offsetY,      // contentBounds.y
-            int prevRows,     // bounds before last resize
-            int prevCols,
-            int prevOffsetX,
-            int prevOffsetY,
-            int cursorRow,
-            int cursorCol,
-            boolean cursorVisible,
-            Cell[][] cells,
-            Cell[][] prevCells
-        ) 
-    {
-        public boolean hasBoundsChanged() {
-            return rows != prevRows || cols != prevCols
-                || offsetX != prevOffsetX || offsetY != prevOffsetY;
-        }
-    }
+
 }

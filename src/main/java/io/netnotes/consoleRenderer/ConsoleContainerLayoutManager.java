@@ -21,6 +21,7 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
     public static final int MIN_ROW_HEIGHT = 24;
 
     private ConsoleRenderer renderer;
+
     private final List<ConsoleContainer> displayOrder = new ArrayList<>();
     private int maxVisible = 1;
     private int focusedIndex = 0;
@@ -286,10 +287,34 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
         return Math.min(Math.max(0, value), displayOrder.size() - 1);
     }
 
+    public List<ConsoleContainer> getVisibleContainers() {
+        List<Integer> focusable = getFocusableIndices();
+        int visible = Math.min(focusable.size(), maxVisible);
+        if (visible == 0) return Collections.emptyList();
+
+        int windowStart = 0;
+        int focusableSize = focusable.size();
+        if (focusableSize > visible) {
+            int focusedFocusableIndex = indexOfFocusable(focusable, focusedIndex);
+            if (focusedFocusableIndex < 0) focusedFocusableIndex = 0;
+            int desiredStart = focusedFocusableIndex - (visible / 2);
+            desiredStart = Math.max(0, Math.min(desiredStart, focusableSize - visible));
+            windowStart = desiredStart;
+        }
+
+        List<ConsoleContainer> result = new ArrayList<>(visible);
+        for (int i = 0; i < visible; i++) {
+            result.add(displayOrder.get(focusable.get(windowStart + i)));
+        }
+        return result;
+    }
+
+
     private CompletableFuture<Void> reflow() {
         List<Integer> focusable = getFocusableIndices();
         int visible = Math.min(focusable.size(), maxVisible);
         boolean isManaged = visible > 1;
+
         List<CompletableFuture<Void>> futures = new ArrayList<>(displayOrder.size());
         List<Integer> visibleIndices = new ArrayList<>(visible);
 
@@ -331,7 +356,8 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
         }
     
       
-        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]));
+        return CompletableFuture.allOf(futures.toArray(new CompletableFuture[0]))
+            .thenRun(() -> renderer.getRenderManager().markDirtyForNewGeneration());
     }
 
     private int indexOfFocusable(List<Integer> focusable, int containerIndex) {

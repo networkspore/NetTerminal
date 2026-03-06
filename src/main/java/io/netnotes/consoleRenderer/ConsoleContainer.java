@@ -22,6 +22,7 @@ import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.BoxStyle;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * ConsoleContainer - Pull-based terminal container
@@ -52,7 +53,10 @@ public class ConsoleContainer extends Container<
     // Cell buffers (indexed as [y][x] for natural row-major ordering)
     private Cell[][] cells;
     private Cell[][] prevCells;
-    
+    private boolean fullRepaintPending = false;
+    private final AtomicBoolean boundsChangedPending = new AtomicBoolean(false);
+    private TerminalRectangle[] pendingDamageRects = null;
+
     // Cursor state (using x,y coordinates)
     private int cursorX = 0;
     private int cursorY = 0;
@@ -110,26 +114,9 @@ public class ConsoleContainer extends Container<
     @Override
     protected void setupMessageMap() {
         // Individual terminal commands
-        msgMap.put(TerminalCommands.TERMINAL_CLEAR, this::handleClear);
-        msgMap.put(TerminalCommands.TERMINAL_PRINT, this::terminalPrint);
-        msgMap.put(TerminalCommands.TERMINAL_PRINTLN, this::terminalPrintLn);
-        msgMap.put(TerminalCommands.TERMINAL_PRINT_AT, this::handlePrintAt);
         msgMap.put(TerminalCommands.TERMINAL_MOVE_CURSOR, this::handleMoveCursor);
         msgMap.put(TerminalCommands.TERMINAL_SHOW_CURSOR, this::handleShowCursor);
         msgMap.put(TerminalCommands.TERMINAL_HIDE_CURSOR, this::handleHideCursor);
-        msgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE, this::handleClearLine);
-        msgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE_AT, this::handleClearLineAt);
-        msgMap.put(TerminalCommands.TERMINAL_CLEAR_REGION, this::handleClearRegion);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_BOX, this::handleDrawBox);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_HLINE, this::handleDrawHLine);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_VLINE, this::handleDrawVLine);
-        msgMap.put(TerminalCommands.TERMINAL_FILL_REGION, this::handleFillRegion);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_BORDERED_TEXT, this::handleDrawBorderedText);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_PANEL, this::handleDrawPanel);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_BUTTON, this::handleDrawButton);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_PROGRESS_BAR, this::handleDrawProgressBar);
-        msgMap.put(TerminalCommands.TERMINAL_DRAW_TEXT_BLOCK, this::handleDrawTextBlock);
-        msgMap.put(TerminalCommands.TERMINAL_SHADE_REGION, this::handleShadeRegion);
     }
 
     @Override
@@ -156,6 +143,8 @@ public class ConsoleContainer extends Container<
         batchMsgMap.put(TerminalCommands.TERMINAL_SHADE_REGION, (cmd)->executeShadeRegionInternal(cmd));
     }
 
+    public boolean hasBoundsChangedPending() { return boundsChangedPending.get(); }
+
     @Override
     protected void setupStateTransitions() {
         // Container-specific state transitions can go here
@@ -175,7 +164,7 @@ public class ConsoleContainer extends Container<
      * Get renderable state snapshot (PULL-BASED)
      * Called by renderer when it wants to render
      */
-    public CompletableFuture<ConsoleRenderManager.RenderableState> getRenderableState() {
+    public CompletableFuture<RenderableState> getRenderableState() {
         if(containerExecutor.isCurrentThread()){
             return CompletableFuture.completedFuture(createStateSnapshot());
         }else{
@@ -186,26 +175,45 @@ public class ConsoleContainer extends Container<
         
     }
 
-    private ConsoleRenderManager.RenderableState createStateSnapshot(){
+    private RenderableState createStateSnapshot() {
         int h = getHeight(), w = getWidth();
+        boolean boundsChanged = boundsChangedPending.get();
+
+        // Consume both pending flags atomically on the container thread
+        boolean repaint = fullRepaintPending || boundsChanged;
+        fullRepaintPending = false;
+
+        TerminalRectangle[] snapDamage = pendingDamageRects;
+        pendingDamageRects = null;
+
         Cell[][] snapCells = new Cell[h][w];
-        Cell[][] snapPrev  = new Cell[h][w];
+        Cell[][] snapPrev = repaint ? null : new Cell[h][w];
+
         for (int y = 0; y < h; y++) {
             for (int x = 0; x < w; x++) {
                 snapCells[y][x] = new Cell();
-                snapCells[y][x].copyFrom(cells[y][x]);
-                snapPrev[y][x]  = new Cell();
-                snapPrev[y][x].copyFrom(prevCells[y][x]);
+                if (repaint) {
+                    snapCells[y][x].copyFrom(cells[y][x]);
+                } else {
+                    Cell current = cells[y][x];
+                    // Damaged blank cell must snapshot as explicit space so the renderer
+                    // physically clears that terminal position rather than skipping it.
+                    if (current.isBlank() && prevCells[y][x].isForceRepaint()) {
+                        snapCells[y][x].set(' ', new TextStyle());
+                    } else {
+                        snapCells[y][x].copyFrom(current);
+                    }
+                    snapPrev[y][x] = new Cell();
+                    snapPrev[y][x].copyFrom(prevCells[y][x]);
+                }
             }
         }
 
-        return new ConsoleRenderManager.RenderableState(
-            h, w,
-            contentBounds.getX(),     contentBounds.getY(),
-            prevContentBounds.getHeight(), prevContentBounds.getWidth(),
-            prevContentBounds.getX(), prevContentBounds.getY(),
+        return new RenderableState(
+            h, w, allocatedBounds.getX(), allocatedBounds.getY(),
             cursorY, cursorX,
             effectiveCursorVisible(),
+            snapDamage,
             snapCells, snapPrev
         );
     }
@@ -265,6 +273,7 @@ public class ConsoleContainer extends Container<
     }
 
     private void setAllocatedBoundsInternal(TerminalRectangle region){
+        boundsChangedPending.set(true);
         allocatedBounds.copyFrom(region);
 
         boolean isBoundsManaged = stateMachine.hasState(Container.STATE_LAYOUT_MANAGED);
@@ -296,7 +305,7 @@ public class ConsoleContainer extends Container<
             int width  = contentBounds.getWidth();
             for (int y = 0; y < height; y++) {
                 for (int x = 0; x < width; x++) {
-                    prevCells[y][x].character = (char) 0xFFFF;
+                    prevCells[y][x].markForceRepaint();
                 }
             }
         });
@@ -342,26 +351,18 @@ public class ConsoleContainer extends Container<
         if(isBoundsManaged()){
             newContentBounds.copyFrom(allocatedBounds);
         }
-    
+        pendingDamageRects = damageRegions;
         if(!newContentBounds.equals(contentBounds)){
             handleContentBoundsInternal(newContentBounds);
         }else{
             invalidateDamageRegions(damageRegions);
         }
-
-        recycleRegions(damageRegions);
         regionPool.recycle(newContentBounds);
     }
 
-    private void recycleRegions(TerminalRectangle[] damageRegions){
-        for(int i = 0; i < damageRegions.length ; i++){
-            TerminalRectangle region = damageRegions[i];
-            damageRegions[i] = null;
-            regionPool.recycle(region);
-        }
-    }
 
     private void invalidateDamageRegions(TerminalRectangle[] damageRegions) {
+        if(damageRegions == null) return;
         int height = contentBounds.getHeight();
         int width  = contentBounds.getWidth();
         
@@ -376,17 +377,14 @@ public class ConsoleContainer extends Container<
             int endX   = Math.min(width,  damage.getX() + damage.getWidth());
             
             if (endY <= startY || endX <= startX) {
-                regionPool.recycle(damage);
                 continue;
             }
             
             for (int y = startY; y < endY; y++) {
                 for (int x = startX; x < endX; x++) {
-                    prevCells[y][x].character = (char) 0xFFFF;
+                    prevCells[y][x].markForceRepaint();
                 }
             }
-            
-            regionPool.recycle(damage);
         }
     }
 
@@ -411,14 +409,15 @@ public class ConsoleContainer extends Container<
 
         for (int y = 0; y < newHeight; y++) {
             for (int x = 0; x < newWidth; x++) {
-                newCells[y][x]     = new Cell();       // blank — client redraws everything
+                newCells[y][x]     = new Cell();
                 newPrevCells[y][x] = new Cell();
-                newPrevCells[y][x].character = (char) 0xFFFF; // force repaint
+                newPrevCells[y][x].markForceRepaint();
             }
         }
 
         this.cells     = newCells;
         this.prevCells = newPrevCells;
+        this.fullRepaintPending = true;
     }
     
     /**
@@ -452,49 +451,16 @@ public class ConsoleContainer extends Container<
     
     // ===== INDIVIDUAL COMMAND HANDLERS =====
     
-    public CompletableFuture<Void> handleClear(NoteBytesMap command) {
-        Log.logMsg("[ConsoleContainer.handleClear]", LogLevel.GENERAL);
-        return containerExecutor.execute(() -> {
-            clearInternal();
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> terminalPrint(NoteBytesMap command) {
-        return handlePrint(command, false);
-    }
 
-    public CompletableFuture<Void> terminalPrintLn(NoteBytesMap command) {
-        return handlePrint(command, true);
-    }
-
-    public CompletableFuture<Void> handlePrint(NoteBytesMap command, boolean newline) {
-        NoteBytes textBytes = command.get(Keys.TEXT);
-        if (textBytes == null) {
-            return CompletableFuture.completedFuture(null);
-        }
-        
-        return containerExecutor.execute(() -> {
-            executePrintInternal(command, newline);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handlePrintAt(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executePrintAtInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleMoveCursor(NoteBytesMap command) {
+ 
+    private CompletableFuture<Void> handleMoveCursor(NoteBytesMap command) {
         return containerExecutor.execute(() -> {
             executeMoveCursorInternal(command);
             requestRenderInternal();
         });
     }
     
-    public CompletableFuture<Void> handleShowCursor(NoteBytesMap command) {
+    private CompletableFuture<Void> handleShowCursor(NoteBytesMap command) {
         return containerExecutor.execute(() -> {
             cursorDesired = true;
             // Only worth re-rendering for cursor state change if we're the focused container.
@@ -503,105 +469,13 @@ public class ConsoleContainer extends Container<
         });
     }
     
-    public CompletableFuture<Void> handleHideCursor(NoteBytesMap command) {
+    private CompletableFuture<Void> handleHideCursor(NoteBytesMap command) {
         return containerExecutor.execute(() -> {
             cursorDesired = false;
             if (isFocused()) requestRenderInternal();
         });
     }
     
-    public CompletableFuture<Void> handleClearLine(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            clearLineInternal(cursorY);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleClearLineAt(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executeClearLineAtInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleClearRegion(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executeClearRegionInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleDrawBox(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executeDrawBoxInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleDrawHLine(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executeDrawHLineInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleDrawVLine(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executeDrawVLineInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-    public CompletableFuture<Void> handleFillRegion(NoteBytesMap command) {
-        return containerExecutor.execute(() -> {
-            executeFillRegionInternal(command);
-            requestRenderInternal();
-        });
-    }
-    
-
-    // Draw bordered text
-    public CompletableFuture<Void> handleDrawBorderedText(NoteBytesMap message) {
-        return containerExecutor.execute(() -> {
-            executeDrawBorderedTextInternal(message);
-            requestRenderInternal();
-        });
-    }
-
-    public CompletableFuture<Void> handleDrawPanel(NoteBytesMap message) {
-        return containerExecutor.execute(() -> {
-            executeDrawPanelInternal(message);
-            requestRenderInternal();
-        });
-    }
-
-    public CompletableFuture<Void> handleDrawButton(NoteBytesMap message) {
-        return containerExecutor.execute(() -> {
-            executeDrawButtonInternal(message);
-            requestRenderInternal();
-        });
-    }
-
-    public CompletableFuture<Void> handleDrawProgressBar(NoteBytesMap message) {
-        return containerExecutor.execute(() -> {
-            executeDrawProgressBarInternal(message);
-            requestRenderInternal();
-        });
-    }
-
-    public CompletableFuture<Void> handleDrawTextBlock(NoteBytesMap message) {
-        return containerExecutor.execute(() -> {
-            executeDrawTextBlockInternal(message);
-            requestRenderInternal();
-        });
-    }
-
-    public CompletableFuture<Void> handleShadeRegion(NoteBytesMap message) {
-        return containerExecutor.execute(() -> {
-            executeShadeRegionInternal(message);
-            requestRenderInternal();
-        });
-    }
     // ===== INTERNAL EXECUTION METHODS =====
     
     private void executePrintInternal(NoteBytesMap cmd, boolean newline) {
@@ -724,9 +598,7 @@ public class ConsoleContainer extends Container<
     // ===== LOW-LEVEL DRAWING OPERATIONS =====
     
     private void clearInternal() {
-        Log.logMsg("[ConsoleContainer] CLEAR - prevCells[0][0]: '" + 
-        prevCells[0][0].character + "' -> cells[0][0]: '" + 
-        cells[0][0].character + "' after clear", LOG_LEVEL);
+        Log.logMsg("[ConsoleContainer] CLEAR executing", LOG_LEVEL);
 
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
@@ -736,9 +608,6 @@ public class ConsoleContainer extends Container<
                 cells[y][x].clear();
             }
         }
-        Log.logMsg("[ConsoleContainer] CLEAR executed - prevCells[0][0]: '" + 
-        prevCells[0][0].character + "' -> cells[0][0]: '" + 
-        cells[0][0].character + "' after clear", LOG_LEVEL);
 
         cursorX = 0;
         cursorY = 0;
@@ -747,20 +616,23 @@ public class ConsoleContainer extends Container<
     private void printInternal(String text, TextStyle style, boolean newline) {
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
-
-        for (char ch : text.toCharArray()) {
+        int offset = 0;
+        while (offset < text.length()) {
             if (cursorY >= height) break;
-            
-            if (ch == '\n' || cursorX >= width) {
+            int cp = text.codePointAt(offset);
+            offset += Character.charCount(cp);
+            if (cp == '\n' || cursorX >= width) {
                 cursorY++;
                 cursorX = 0;
-                if (ch == '\n') continue;
+                if (cp == '\n') continue;
             }
-            
-            cells[cursorY][cursorX].set(ch, style);
-            cursorX++;
+            cells[cursorY][cursorX].set(cp, style);
+            int dw = cells[cursorY][cursorX].getDisplayWidth();
+            if (dw == 2 && cursorX + 1 < width) {
+                cells[cursorY][cursorX + 1].setAsContinuation();
+            }
+            cursorX += dw;
         }
-        
         if (newline) {
             cursorY++;
             cursorX = 0;
@@ -768,19 +640,28 @@ public class ConsoleContainer extends Container<
     }
     
     private void printAtInternal(int x, int y, String text, TextStyle style) {
-        Log.logMsg("[ConsoleContainer] printAt:" + x + "," + y + " " + text + " \n\t" + style.toString(), LOG_LEVEL);
+        Log.logMsg("[ConsoleContainer] printAt:" + x + "," + y + Cell.SPACE_STR + text, LOG_LEVEL);
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
-
-        if (y < 0 || y >= height || x < 0) return;
+        
+        if (y < 0 || y >= height) return;
         
         int printX = x;
-        for (char ch : text.toCharArray()) {
-            if (printX >= width) break;
-            if (printX >= 0) {
-                cells[y][printX].set(ch, style);
+        int offset = 0;
+
+        while (offset < text.length() && printX < width) {
+            int cp = text.codePointAt(offset);
+            offset += Character.charCount(cp);
+            if (printX < 0) {
+                printX += Cell.computeDisplayWidth(cp);
+                continue;
             }
-            printX++;
+            cells[y][printX].set(cp, style);
+            int dw = cells[y][printX].getDisplayWidth();
+            if (dw == 2 && printX + 1 < width) {
+                cells[y][printX + 1].setAsContinuation();
+            }
+            printX += dw;
         }
     }
     
@@ -841,7 +722,7 @@ public class ConsoleContainer extends Container<
             int titleY = calculateTitleY(y, boxHeight, titlePos);
             
             if (titleX >= x && titleX + title.length() + 2 <= x + boxWidth) {
-                printAtInternal(titleX, titleY, " " + title + " ", new TextStyle());
+                printAtInternal(titleX, titleY, Cell.SPACE_STR + title + Cell.SPACE_STR, new TextStyle());
             }
         }
         
@@ -895,7 +776,7 @@ public class ConsoleContainer extends Container<
                 String visible = clipString(title, titleX, visLeft, visRight);
                 int renderX = Math.max(titleX, visLeft);
                 if (!visible.isEmpty()) {
-                    printAtInternal(renderX, titleY, " " + visible + " ", new TextStyle());
+                    printAtInternal(renderX, titleY, Cell.SPACE_STR + visible + Cell.SPACE_STR, new TextStyle());
                 }
             }
         }
@@ -955,17 +836,25 @@ public class ConsoleContainer extends Container<
     private void fillRegionInternal(TerminalRectangle region, int codePoint, TextStyle style) {
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
-
         int startX = Math.max(contentBounds.getX(), region.getX());
         int startY = Math.max(contentBounds.getY(), region.getY());
         int endX = Math.min(width - 1, region.getX() + region.getWidth() - 1);
         int endY = Math.min(height - 1, region.getY() + region.getHeight() - 1);
-        
-        char fillChar = (char) codePoint;
-        
+        int dw = Cell.computeDisplayWidth(codePoint);
+
         for (int y = startY; y <= endY; y++) {
             for (int x = startX; x <= endX; x++) {
-                cells[y][x].set(fillChar, style);
+                if (dw == 2) {
+                    if (x + 1 <= endX) {
+                        cells[y][x].set(codePoint, style);
+                        cells[y][x + 1].setAsContinuation();
+                        x++;
+                    } else {
+                        cells[y][x].set(' ', style); // no room for wide char at right edge
+                    }
+                } else {
+                    cells[y][x].set(codePoint, style);
+                }
             }
         }
     }
@@ -979,412 +868,383 @@ public class ConsoleContainer extends Container<
                 prevCells[y][x].copyFrom(cells[y][x]);
             }
         }
+        boundsChangedPending.set(false);
     }
 
 
-private void executeDrawBorderedTextInternal(NoteBytesMap cmd) {
-    NoteBytes regionBytes = cmd.get(Keys.REGION);
-    if (regionBytes == null) return;
-    
-    TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
-    String text = cmd.getAsString(Keys.TEXT, "");
-    String textPosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "CENTER");
-    Position textPos = Position.valueOf(textPosStr);
-    String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
-    BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
-    
-    TextStyle textStyle = parseStyle(cmd.get(Keys.STYLE));
-    TextStyle borderStyle = parseStyle(cmd.get(StyleConstants.BORDER_STYLE));
-    
-    drawBorderedTextInternal(region, text, textPos, boxStyle, textStyle, borderStyle);
-}
-
-private void executeDrawPanelInternal(NoteBytesMap cmd) {
-    NoteBytes regionBytes = cmd.get(Keys.REGION);
-    if (regionBytes == null) return;
-
-    NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
-
-    TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
-    TerminalRectangle renderRegion = renderRegionBytes != null ? 
-        TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
-    
-    String title = cmd.getAsString(Keys.TITLE, null);
-    String titlePosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "TOP_CENTER");
-    Position titlePos = Position.valueOf(titlePosStr);
-    String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
-    BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
-    
-    TextStyle borderStyle = parseStyle(cmd.get(Keys.STYLE));
-    TextStyle fillStyle = parseStyle(cmd.get(StyleConstants.BG_STYLE));
-    if(renderRegion == null){
-        drawPanelInternal(region, title, titlePos, boxStyle, borderStyle, fillStyle);
-        regionPool.recycle(region);
-    }else{
-        drawPanelInternal(region, renderRegion, title, titlePos, boxStyle, borderStyle, fillStyle);
-        regionPool.recycle(region);
-        regionPool.recycle(renderRegion);
+    private void executeDrawBorderedTextInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+        
+        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
+        String text = cmd.getAsString(Keys.TEXT, "");
+        String textPosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "CENTER");
+        Position textPos = Position.valueOf(textPosStr);
+        String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
+        BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
+        
+        TextStyle textStyle = parseStyle(cmd.get(Keys.STYLE));
+        TextStyle borderStyle = parseStyle(cmd.get(StyleConstants.BORDER_STYLE));
+        
+        drawBorderedTextInternal(region, text, textPos, boxStyle, textStyle, borderStyle);
     }
-}
 
-private void executeDrawButtonInternal(NoteBytesMap cmd) {
-     NoteBytes regionBytes = cmd.get(Keys.REGION);
-    NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
-    if (regionBytes == null) return;
-    
-    TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
-    TerminalRectangle renderRegion = renderRegionBytes != null ? 
-        TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
-    
-    String label = cmd.getAsString(Keys.TEXT, "");
-    String labelPosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "CENTER");
-    Position labelPos = Position.valueOf(labelPosStr);
-    boolean selected = cmd.getAsBoolean(TerminalCommands.SELECTED, false);
-    TextStyle style = parseStyle(cmd.get(Keys.STYLE));
-    
-    if(renderRegion == null){
-        drawButtonInternal(region, label, labelPos, selected, style);
-    }else{
-        drawButtonInternal(region, renderRegion, label, labelPos, selected, style);
+    private void executeDrawPanelInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+
+        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null ? 
+            TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+        
+        String title = cmd.getAsString(Keys.TITLE, null);
+        String titlePosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "TOP_CENTER");
+        Position titlePos = Position.valueOf(titlePosStr);
+        String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
+        BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
+        
+        TextStyle borderStyle = parseStyle(cmd.get(Keys.STYLE));
+        TextStyle fillStyle = parseStyle(cmd.get(StyleConstants.BG_STYLE));
+        if(renderRegion == null){
+            drawPanelInternal(region, title, titlePos, boxStyle, borderStyle, fillStyle);
+            regionPool.recycle(region);
+        }else{
+            drawPanelInternal(region, renderRegion, title, titlePos, boxStyle, borderStyle, fillStyle);
+            regionPool.recycle(region);
+            regionPool.recycle(renderRegion);
+        }
     }
-}
 
-private void executeDrawProgressBarInternal(NoteBytesMap cmd) {
-    NoteBytes regionBytes = cmd.get(Keys.REGION);
-    if (regionBytes == null) return;
-    NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
-
-    TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
-    TerminalRectangle renderRegion = renderRegionBytes != null ? 
-        TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
-    
-    double progress = cmd.getAsDouble(TerminalCommands.PROGRESS, 0.0);
-    TextStyle style = parseStyle(cmd.get(Keys.STYLE));
-    TextStyle emptyStyle = parseStyle(cmd.get(StyleConstants.EMPTY_STYLE));
-    
-    if(renderRegion == null){
-        drawProgressBarInternal(region, progress, style, emptyStyle);
-    }else{
-        drawProgressBarInternal(region, renderRegion, progress, style, emptyStyle);
+    private void executeDrawButtonInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        if (regionBytes == null) return;
+        
+        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null ? 
+            TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+        
+        String label = cmd.getAsString(Keys.TEXT, "");
+        String labelPosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "CENTER");
+        Position labelPos = Position.valueOf(labelPosStr);
+        boolean selected = cmd.getAsBoolean(TerminalCommands.SELECTED, false);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+        
+        if(renderRegion == null){
+            drawButtonInternal(region, label, labelPos, selected, style);
+        }else{
+            drawButtonInternal(region, renderRegion, label, labelPos, selected, style);
+        }
     }
-}
 
-private void executeDrawTextBlockInternal(NoteBytesMap cmd) {
-    NoteBytes regionBytes = cmd.get(Keys.REGION);
-    if (regionBytes == null) return;
+    private void executeDrawProgressBarInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
 
-    NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
-
-    TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
-    TerminalRectangle renderRegion = renderRegionBytes != null ? 
-        TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
-    
-    String text = cmd.getAsString(Keys.TEXT, "");
-    String alignName = cmd.getAsString(TerminalCommands.ALIGN, "LEFT");
-    TextAlignment align = TextAlignment.valueOf(alignName);
-    TextStyle style = parseStyle(cmd.get(Keys.STYLE));
-    
-    if(renderRegion == null){
-        drawTextBlockInternal(region, text, align, style);
-    }else{
-        drawTextBlockInternal(region, renderRegion, text, align, style);
+        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null ? 
+            TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+        
+        double progress = cmd.getAsDouble(TerminalCommands.PROGRESS, 0.0);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+        TextStyle emptyStyle = parseStyle(cmd.get(StyleConstants.EMPTY_STYLE));
+        
+        if(renderRegion == null){
+            drawProgressBarInternal(region, progress, style, emptyStyle);
+        }else{
+            drawProgressBarInternal(region, renderRegion, progress, style, emptyStyle);
+        }
     }
-}
 
-private void executeShadeRegionInternal(NoteBytesMap cmd) {
-    NoteBytes regionBytes = cmd.get(Keys.REGION);
-    if (regionBytes == null) return;
+    private void executeDrawTextBlockInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
 
-    NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
-    TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
-    TerminalRectangle renderRegion = renderRegionBytes != null ? 
-        TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
-    
-    String shadeStr = cmd.getAsString(TerminalCommands.SHADE_CHAR, "░");
-    char shadeChar = shadeStr.isEmpty() ? '░' : shadeStr.charAt(0);
-    TextStyle style = parseStyle(cmd.get(Keys.STYLE));
-    
-    if(renderRegion == null){
-        shadeRegionInternal(region, shadeChar, style);
-    }else{
-        fillRegionInternal(renderRegion, shadeChar, style);
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+
+        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null ? 
+            TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+        
+        String text = cmd.getAsString(Keys.TEXT, "");
+        String alignName = cmd.getAsString(TerminalCommands.ALIGN, "LEFT");
+        TextAlignment align = TextAlignment.valueOf(alignName);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+        
+        if(renderRegion == null){
+            drawTextBlockInternal(region, text, align, style);
+        }else{
+            drawTextBlockInternal(region, renderRegion, text, align, style);
+        }
     }
-}
 
+    private void executeShadeRegionInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
 
-private void drawBorderedTextInternal(TerminalRectangle region, String text, Position textPos,
-                                      BoxStyle boxStyle, TextStyle textStyle, TextStyle borderStyle) {
-    drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
-                   null, null, boxStyle);
-    
-    if (text != null && !text.isEmpty() && region.getWidth() > 2 && region.getHeight() > 2) {
-        int[] coords = calculateTextPosition(region, text, textPos);
-        printAtInternal(coords[0], coords[1], text, textStyle);
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null ? 
+            TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+        
+        String shadeStr = cmd.getAsString(TerminalCommands.SHADE_CHAR, "░");
+        int shadeChar = shadeStr.isEmpty() ? '░' : shadeStr.charAt(0);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+        
+        if(renderRegion == null){
+            shadeRegionInternal(region, shadeChar, style);
+        }else{
+            fillRegionInternal(renderRegion, shadeChar, style);
+        }
     }
-}
 
-private void drawPanelInternal(TerminalRectangle region, String title, Position titlePos,
-                              BoxStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
-    int height = contentBounds.getHeight();
-    int width = contentBounds.getWidth();       
 
-    int fillX = region.getX() + 1;
-    int fillY = region.getY() + 1;
-    int fillWidth = region.getWidth() - 2;
-    int fillHeight = region.getHeight() - 2;
-    
-    if (fillWidth > 0 && fillHeight > 0) {
-        for (int y = fillY; y < fillY + fillHeight; y++) {
-            for (int x = fillX; x < fillX + fillWidth; x++) {
+    private void drawBorderedTextInternal(TerminalRectangle region, String text, Position textPos,
+                                        BoxStyle boxStyle, TextStyle textStyle, TextStyle borderStyle) {
+        drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
+                    null, null, boxStyle);
+        
+        if (text != null && !text.isEmpty() && region.getWidth() > 2 && region.getHeight() > 2) {
+            int[] coords = calculateTextPosition(region, text, textPos);
+            printAtInternal(coords[0], coords[1], text, textStyle);
+        }
+    }
+
+    private void drawPanelInternal(TerminalRectangle region, String title, Position titlePos,
+                                BoxStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();       
+
+        int fillX = region.getX() + 1;
+        int fillY = region.getY() + 1;
+        int fillWidth = region.getWidth() - 2;
+        int fillHeight = region.getHeight() - 2;
+        
+        if (fillWidth > 0 && fillHeight > 0) {
+            for (int y = fillY; y < fillY + fillHeight; y++) {
+                for (int x = fillX; x < fillX + fillWidth; x++) {
+                    if (x >= 0 && x < width && y >= 0 && y < height) {
+                        cells[y][x].set(' ', fillStyle);
+                    }
+                }
+            }
+        }
+        
+        drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
+                    title, titlePos, boxStyle);
+    }
+
+    private void drawButtonInternal(TerminalRectangle region, String label, Position labelPos,
+                                boolean selected, TextStyle style) {
+        TextStyle buttonStyle = selected ? style.inverse() : style;
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
+
+        for (int y = region.getY(); y < region.getY() + region.getHeight(); y++) {
+            for (int x = region.getX(); x < region.getX() + region.getWidth(); x++) {
                 if (x >= 0 && x < width && y >= 0 && y < height) {
-                    cells[y][x].set(' ', fillStyle);
+                    cells[y][x].set(' ', buttonStyle);
+                }
+            }
+        }
+        
+        if (!label.isEmpty()) {
+            int[] coords = calculateTextPosition(region, label, labelPos);
+            printAtInternal(coords[0], coords[1], label, buttonStyle);
+        }
+    }
+
+    private void drawButtonInternal(TerminalRectangle region, TerminalRectangle renderRegion,
+                                String label, Position labelPos, boolean selected, TextStyle style
+    ) {
+        TextStyle buttonStyle = selected ? style.inverse() : style;
+
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
+
+        int visLeft = renderRegion.getX();
+        int visTop = renderRegion.getY();
+        int visRight = renderRegion.getX() + renderRegion.getWidth();
+        int visBottom = renderRegion.getY() + renderRegion.getHeight();
+        
+        // Fill button - only visible portion
+        for (int y = Math.max(region.getY(), visTop); y < Math.min(region.getY() + region.getHeight(), visBottom); y++) {
+            for (int x = Math.max(region.getX(), visLeft); x < Math.min(region.getX() + region.getWidth(), visRight); x++) {
+                if (x >= 0 && x < width && y >= 0 && y < height) {
+                    cells[y][x].set(' ', buttonStyle);
+                }
+            }
+        }
+        
+        // Label - calculate position based on full region, render only visible
+        if (!label.isEmpty()) {
+            int[] coords = calculateTextPosition(region, label, labelPos);
+            int labelX = coords[0];
+            int labelY = coords[1];
+            
+            if (labelY >= visTop && labelY < visBottom) {
+                String visible = clipString(label, labelX, visLeft, visRight);
+                int renderX = Math.max(labelX, visLeft);
+                if (!visible.isEmpty()) {
+                    printAtInternal(renderX, labelY, visible, buttonStyle);
                 }
             }
         }
     }
-    
-    drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
-                   title, titlePos, boxStyle);
-}
 
-private void drawButtonInternal(TerminalRectangle region, String label, Position labelPos,
-                               boolean selected, TextStyle style) {
-    TextStyle buttonStyle = selected ? style.inverse() : style;
-    int height = contentBounds.getHeight();
-    int width = contentBounds.getWidth();
+    private void drawPanelInternal(TerminalRectangle region, TerminalRectangle renderRegion,
+                                String title, Position titlePos, BoxStyle boxStyle, 
+                                TextStyle borderStyle, TextStyle fillStyle
+    ) {
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
-    for (int y = region.getY(); y < region.getY() + region.getHeight(); y++) {
-        for (int x = region.getX(); x < region.getX() + region.getWidth(); x++) {
-            if (x >= 0 && x < width && y >= 0 && y < height) {
-                cells[y][x].set(' ', buttonStyle);
-            }
-        }
-    }
-    
-    if (!label.isEmpty()) {
-        int[] coords = calculateTextPosition(region, label, labelPos);
-        printAtInternal(coords[0], coords[1], label, buttonStyle);
-    }
-}
-
-private void drawButtonInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                               String label, Position labelPos, boolean selected, TextStyle style
-) {
-    TextStyle buttonStyle = selected ? style.inverse() : style;
-
-    int height = contentBounds.getHeight();
-    int width = contentBounds.getWidth();
-
-    int visLeft = renderRegion.getX();
-    int visTop = renderRegion.getY();
-    int visRight = renderRegion.getX() + renderRegion.getWidth();
-    int visBottom = renderRegion.getY() + renderRegion.getHeight();
-    
-    // Fill button - only visible portion
-    for (int y = Math.max(region.getY(), visTop); y < Math.min(region.getY() + region.getHeight(), visBottom); y++) {
-        for (int x = Math.max(region.getX(), visLeft); x < Math.min(region.getX() + region.getWidth(), visRight); x++) {
-            if (x >= 0 && x < width && y >= 0 && y < height) {
-                cells[y][x].set(' ', buttonStyle);
-            }
-        }
-    }
-    
-    // Label - calculate position based on full region, render only visible
-    if (!label.isEmpty()) {
-        int[] coords = calculateTextPosition(region, label, labelPos);
-        int labelX = coords[0];
-        int labelY = coords[1];
+        int fillX = region.getX() + 1;
+        int fillY = region.getY() + 1;
+        int fillWidth = region.getWidth() - 2;
+        int fillHeight = region.getHeight() - 2;
         
-        if (labelY >= visTop && labelY < visBottom) {
-            String visible = clipString(label, labelX, visLeft, visRight);
-            int renderX = Math.max(labelX, visLeft);
-            if (!visible.isEmpty()) {
-                printAtInternal(renderX, labelY, visible, buttonStyle);
+        int visLeft = renderRegion.getX();
+        int visTop = renderRegion.getY();
+        int visRight = renderRegion.getX() + renderRegion.getWidth();
+        int visBottom = renderRegion.getY() + renderRegion.getHeight();
+        
+        // Fill interior - only visible portion
+        if (fillWidth > 0 && fillHeight > 0) {
+            for (int y = Math.max(fillY, visTop); y < Math.min(fillY + fillHeight, visBottom); y++) {
+                for (int x = Math.max(fillX, visLeft); x < Math.min(fillX + fillWidth, visRight); x++) {
+                    if (x >= 0 && x < width && y >= 0 && y < height) {
+                        cells[y][x].set(' ', fillStyle);
+                    }
+                }
             }
         }
+        
+        drawBoxInternal(region, renderRegion, title, titlePos, boxStyle);
     }
-}
 
-private void drawPanelInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                              String title, Position titlePos, BoxStyle boxStyle, 
-                              TextStyle borderStyle, TextStyle fillStyle
-) {
-    int height = contentBounds.getHeight();
-    int width = contentBounds.getWidth();
+    private int[] calculateTextPosition(TerminalRectangle region, String text, Position pos) {
+        int textLen = displayWidth(text);
+        int x = region.getX() + 1;
+        int y = region.getY() + 1;
+        
+        x = switch (pos) {
+            case TOP_LEFT, CENTER_LEFT, BOTTOM_LEFT -> region.getX() + 1;
+            case TOP_CENTER, CENTER, BOTTOM_CENTER -> region.getX() + (region.getWidth() - textLen) / 2;
+            case TOP_RIGHT, CENTER_RIGHT, BOTTOM_RIGHT -> region.getX() + region.getWidth() - textLen - 1;
+        };
+        
+        y = switch (pos) {
+            case TOP_LEFT, TOP_CENTER, TOP_RIGHT -> region.getY() + 1;
+            case CENTER_LEFT, CENTER, CENTER_RIGHT -> region.getY() + (region.getHeight() / 2);
+            case BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT -> region.getY() + region.getHeight() - 2;
+        };
+        
+        x = Math.max(region.getX() + 1, Math.min(x, region.getX() + region.getWidth() - textLen - 1));
+        y = Math.max(region.getY() + 1, Math.min(y, region.getY() + region.getHeight() - 2));
+        
+        return new int[] { x, y };
+    }
 
-    int fillX = region.getX() + 1;
-    int fillY = region.getY() + 1;
-    int fillWidth = region.getWidth() - 2;
-    int fillHeight = region.getHeight() - 2;
-    
-    int visLeft = renderRegion.getX();
-    int visTop = renderRegion.getY();
-    int visRight = renderRegion.getX() + renderRegion.getWidth();
-    int visBottom = renderRegion.getY() + renderRegion.getHeight();
-    
-    // Fill interior - only visible portion
-    if (fillWidth > 0 && fillHeight > 0) {
-        for (int y = Math.max(fillY, visTop); y < Math.min(fillY + fillHeight, visBottom); y++) {
-            for (int x = Math.max(fillX, visLeft); x < Math.min(fillX + fillWidth, visRight); x++) {
-                if (x >= 0 && x < width && y >= 0 && y < height) {
-                    cells[y][x].set(' ', fillStyle);
+    private void drawProgressBarInternal(TerminalRectangle region, double progress, 
+                                        TextStyle style, TextStyle emptyStyle
+    ) {
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
+
+        progress = Math.max(0.0, Math.min(1.0, progress));
+        
+        int barWidth = region.getWidth();
+        double exactFilled = progress * barWidth;
+        int fullBlocks = (int) exactFilled;
+        double fraction = exactFilled - fullBlocks;
+        
+        // Calculate which partial block to use (0-8)
+        int partialIndex = (int) Math.round(fraction * 8);
+        
+        for (int y = region.getY(); y < region.getY() + region.getHeight(); y++) {
+            if (y < 0 || y >= height) continue;
+            
+            for (int x = region.getX(); x < region.getX() + barWidth; x++) {
+                if (x < 0 || x >= width) continue;
+                
+                int pos = x - region.getX();
+                
+                if (pos < fullBlocks) {
+                    // Full block
+                    cells[y][x].set('█', style);
+                } else if (pos == fullBlocks && partialIndex > 0 && partialIndex < 8) {
+                    // Partial block
+                    cells[y][x].set(TerminalCommands.PROGRESS_BLOCKS[partialIndex].codePointAt(0), style);
+                } else {
+                    // Empty
+                    cells[y][x].set(' ', emptyStyle);
                 }
             }
         }
     }
-    
-    drawBoxInternal(region, renderRegion, title, titlePos, boxStyle);
-}
 
-private int[] calculateTextPosition(TerminalRectangle region, String text, Position pos) {
-    int textLen = text.length();
-    int x = region.getX() + 1;
-    int y = region.getY() + 1;
-    
-    x = switch (pos) {
-        case TOP_LEFT, CENTER_LEFT, BOTTOM_LEFT -> region.getX() + 1;
-        case TOP_CENTER, CENTER, BOTTOM_CENTER -> region.getX() + (region.getWidth() - textLen) / 2;
-        case TOP_RIGHT, CENTER_RIGHT, BOTTOM_RIGHT -> region.getX() + region.getWidth() - textLen - 1;
-    };
-    
-    y = switch (pos) {
-        case TOP_LEFT, TOP_CENTER, TOP_RIGHT -> region.getY() + 1;
-        case CENTER_LEFT, CENTER, CENTER_RIGHT -> region.getY() + (region.getHeight() / 2);
-        case BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT -> region.getY() + region.getHeight() - 2;
-    };
-    
-    x = Math.max(region.getX() + 1, Math.min(x, region.getX() + region.getWidth() - textLen - 1));
-    y = Math.max(region.getY() + 1, Math.min(y, region.getY() + region.getHeight() - 2));
-    
-    return new int[] { x, y };
-}
+    private void drawProgressBarInternal(TerminalRectangle region, TerminalRectangle renderRegion,
+                                        double progress, TextStyle style, TextStyle emptyStyle
+    ) {
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
 
-private void drawProgressBarInternal(TerminalRectangle region, double progress, 
-                                    TextStyle style, TextStyle emptyStyle
-) {
-    int height = contentBounds.getHeight();
-    int width = contentBounds.getWidth();
-
-    progress = Math.max(0.0, Math.min(1.0, progress));
-    
-    int barWidth = region.getWidth();
-    double exactFilled = progress * barWidth;
-    int fullBlocks = (int) exactFilled;
-    double fraction = exactFilled - fullBlocks;
-    
-    // Calculate which partial block to use (0-8)
-    int partialIndex = (int) Math.round(fraction * 8);
-    
-    for (int y = region.getY(); y < region.getY() + region.getHeight(); y++) {
-        if (y < 0 || y >= height) continue;
+        progress = Math.max(0.0, Math.min(1.0, progress));
         
-        for (int x = region.getX(); x < region.getX() + barWidth; x++) {
-            if (x < 0 || x >= width) continue;
+        int barWidth = region.getWidth();
+        double exactFilled = progress * barWidth;
+        int fullBlocks = (int) exactFilled;
+        double fraction = exactFilled - fullBlocks;
+        int partialIndex = (int) Math.round(fraction * 8);
+        
+        int visLeft = renderRegion.getX();
+        int visTop = renderRegion.getY();
+        int visRight = renderRegion.getX() + renderRegion.getWidth();
+        int visBottom = renderRegion.getY() + renderRegion.getHeight();
+        
+        for (int y = Math.max(region.getY(), visTop); y < Math.min(region.getY() + region.getHeight(), visBottom); y++) {
+            if (y < 0 || y >= height) continue;
             
-            int pos = x - region.getX();
-            
-            if (pos < fullBlocks) {
-                // Full block
-                cells[y][x].set('█', style);
-            } else if (pos == fullBlocks && partialIndex > 0 && partialIndex < 8) {
-                // Partial block
-                cells[y][x].set(TerminalCommands.PROGRESS_BLOCKS[partialIndex].charAt(0), style);
-            } else {
-                // Empty
-                cells[y][x].set(' ', emptyStyle);
+            for (int x = Math.max(region.getX(), visLeft); x < Math.min(region.getX() + barWidth, visRight); x++) {
+                if (x < 0 || x >= width) continue;
+                
+                int pos = x - region.getX();
+                
+                if (pos < fullBlocks) {
+                    cells[y][x].set('█', style);
+                } else if (pos == fullBlocks && partialIndex > 0 && partialIndex < 8) {
+                    cells[y][x].set(TerminalCommands.PROGRESS_BLOCKS[partialIndex].charAt(0), style);
+                } else {
+                    cells[y][x].set(' ', emptyStyle);
+                }
             }
         }
     }
-}
 
-private void drawProgressBarInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                                    double progress, TextStyle style, TextStyle emptyStyle
-) {
-    int height = contentBounds.getHeight();
-    int width = contentBounds.getWidth();
+    private void drawTextBlockInternal(TerminalRectangle region, String text, 
+                                    TextAlignment align, TextStyle style
+    ) {
+        if (text == null || text.isEmpty()) return;
+        int height = contentBounds.getHeight();
 
-    progress = Math.max(0.0, Math.min(1.0, progress));
-    
-    int barWidth = region.getWidth();
-    double exactFilled = progress * barWidth;
-    int fullBlocks = (int) exactFilled;
-    double fraction = exactFilled - fullBlocks;
-    int partialIndex = (int) Math.round(fraction * 8);
-    
-    int visLeft = renderRegion.getX();
-    int visTop = renderRegion.getY();
-    int visRight = renderRegion.getX() + renderRegion.getWidth();
-    int visBottom = renderRegion.getY() + renderRegion.getHeight();
-    
-    for (int y = Math.max(region.getY(), visTop); y < Math.min(region.getY() + region.getHeight(), visBottom); y++) {
-        if (y < 0 || y >= height) continue;
+        // Simple word wrapping implementation
+        String[] lines = wrapText(text, region.getWidth());
         
-        for (int x = Math.max(region.getX(), visLeft); x < Math.min(region.getX() + barWidth, visRight); x++) {
-            if (x < 0 || x >= width) continue;
-            
-            int pos = x - region.getX();
-            
-            if (pos < fullBlocks) {
-                cells[y][x].set('█', style);
-            } else if (pos == fullBlocks && partialIndex > 0 && partialIndex < 8) {
-                cells[y][x].set(TerminalCommands.PROGRESS_BLOCKS[partialIndex].charAt(0), style);
-            } else {
-                cells[y][x].set(' ', emptyStyle);
+        int y = region.getY();
+        for (String line : lines) {
+            if (y >= region.getY() + region.getHeight()) break;
+            if (y < 0 || y >= height) {
+                y++;
+                continue;
             }
-        }
-    }
-}
-
-private void drawTextBlockInternal(TerminalRectangle region, String text, 
-                                  TextAlignment align, TextStyle style
-) {
-    if (text == null || text.isEmpty()) return;
-    int height = contentBounds.getHeight();
-
-    // Simple word wrapping implementation
-    String[] lines = wrapText(text, region.getWidth());
-    
-    int y = region.getY();
-    for (String line : lines) {
-        if (y >= region.getY() + region.getHeight()) break;
-        if (y < 0 || y >= height) {
-            y++;
-            continue;
-        }
-        
-        int x = region.getX();
-        
-        // Apply alignment
-        if (align == TextAlignment.CENTER) {
-            x = region.getX() + (region.getWidth() - line.length()) / 2;
-        } else if (align == TextAlignment.RIGHT) {
-            x = region.getX() + region.getWidth() - line.length();
-        }
-        
-        x = Math.max(region.getX(), Math.min(x, region.getX() + region.getWidth() - line.length()));
-        
-        printAtInternal(x, y, line, style);
-        y++;
-    }
-}
-
-private void drawTextBlockInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                                  String text, TextAlignment align, TextStyle style) {
-    if (text == null || text.isEmpty()) return;
-    
-    String[] lines = wrapText(text, region.getWidth());
-    
-    int visLeft = renderRegion.getX();
-    int visTop = renderRegion.getY();
-    int visRight = renderRegion.getX() + renderRegion.getWidth();
-    int visBottom = renderRegion.getY() + renderRegion.getHeight();
-    
-    int y = region.getY();
-    for (String line : lines) {
-        if (y >= region.getY() + region.getHeight()) break;
-        if (y >= visTop && y < visBottom) {
+            
             int x = region.getX();
             
+            // Apply alignment
             if (align == TextAlignment.CENTER) {
                 x = region.getX() + (region.getWidth() - line.length()) / 2;
             } else if (align == TextAlignment.RIGHT) {
@@ -1393,55 +1253,86 @@ private void drawTextBlockInternal(TerminalRectangle region, TerminalRectangle r
             
             x = Math.max(region.getX(), Math.min(x, region.getX() + region.getWidth() - line.length()));
             
-            String visible = clipString(line, x, visLeft, visRight);
-            int renderX = Math.max(x, visLeft);
-            if (!visible.isEmpty()) {
-                printAtInternal(renderX, y, visible, style);
-            }
-        }
-        y++;
-    }
-}
-
-private void shadeRegionInternal(TerminalRectangle region, char shadeChar, TextStyle style) {
-    fillRegionInternal(region, shadeChar, style);
-}
-
-// ===== ADD TEXT WRAPPING HELPER =====
-
-private String[] wrapText(String text, int maxWidth) {
-    if (maxWidth <= 0) return new String[0];
-    
-    java.util.List<String> lines = new java.util.ArrayList<>();
-    String[] paragraphs = text.split("\n", -1);
-    
-    for (String paragraph : paragraphs) {
-        if (paragraph.isEmpty()) {
-            lines.add("");
-            continue;
-        }
-        
-        String[] words = paragraph.split("\\s+");
-        StringBuilder currentLine = new StringBuilder();
-        
-        for (String word : words) {
-            if (currentLine.length() == 0) {
-                currentLine.append(word);
-            } else if (currentLine.length() + 1 + word.length() <= maxWidth) {
-                currentLine.append(" ").append(word);
-            } else {
-                lines.add(currentLine.toString());
-                currentLine = new StringBuilder(word);
-            }
-        }
-        
-        if (currentLine.length() > 0) {
-            lines.add(currentLine.toString());
+            printAtInternal(x, y, line, style);
+            y++;
         }
     }
-    
-    return lines.toArray(new String[0]);
-}
+
+    private void drawTextBlockInternal(TerminalRectangle region, TerminalRectangle renderRegion,
+                                    String text, TextAlignment align, TextStyle style) {
+        if (text == null || text.isEmpty()) return;
+        
+        String[] lines = wrapText(text, region.getWidth());
+        
+        int visLeft = renderRegion.getX();
+        int visTop = renderRegion.getY();
+        int visRight = renderRegion.getX() + renderRegion.getWidth();
+        int visBottom = renderRegion.getY() + renderRegion.getHeight();
+        
+        int y = region.getY();
+        for (String line : lines) {
+            if (y >= region.getY() + region.getHeight()) break;
+            if (y >= visTop && y < visBottom) {
+                int x = region.getX();
+                
+                if (align == TextAlignment.CENTER) {
+                    x = region.getX() + (region.getWidth() - line.length()) / 2;
+                } else if (align == TextAlignment.RIGHT) {
+                    x = region.getX() + region.getWidth() - line.length();
+                }
+                
+                x = Math.max(region.getX(), Math.min(x, region.getX() + region.getWidth() - line.length()));
+                
+                String visible = clipString(line, x, visLeft, visRight);
+                int renderX = Math.max(x, visLeft);
+                if (!visible.isEmpty()) {
+                    printAtInternal(renderX, y, visible, style);
+                }
+            }
+            y++;
+        }
+    }
+
+    private void shadeRegionInternal(TerminalRectangle region, int shadeCodepoint, TextStyle style) {
+        fillRegionInternal(region, shadeCodepoint, style);
+    }
+
+
+    private static int displayWidth(String s) {
+        int w = 0;
+        for (int i = 0; i < s.length(); ) {
+            int cp = s.codePointAt(i);
+            w += Cell.computeDisplayWidth(cp);
+            i += Character.charCount(cp);
+        }
+        return w;
+    }
+
+    private String[] wrapText(String text, int maxWidth) {
+        if (maxWidth <= 0) return new String[0];
+        java.util.List<String> lines = new java.util.ArrayList<>();
+        for (String paragraph : text.split("\n", -1)) {
+            if (paragraph.isEmpty()) { lines.add(""); continue; }
+            StringBuilder currentLine = new StringBuilder();
+            int currentWidth = 0;
+            for (String word : paragraph.split("\\s+")) {
+                int wordWidth = displayWidth(word);
+                if (currentWidth == 0) {
+                    currentLine.append(word);
+                    currentWidth = wordWidth;
+                } else if (currentWidth + 1 + wordWidth <= maxWidth) {
+                    currentLine.append(' ').append(word);
+                    currentWidth += 1 + wordWidth;
+                } else {
+                    lines.add(currentLine.toString());
+                    currentLine = new StringBuilder(word);
+                    currentWidth = wordWidth;
+                }
+            }
+            if (currentLine.length() > 0) lines.add(currentLine.toString());
+        }
+        return lines.toArray(new String[0]);
+    }
     
     // ===== RESIZE HANDLING =====
     
@@ -1450,13 +1341,24 @@ private String[] wrapText(String text, int maxWidth) {
     // ===== HELPERS =====
 
     private String clipString(String text, int textX, int visLeft, int visRight) {
-        if (textX >= visRight || textX + text.length() <= visLeft) return "";
-        
-        int startIdx = Math.max(0, visLeft - textX);
-        int endIdx = Math.min(text.length(), visRight - textX);
-        
-        if (startIdx >= endIdx) return "";
-        return text.substring(startIdx, endIdx);
+        if (textX >= visRight) return "";
+        StringBuilder result = new StringBuilder();
+        int col = textX;
+        int offset = 0;
+        while (offset < text.length()) {
+            int cp = text.codePointAt(offset);
+            int w = Cell.computeDisplayWidth(cp);
+            if (col + w > visRight) break;
+            if (col >= visLeft) {
+                result.appendCodePoint(cp);
+            } else if (col + w > visLeft) {
+                // wide char straddles visLeft — emit space to hold the column
+                result.append(' ');
+            }
+            col += w;
+            offset += Character.charCount(cp);
+        }
+        return result.toString();
     }
     
     private TextStyle parseStyle(NoteBytes styleBytes) {
