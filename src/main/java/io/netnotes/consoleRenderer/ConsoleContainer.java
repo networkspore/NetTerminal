@@ -19,8 +19,11 @@ import io.netnotes.terminal.TerminalContainerConfig;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TextStyle;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 
+import java.util.Collections;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
@@ -121,26 +124,33 @@ public class ConsoleContainer extends Container<
 
     @Override
     protected void setupBatchMsgMap(){
-        batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR, (cmd)->clearInternal());
+        batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR, cmd->clearInternal());
         batchMsgMap.put(TerminalCommands.TERMINAL_PRINT, (cmd)->executePrintInternal(cmd, false));
         batchMsgMap.put(TerminalCommands.TERMINAL_PRINTLN, (cmd)->executePrintInternal(cmd, true));
-        batchMsgMap.put(TerminalCommands.TERMINAL_PRINT_AT, (cmd)->executePrintAtInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_MOVE_CURSOR, (cmd)->executeMoveCursorInternal(cmd));
+        batchMsgMap.put(TerminalCommands.TERMINAL_PRINT_AT, this::executePrintAtInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_PRINT_CODEPOINT_AT, this::executePrintCodePointAtInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_MOVE_CURSOR, this::executeMoveCursorInternal);
         batchMsgMap.put(TerminalCommands.TERMINAL_SHOW_CURSOR, (cmd)->{ cursorDesired = true; });
         batchMsgMap.put(TerminalCommands.TERMINAL_HIDE_CURSOR, (cmd)->{ cursorDesired = false; });
         batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE, (cmd)->clearLineInternal(cursorY));
-        batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE_AT, (cmd)-> executeClearLineAtInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_REGION, (cmd)->executeClearRegionInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BOX, (cmd)->executeDrawBoxInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_HLINE, (cmd)->executeDrawHLineInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_VLINE, (cmd)->executeDrawVLineInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_FILL_REGION, (cmd)->executeFillRegionInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BORDERED_TEXT, (cmd)->executeDrawBorderedTextInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_PANEL, (cmd)->executeDrawPanelInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BUTTON, (cmd)->executeDrawButtonInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_PROGRESS_BAR, (cmd)->executeDrawProgressBarInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_TEXT_BLOCK, (cmd)->executeDrawTextBlockInternal(cmd));
-        batchMsgMap.put(TerminalCommands.TERMINAL_SHADE_REGION, (cmd)->executeShadeRegionInternal(cmd));
+        batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_LINE_AT, this::executeClearLineAtInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_CLEAR_REGION, this::executeClearRegionInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BOX, this::executeDrawBoxInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_HLINE, this::executeDrawHLineInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_VLINE, this::executeDrawVLineInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_FILL_REGION, this::executeFillRegionInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BORDERED_TEXT, this::executeDrawBorderedTextInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_PANEL, this::executeDrawPanelInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BUTTON, this::executeDrawButtonInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_PROGRESS_BAR, this::executeDrawProgressBarInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_TEXT_BLOCK, this::executeDrawTextBlockInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_SHADE_REGION, this::executeShadeRegionInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_TABLE_BORDER, this::executeDrawTableBorderInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_SPARKLINE,      this::executeDrawSparklineInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_SCROLLBAR,      this::executeDrawScrollbarInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BITMAP,         this::executeDrawBitmapInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_BRAILLE_BITMAP, this::executeDrawBrailleBitmapInternal);
+        batchMsgMap.put(TerminalCommands.TERMINAL_DRAW_SEXTANT_BITMAP, this::executeDrawSextantBitmapInternal);
     }
 
     public boolean hasBoundsChangedPending() { return boundsChangedPending.get(); }
@@ -369,8 +379,6 @@ public class ConsoleContainer extends Container<
         for (TerminalRectangle damage : damageRegions) {
             if (damage == null) continue;
             
-            // No offset conversion needed — damage coords are already container-local
-            // matching cell buffer indices directly
             int startY = Math.max(0, damage.getY());
             int endY   = Math.min(height, damage.getY() + damage.getHeight());
             int startX = Math.max(0, damage.getX());
@@ -382,6 +390,7 @@ public class ConsoleContainer extends Container<
             
             for (int y = startY; y < endY; y++) {
                 for (int x = startX; x < endX; x++) {
+                    cells[y][x].clear();
                     prevCells[y][x].markForceRepaint();
                 }
             }
@@ -505,6 +514,22 @@ public class ConsoleContainer extends Container<
         
         printAtInternal(x, y, text, style);
     }
+
+    private void executePrintCodePointAtInternal(NoteBytesMap cmd) {
+        NoteBytes xBytes = cmd.get(Keys.X);
+        NoteBytes yBytes = cmd.get(Keys.Y);
+        NoteBytes cpBytes = cmd.get(TerminalCommands.CODE_POINT);
+        NoteBytes styleBytes = cmd.get(Keys.STYLE);
+
+        if (xBytes == null || yBytes == null || cpBytes == null) return;
+
+        int x = xBytes.getAsInt();
+        int y = yBytes.getAsInt();
+        int codePoint = cpBytes.getAsInt();
+        TextStyle style = parseStyle(styleBytes);
+
+        printCodePointAtInternal(x, y, codePoint, style);
+    }
     
     private void executeMoveCursorInternal(NoteBytesMap cmd) {
         NoteBytes xBytes = cmd.get(Keys.X);
@@ -534,7 +559,9 @@ public class ConsoleContainer extends Container<
     private void executeDrawBoxInternal(NoteBytesMap cmd) {
         NoteBytes regionBytes = cmd.get(Keys.REGION);
         NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        NoteBytes styleBytes = cmd.get(Keys.STYLE);
         if (regionBytes == null) return;
+        TextStyle textStyle = styleBytes != null ?  TextStyle.fromNoteBytes(styleBytes) : new TextStyle(); 
         
         TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes);
         TerminalRectangle renderRegion = renderRegionBytes != null ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
@@ -542,13 +569,13 @@ public class ConsoleContainer extends Container<
         String title = cmd.getAsString(Keys.TITLE, null);
         String titlePosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "TOP_CENTER");
         Position titlePos = Position.valueOf(titlePosStr);
-        String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
-        BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
+        String boxStyleName = cmd.getAsString(TerminalCommands.LINE_STYLE, "SINGLE");
+        LineStyle boxStyle = LineStyle.valueOf(boxStyleName);
         
         if(renderRegion != null){
-            drawBoxInternal(region, renderRegion, title, titlePos, boxStyle);
+            drawBoxInternal(region, renderRegion, title, titlePos, boxStyle, textStyle);
         }else{
-            drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), title, titlePos, boxStyle);
+            drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), title, titlePos, textStyle, boxStyle);
             regionPool.recycle(region);
         }
     }
@@ -557,13 +584,20 @@ public class ConsoleContainer extends Container<
         NoteBytes xBytes = cmd.get(Keys.X);
         NoteBytes yBytes = cmd.get(Keys.Y);
         NoteBytes lengthBytes = cmd.get(Keys.LENGTH);
-        
+        NoteBytes styleBytes = cmd.get(Keys.STYLE);
+        NoteBytes lineStyleBytes = cmd.get(TerminalCommands.LINE_STYLE);
+
         if (xBytes == null || yBytes == null || lengthBytes == null) return;
+        
+        TextStyle style = styleBytes != null ? TextStyle.fromNoteBytes(styleBytes) : new TextStyle();
+        LineStyle lineStyle = lineStyleBytes != null ? LineStyle.valueOf(lineStyleBytes.getAsString()) : LineStyle.SINGLE;
         
         drawHLineInternal(
             xBytes.getAsInt(),
             yBytes.getAsInt(),
-            lengthBytes.getAsInt()
+            lengthBytes.getAsInt(),
+            style, 
+            lineStyle
         );
     }
     
@@ -571,29 +605,156 @@ public class ConsoleContainer extends Container<
         NoteBytes xBytes = cmd.get(Keys.X);
         NoteBytes yBytes = cmd.get(Keys.Y);
         NoteBytes lengthBytes = cmd.get(Keys.LENGTH);
-        
+        NoteBytes styleBytes = cmd.get(Keys.STYLE);
+        NoteBytes lineStyleBytes = cmd.get(TerminalCommands.LINE_STYLE);
+
         if (xBytes == null || yBytes == null || lengthBytes == null) return;
-        
+        TextStyle style = styleBytes != null ? TextStyle.fromNoteBytes(styleBytes) : new TextStyle();
+        LineStyle lineStyle = lineStyleBytes != null ? LineStyle.valueOf(lineStyleBytes.getAsString()) : LineStyle.SINGLE;
+
         drawVLineInternal(
             xBytes.getAsInt(),
             yBytes.getAsInt(),
-            lengthBytes.getAsInt()
+            lengthBytes.getAsInt(),
+            style,
+            lineStyle
         );
+    }
+
+    private void executeDrawSparklineInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+
+        int[] raw = readNoteIntArray(cmd.get(Keys.DATA));
+        float[] values = new float[raw.length];
+        for (int i = 0; i < raw.length; i++) values[i] = Float.intBitsToFloat(raw[i]);
+
+        TextStyle style     = parseStyle(cmd.get(Keys.STYLE));
+        TextStyle peakStyle = parseStyle(cmd.get(TerminalCommands.PEAK_STYLE));
+
+        drawSparklineInternal(region, renderRegion, values, style, peakStyle);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
     }
     
     private void executeFillRegionInternal(NoteBytesMap cmd) {
-        NoteBytes regionBytes = cmd.get(Keys.REGION);
-        NoteBytes codePointBytes = cmd.get(TerminalCommands.CODE_POINT);
-        NoteBytes styleBytes = cmd.get(Keys.STYLE);
-        
+        NoteBytes regionBytes      = cmd.get(Keys.REGION);
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        NoteBytes codePointBytes   = cmd.get(TerminalCommands.CODE_POINT);
+        NoteBytes styleBytes       = cmd.get(Keys.STYLE);
+
         if (regionBytes == null || codePointBytes == null) return;
-        
-        TerminalRectangle region = TerminalRectangle.fromNoteBytes(regionBytes.getAsNoteBytesMap());
+
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes.getAsNoteBytesMap());
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
         int codePoint = codePointBytes.getAsInt();
         TextStyle style = parseStyle(styleBytes);
-        
-        fillRegionInternal(region, codePoint, style);
+
+        // When a renderRegion is present use it as the effective draw area,
+        // not the full logical region — this is what the clip intersection produced
+        TerminalRectangle drawTarget = renderRegion != null ? renderRegion : region;
+        fillRegionInternal(drawTarget, codePoint, style);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
     }
+
+    private void executeDrawScrollbarInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+
+        int     scrollPos    = cmd.getAsInt(TerminalCommands.SCROLL_POS,    0);
+        int     totalItems   = cmd.getAsInt(Keys.ITEM_COUNT,                1);
+        int     visibleItems = cmd.getAsInt(Keys.VISIBLE_ITEMS,             1);
+        boolean showArrows   = cmd.getAsBoolean(TerminalCommands.SHOW_ARROWS, false);
+        TextStyle trackStyle = parseStyle(cmd.get(TerminalCommands.TRACK_STYLE));
+        TextStyle thumbStyle = parseStyle(cmd.get(TerminalCommands.THUMB_STYLE));
+
+        drawScrollbarInternal(region, renderRegion,
+            scrollPos, totalItems, visibleItems, showArrows, trackStyle, thumbStyle);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
+    }
+
+    private void executeDrawBitmapInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+
+        int  pixelW  = cmd.getAsInt(Keys.WIDTH,  0);
+        int  pixelH  = cmd.getAsInt(Keys.HEIGHT, 0);
+        byte[] pixels = cmd.getAsByteArray(Keys.DATA, null);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+
+        if (pixelW <= 0 || pixelH <= 0 || pixels == null) return;
+        drawBitmapInternal(region, renderRegion, pixelW, pixelH, pixels, style);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
+    }
+
+  
+
+    private void executeDrawBrailleBitmapInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+
+        int    pixelW  = cmd.getAsInt(Keys.WIDTH,  0);
+        int    pixelH  = cmd.getAsInt(Keys.HEIGHT, 0);
+        byte[] pixels  = cmd.getAsByteArray(Keys.DATA, null);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+
+        if (pixelW <= 0 || pixelH <= 0 || pixels == null) return;
+        drawBrailleBitmapInternal(region, renderRegion, pixelW, pixelH, pixels, style);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
+    }
+
+    private void executeDrawSextantBitmapInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+
+        int    pixelW  = cmd.getAsInt(Keys.WIDTH,  0);
+        int    pixelH  = cmd.getAsInt(Keys.HEIGHT, 0);
+        byte[] pixels  = cmd.getAsByteArray(Keys.DATA, null);
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+
+        if (pixelW <= 0 || pixelH <= 0 || pixels == null) return;
+        drawSextantBitmapInternal(region, renderRegion, pixelW, pixelH, pixels, style);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
+    }
+
+    
     
     // ===== LOW-LEVEL DRAWING OPERATIONS =====
     
@@ -664,6 +825,28 @@ public class ConsoleContainer extends Container<
             printX += dw;
         }
     }
+
+    private void printCodePointAtInternal(int x, int y, int codePoint, TextStyle style) {
+        int height = contentBounds.getHeight();
+        int width = contentBounds.getWidth();
+        if (y < 0 || y >= height) return;
+        if (x < 0 || x >= width) return;
+
+        TextStyle useStyle = style != null ? style : new TextStyle();
+        int dw = Cell.computeDisplayWidth(codePoint);
+
+        cells[y][x].set(codePoint, useStyle);
+
+        if (dw == 2) {
+            if (x + 1 < width) {
+                cells[y][x + 1].setAsContinuation();
+            }
+        } else {
+            if (x + 1 < width && cells[y][x + 1].isContinuation()) {
+                cells[y][x + 1].clear();
+            }
+        }
+    }
     
     private void clearLineInternal(int y) {
         int height = contentBounds.getHeight();
@@ -698,8 +881,9 @@ public class ConsoleContainer extends Container<
         int boxWidth, 
         int boxHeight, 
         String title, 
-        Position titlePos, 
-        BoxStyle style
+        Position titlePos,
+        TextStyle textStyle,
+        LineStyle style
     ) {
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
@@ -710,11 +894,11 @@ public class ConsoleContainer extends Container<
         char[] chars = style.getChars();
         
         // Top border
-        printAtInternal(x, y, String.valueOf(chars[2]), new TextStyle());
+        printAtInternal(x, y, String.valueOf(chars[2]), textStyle);
         for (int i = 1; i < boxWidth - 1; i++) {
-            printAtInternal(x + i, y, String.valueOf(chars[0]), new TextStyle());
+            printAtInternal(x + i, y, String.valueOf(chars[0]), textStyle);
         }
-        printAtInternal(x + boxWidth - 1, y, String.valueOf(chars[3]), new TextStyle());
+        printAtInternal(x + boxWidth - 1, y, String.valueOf(chars[3]), textStyle);
         
         // Title positioning
         if (title != null && !title.isEmpty()) {
@@ -722,7 +906,7 @@ public class ConsoleContainer extends Container<
             int titleY = calculateTitleY(y, boxHeight, titlePos);
             
             if (titleX >= x && titleX + title.length() + 2 <= x + boxWidth) {
-                printAtInternal(titleX, titleY, Cell.SPACE_STR + title + Cell.SPACE_STR, new TextStyle());
+                printAtInternal(titleX, titleY, Cell.SPACE_STR + title + Cell.SPACE_STR, textStyle);
             }
         }
         
@@ -741,7 +925,7 @@ public class ConsoleContainer extends Container<
     }
 
     private void drawBoxInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                            String title, Position titlePos, BoxStyle style) {
+                            String title, Position titlePos, LineStyle style, TextStyle textStyle) {
         int x = region.getX();
         int y = region.getY();
         int boxWidth = region.getWidth();
@@ -759,11 +943,8 @@ public class ConsoleContainer extends Container<
         // Top border - only visible portion
         if (y >= visTop && y < visBottom) {
             for (int cx = Math.max(x, visLeft); cx < Math.min(x + boxWidth, visRight); cx++) {
-                char ch;
-                if (cx == x) ch = chars[2]; // top-left
-                else if (cx == x + boxWidth - 1) ch = chars[3]; // top-right
-                else ch = chars[0]; // horizontal
-                printAtInternal(cx, y, String.valueOf(ch), new TextStyle());
+                int ch = cx == x ? chars[2] : ((cx == x + boxWidth - 1) ? chars[3] : chars[0]);
+                printCodePointAtInternal(cx, y, ch, textStyle);
             }
         }
         
@@ -776,7 +957,7 @@ public class ConsoleContainer extends Container<
                 String visible = clipString(title, titleX, visLeft, visRight);
                 int renderX = Math.max(titleX, visLeft);
                 if (!visible.isEmpty()) {
-                    printAtInternal(renderX, titleY, Cell.SPACE_STR + visible + Cell.SPACE_STR, new TextStyle());
+                    printAtInternal(renderX, titleY, Cell.SPACE_STR + visible + Cell.SPACE_STR, textStyle);
                 }
             }
         }
@@ -784,10 +965,10 @@ public class ConsoleContainer extends Container<
         // Sides - only visible rows
         for (int cy = Math.max(y + 1, visTop); cy < Math.min(y + boxHeight - 1, visBottom); cy++) {
             if (x >= visLeft && x < visRight) {
-                printAtInternal(x, cy, String.valueOf(chars[1]), new TextStyle());
+                printAtInternal(x, cy, String.valueOf(chars[1]), textStyle);
             }
             if (x + boxWidth - 1 >= visLeft && x + boxWidth - 1 < visRight) {
-                printAtInternal(x + boxWidth - 1, cy, String.valueOf(chars[1]), new TextStyle());
+                printAtInternal(x + boxWidth - 1, cy, String.valueOf(chars[1]), textStyle);
             }
         }
         
@@ -798,11 +979,400 @@ public class ConsoleContainer extends Container<
                 if (cx == x) ch = chars[4]; // bottom-left
                 else if (cx == x + boxWidth - 1) ch = chars[5]; // bottom-right
                 else ch = chars[0]; // horizontal
-                printAtInternal(cx, y + boxHeight - 1, String.valueOf(ch), new TextStyle());
+                printAtInternal(cx, y + boxHeight - 1, String.valueOf(ch), textStyle);
             }
         }
         regionPool.recycle(region);
         regionPool.recycle(renderRegion);
+    }
+
+
+    private void drawSparklineInternal(
+        TerminalRectangle region, 
+        TerminalRectangle renderRegion,
+        float[] values, 
+        TextStyle style, 
+        TextStyle peakStyle
+    ) {
+        int bufW = contentBounds.getWidth();
+        int bufH = contentBounds.getHeight();
+
+        int visLeft   = renderRegion != null ? renderRegion.getX()                           : 0;
+        int visTop    = renderRegion != null ? renderRegion.getY()                           : 0;
+        int visRight  = renderRegion != null ? renderRegion.getX() + renderRegion.getWidth() : bufW;
+        int visBottom = renderRegion != null ? renderRegion.getY() + renderRegion.getHeight(): bufH;
+
+        int ox = region.getX();
+        int oy = region.getY();
+        int rw = region.getWidth();
+        int rh = region.getHeight();
+
+        TextStyle base = style != null ? style : new TextStyle();
+
+        // Locate peak index for optional highlight
+        int peakIdx = 0;
+        float peakVal = Float.NEGATIVE_INFINITY;
+        for (int i = 0; i < values.length; i++) {
+            if (values[i] > peakVal) { peakVal = values[i]; peakIdx = i; }
+        }
+
+        // Lower eighth-block codepoints: index 1–7 = ▁–▇, index 8 = █, index 0 = space
+        final int[] EIGHTH_BLOCKS = {
+            ' ', 0x2581, 0x2582, 0x2583, 0x2584, 0x2585, 0x2586, 0x2587, 0x2588
+        };
+
+        for (int i = 0; i < values.length && i < rw; i++) {
+            int cx = ox + i;
+            if (cx < visLeft || cx >= visRight) continue;
+
+            float val = Math.max(0f, Math.min(1f, values[i]));
+            int totalEighths = Math.round(val * rh * 8);
+            TextStyle cellStyle = (peakStyle != null && i == peakIdx) ? peakStyle : base;
+
+            for (int row = 0; row < rh; row++) {
+                int cy = oy + row;
+                if (cy < visTop || cy >= visBottom) continue;
+
+                // row 0 = top of region; rowFromBottom 0 = bottom row
+                int rowFromBottom    = rh - 1 - row;
+                int rowEighthsStart  = rowFromBottom * 8;
+                int rowEighthsEnd    = rowEighthsStart + 8;
+
+                int cp;
+                if (totalEighths >= rowEighthsEnd) {
+                    cp = 0x2588;    // █ fully filled
+                } else if (totalEighths > rowEighthsStart) {
+                    cp = EIGHTH_BLOCKS[totalEighths - rowEighthsStart];
+                } else {
+                    cp = ' ';       // empty
+                }
+                cells[cy][cx].set(cp, cellStyle);
+            }
+        }
+    }
+
+
+    // Column × row → Unicode bit position (ISO 11548-1 encoding)
+    // Layout:  dot1(TL)=bit0  dot4(TR)=bit3
+    //          dot2(ML)=bit1  dot5(MR)=bit4
+    //          dot3(BL-mid)=bit2  dot6(BR-mid)=bit5
+    //          dot7(BL)=bit6  dot8(BR)=bit7
+    private static final int[][] BRAILLE_BITS = {
+        {0, 1, 2, 6},   // left column  (rows 0–3)
+        {3, 4, 5, 7}    // right column (rows 0–3)
+    };
+
+    private void drawBrailleBitmapInternal(
+        TerminalRectangle region, TerminalRectangle renderRegion,
+        int pixelWidth, int pixelHeight, byte[] pixels, TextStyle style
+    ) {
+        int bufW = contentBounds.getWidth();
+        int bufH = contentBounds.getHeight();
+
+        int visLeft   = renderRegion != null ? renderRegion.getX()                           : 0;
+        int visTop    = renderRegion != null ? renderRegion.getY()                           : 0;
+        int visRight  = renderRegion != null ? renderRegion.getX() + renderRegion.getWidth() : bufW;
+        int visBottom = renderRegion != null ? renderRegion.getY() + renderRegion.getHeight(): bufH;
+
+        int ox = region.getX();
+        int oy = region.getY();
+
+        int charCols = (pixelWidth  + 1) / 2;
+        int charRows = (pixelHeight + 3) / 4;
+        TextStyle s  = style != null ? style : new TextStyle();
+
+        for (int charY = 0; charY < charRows; charY++) {
+            int cy = oy + charY;
+            if (cy < visTop || cy >= visBottom || cy < 0 || cy >= bufH) continue;
+
+            for (int charX = 0; charX < charCols; charX++) {
+                int cx = ox + charX;
+                if (cx < visLeft || cx >= visRight || cx < 0 || cx >= bufW) continue;
+
+                int px = charX * 2;
+                int py = charY * 4;
+                int pattern = 0;
+
+                for (int dc = 0; dc < 2; dc++) {
+                    for (int dr = 0; dr < 4; dr++) {
+                        if (getPixel(pixels, pixelWidth, pixelHeight, px + dc, py + dr))
+                            pattern |= (1 << BRAILLE_BITS[dc][dr]);
+                    }
+                }
+
+                // U+2800 + pattern covers the entire 256-char braille block
+                cells[cy][cx].set(0x2800 + pattern, s);
+            }
+        }
+    }
+
+    // Column × row → sextant mask bit
+    // Layout:  TL=bit0  TR=bit1
+    //          ML=bit2  MR=bit3
+    //          BL=bit4  BR=bit5
+    private static final int[][] SEXTANT_BITS = {
+        {0, 2, 4},   // left column  (rows 0–2)
+        {1, 3, 5}    // right column (rows 0–2)
+    };
+
+    private void drawSextantBitmapInternal(
+        TerminalRectangle region, TerminalRectangle renderRegion,
+        int pixelWidth, int pixelHeight, byte[] pixels, TextStyle style
+    ) {
+        int bufW = contentBounds.getWidth();
+        int bufH = contentBounds.getHeight();
+
+        int visLeft   = renderRegion != null ? renderRegion.getX()                           : 0;
+        int visTop    = renderRegion != null ? renderRegion.getY()                           : 0;
+        int visRight  = renderRegion != null ? renderRegion.getX() + renderRegion.getWidth() : bufW;
+        int visBottom = renderRegion != null ? renderRegion.getY() + renderRegion.getHeight(): bufH;
+
+        int ox = region.getX();
+        int oy = region.getY();
+
+        int charCols = (pixelWidth  + 1) / 2;
+        int charRows = (pixelHeight + 2) / 3;
+        TextStyle s  = style != null ? style : new TextStyle();
+
+        for (int charY = 0; charY < charRows; charY++) {
+            int cy = oy + charY;
+            if (cy < visTop || cy >= visBottom || cy < 0 || cy >= bufH) continue;
+
+            for (int charX = 0; charX < charCols; charX++) {
+                int cx = ox + charX;
+                if (cx < visLeft || cx >= visRight || cx < 0 || cx >= bufW) continue;
+
+                int px = charX * 2;
+                int py = charY * 3;
+                int sextantMask = 0;
+
+                for (int dc = 0; dc < 2; dc++) {
+                    for (int dr = 0; dr < 3; dr++) {
+                        if (getPixel(pixels, pixelWidth, pixelHeight, px + dc, py + dr))
+                            sextantMask |= (1 << SEXTANT_BITS[dc][dr]);
+                    }
+                }
+
+                if (TextStyle.Sextant.isBlank(sextantMask)) {
+                    // Transparent — leave cell unchanged (caller fills background separately)
+                    // Alternatively: cells[cy][cx].set(' ', s); for opaque blank
+                } else if (TextStyle.Sextant.requiresFill(sextantMask)) {
+                    // FULL_MASK (0b111111): no safe single glyph exists.
+                    // A background-filled space preserves display width consistency.
+                    cells[cy][cx].set(' ', s);
+                } else {
+                    // All other masks: U+1FB00–U+1FB3B sextant glyphs.
+                    // 0b010101 (▌) and 0b101010 (▐) resolve here too — they are
+                    // single-width half-blocks from the block-elements range, not
+                    // legacy-computing chars.  Cell.computeDisplayWidth handles them
+                    // correctly, but mixing them into a sextant grid can cause column
+                    // misalignment if the terminal treats the sextant block as double-width.
+                    int cp = TextStyle.Sextant.codepointForMask(sextantMask);
+                    printCodePointAtInternal(cx, cy, cp, s);
+                }
+            }
+        }
+    }
+
+
+    private void drawBitmapInternal(
+        TerminalRectangle region, TerminalRectangle renderRegion,
+        int pixelWidth, int pixelHeight, byte[] pixels, TextStyle style
+    ) {
+        int bufW = contentBounds.getWidth();
+        int bufH = contentBounds.getHeight();
+
+        int visLeft   = renderRegion != null ? renderRegion.getX()                           : 0;
+        int visTop    = renderRegion != null ? renderRegion.getY()                           : 0;
+        int visRight  = renderRegion != null ? renderRegion.getX() + renderRegion.getWidth() : bufW;
+        int visBottom = renderRegion != null ? renderRegion.getY() + renderRegion.getHeight(): bufH;
+
+        int ox = region.getX();
+        int oy = region.getY();
+
+        int charCols = (pixelWidth  + 1) / 2;
+        int charRows = (pixelHeight + 1) / 2;
+        TextStyle s  = style != null ? style : new TextStyle();
+
+        for (int charY = 0; charY < charRows; charY++) {
+            int cy = oy + charY;
+            if (cy < visTop || cy >= visBottom || cy < 0 || cy >= bufH) continue;
+
+            for (int charX = 0; charX < charCols; charX++) {
+                int cx = ox + charX;
+                if (cx < visLeft || cx >= visRight || cx < 0 || cx >= bufW) continue;
+
+                int px = charX * 2;
+                int py = charY * 2;
+
+                // Quadrant bit layout: bit3=UL bit2=UR bit1=LL bit0=LR
+                int mask = 0;
+                if (getPixel(pixels, pixelWidth, pixelHeight, px,   py  )) mask |= 0b1000;
+                if (getPixel(pixels, pixelWidth, pixelHeight, px+1, py  )) mask |= 0b0100;
+                if (getPixel(pixels, pixelWidth, pixelHeight, px,   py+1)) mask |= 0b0010;
+                if (getPixel(pixels, pixelWidth, pixelHeight, px+1, py+1)) mask |= 0b0001;
+
+                cells[cy][cx].set(TextStyle.Quadrant.quadrantFromMask(mask).getCodepoint(), s);
+            }
+        }
+    }
+
+    // ── Executor ─────────────────────────────────────────────────────────────────
+
+    private void executeDrawTableBorderInternal(NoteBytesMap cmd) {
+        NoteBytes regionBytes = cmd.get(Keys.REGION);
+        if (regionBytes == null) return;
+
+        NoteBytes renderRegionBytes = cmd.get(TerminalCommands.RENDER_REGION);
+
+        TerminalRectangle region       = TerminalRectangle.fromNoteBytes(regionBytes);
+        TerminalRectangle renderRegion = renderRegionBytes != null
+            ? TerminalRectangle.fromNoteBytes(renderRegionBytes) : null;
+
+        String boxStyleName = cmd.getAsString(TerminalCommands.LINE_STYLE, "SINGLE");
+        LineStyle boxStyle = LineStyle.valueOf(boxStyleName);
+
+        TextStyle style = parseStyle(cmd.get(Keys.STYLE));
+
+        int[] hSeps = readNoteIntArray(cmd.get(TerminalCommands.H_SEPARATORS));
+        int[] vSeps = readNoteIntArray(cmd.get(TerminalCommands.V_SEPARATORS));
+
+        String   title    = cmd.getAsString(Keys.TITLE,    null);
+        String   titlePos = cmd.getAsString(TerminalCommands.TITLE_POS, "TOP_CENTER");
+        Position pos      = Position.valueOf(titlePos);
+
+        drawTableBorderInternal(region, renderRegion, boxStyle, style,
+                                hSeps, vSeps, title, pos);
+
+        regionPool.recycle(region);
+        if (renderRegion != null) regionPool.recycle(renderRegion);
+    }
+
+
+    // ── Core draw ─────────────────────────────────────────────────────────────────
+
+    private void drawTableBorderInternal(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,   // null = no clipping beyond buffer bounds
+        LineStyle          boxStyle,
+        TextStyle         style,
+        int[]             hSeps,          // local Y positions of H-separators
+        int[]             vSeps,          // local X positions of V-separators
+        String            title,
+        Position          titlePos
+    ) {
+        if (region.getWidth() < 2 || region.getHeight() < 2) return;
+
+        // Effective visibility window: renderRegion if supplied, else full buffer
+        int bufW = contentBounds.getWidth();
+        int bufH = contentBounds.getHeight();
+
+        int visLeft   = renderRegion != null ? renderRegion.getX()                       : 0;
+        int visTop    = renderRegion != null ? renderRegion.getY()                       : 0;
+        int visRight  = renderRegion != null ? renderRegion.getX() + renderRegion.getWidth()  : bufW;
+        int visBottom = renderRegion != null ? renderRegion.getY() + renderRegion.getHeight() : bufH;
+
+        int ox = region.getX();   // origin X
+        int oy = region.getY();   // origin Y
+        int rw = region.getWidth();
+        int rh = region.getHeight();
+
+        char[] jc = boxStyle.getChars();
+   
+        // Sets for O(1) lookup during draw
+        Set<Integer> hSet = toSet(hSeps);
+        Set<Integer> vSet = toSet(vSeps);
+
+        // ── 1. Outer box top row ──────────────────────────────────────────────────
+        int topY = oy;
+        if (topY >= visTop && topY < visBottom) {
+            for (int cx = Math.max(ox, visLeft); cx < Math.min(ox + rw, visRight); cx++) {
+                char ch;
+                if      (cx == ox)           ch = jc[2];                    // ┌
+                else if (cx == ox + rw - 1)  ch = jc[3];                    // ┐
+                else if (vSet.contains(cx))  ch = jc[8];                    // ┬
+                else                         ch = jc[0];                    // ─
+                printCodePointAtInternal(cx, topY, ch, style);
+            }
+        }
+
+        // ── 2. Outer box bottom row ───────────────────────────────────────────────
+        int botY = oy + rh - 1;
+        if (botY >= visTop && botY < visBottom) {
+            for (int cx = Math.max(ox, visLeft); cx < Math.min(ox + rw, visRight); cx++) {
+                char ch;
+                if      (cx == ox)           ch = jc[4];                    // └
+                else if (cx == ox + rw - 1)  ch = jc[5];                    // ┘
+                else if (vSet.contains(cx))  ch = jc[9];                    // ┴
+                else                         ch = jc[0];                    // ─
+                printCodePointAtInternal(cx, botY, ch, style);
+            }
+        }
+
+        // ── 3. Interior rows ──────────────────────────────────────────────────────
+        for (int cy = oy + 1; cy < oy + rh - 1; cy++) {
+            if (cy < visTop || cy >= visBottom) continue;
+
+            boolean isHSep = hSet.contains(cy);
+
+            if (isHSep) {
+                // Full horizontal separator row
+                for (int cx = Math.max(ox, visLeft); cx < Math.min(ox + rw, visRight); cx++) {
+                    char ch;
+                    if      (cx == ox)           ch = jc[6];                // ├
+                    else if (cx == ox + rw - 1)  ch = jc[7];                // ┤
+                    else if (vSet.contains(cx))  ch = jc[10];               // ┼
+                    else                         ch = jc[0];                // ─
+                    printCodePointAtInternal(cx, cy, ch, style);
+                }
+            } else {
+                // Non-separator row — only left/right walls and V-separator columns
+                if (ox >= visLeft && ox < visRight) {
+                    printCodePointAtInternal(ox, cy, jc[1], style);         // │ left wall
+                }
+                if (ox + rw - 1 >= visLeft && ox + rw - 1 < visRight) {
+                    printCodePointAtInternal(ox + rw - 1, cy, jc[1], style);// │ right wall
+                }
+                for (int vx : vSeps) {
+                    if (vx >= visLeft && vx < visRight) {
+                        printCodePointAtInternal(vx, cy, jc[1], style);     // │ column divider
+                    }
+                }
+            }
+        }
+
+        // ── 4. Optional title (drawn last — overwrites border chars) ──────────────
+        if (title != null && !title.isEmpty()) {
+            int titleX = calculateTitleX(ox, rw, title, titlePos);
+            int titleY = calculateTitleY(oy, rh, titlePos);
+            if (titleY >= visTop && titleY < visBottom && titleX < visRight) {
+                String visible = clipString(title, titleX, visLeft, visRight);
+                if (!visible.isEmpty()) {
+                    printAtInternal(Math.max(titleX, visLeft), titleY,
+                                    " " + visible + " ", style);
+                }
+            }
+        }
+    }
+
+    private static Set<Integer> toSet(int[] arr) {
+        if (arr == null || arr.length == 0) return Collections.emptySet();
+        Set<Integer> set = new HashSet<>(arr.length * 2);
+        for (int v : arr) set.add(v);
+        return set;
+    }
+
+    private static int[] readNoteIntArray(NoteBytes value) {
+        if(value == null)
+            return new int[0];
+
+        if(value.getType() != NoteBytesMetaData.NOTE_INTEGER_ARRAY_TYPE){
+            Throwable ex = new IllegalArgumentException("" + value + " is not a NoteIntegerArray");
+            Log.logError("[ConsoleContainer]", "readNoteIntArray", ex);
+            return new int[0];
+        }
+
+        return value.getAsNoteIntegerArray().getAsArray();
     }
     
     private int calculateTitleX(int x, int boxWidth, String title, Position pos) {
@@ -821,15 +1391,15 @@ public class ConsoleContainer extends Container<
         };
     }
 
-    private void drawHLineInternal(int x, int y, int length) {
+    private void drawHLineInternal(int x, int y, int length, TextStyle style, LineStyle lineStyle) {
         for (int i = 0; i < length; i++) {
-            printAtInternal(x + i, y, "─", new TextStyle());
+            printCodePointAtInternal(x, y, lineStyle.horizontal(), style);
         }
     }
     
-    private void drawVLineInternal(int x, int y, int length) {
+    private void drawVLineInternal(int x, int y, int length, TextStyle style, LineStyle lineStyle) {
         for (int i = 0; i < length; i++) {
-            printAtInternal(x, y + i, "│", new TextStyle());
+            printCodePointAtInternal(x, y + i,lineStyle.vertical(), style);
         }
     }
     
@@ -880,8 +1450,8 @@ public class ConsoleContainer extends Container<
         String text = cmd.getAsString(Keys.TEXT, "");
         String textPosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "CENTER");
         Position textPos = Position.valueOf(textPosStr);
-        String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
-        BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
+        String boxStyleName = cmd.getAsString(TerminalCommands.LINE_STYLE, "SINGLE");
+        LineStyle boxStyle = LineStyle.valueOf(boxStyleName);
         
         TextStyle textStyle = parseStyle(cmd.get(Keys.STYLE));
         TextStyle borderStyle = parseStyle(cmd.get(StyleConstants.BORDER_STYLE));
@@ -902,8 +1472,8 @@ public class ConsoleContainer extends Container<
         String title = cmd.getAsString(Keys.TITLE, null);
         String titlePosStr = cmd.getAsString(TerminalCommands.TITLE_POS, "TOP_CENTER");
         Position titlePos = Position.valueOf(titlePosStr);
-        String boxStyleName = cmd.getAsString(TerminalCommands.BOX_STYLE, "SINGLE");
-        BoxStyle boxStyle = BoxStyle.valueOf(boxStyleName);
+        String boxStyleName = cmd.getAsString(TerminalCommands.LINE_STYLE, "SINGLE");
+        LineStyle boxStyle = LineStyle.valueOf(boxStyleName);
         
         TextStyle borderStyle = parseStyle(cmd.get(Keys.STYLE));
         TextStyle fillStyle = parseStyle(cmd.get(StyleConstants.BG_STYLE));
@@ -915,6 +1485,75 @@ public class ConsoleContainer extends Container<
             regionPool.recycle(region);
             regionPool.recycle(renderRegion);
         }
+    }
+
+    private void drawScrollbarInternal(
+        TerminalRectangle region, 
+        TerminalRectangle renderRegion,
+        int scrollPos, 
+        int totalItems, 
+        int visibleItems,
+        boolean showArrows, 
+        TextStyle trackStyle, 
+        TextStyle thumbStyle
+    ) {
+        int bufW = contentBounds.getWidth();
+        int bufH = contentBounds.getHeight();
+
+        int visLeft   = renderRegion != null ? renderRegion.getX()                           : 0;
+        int visTop    = renderRegion != null ? renderRegion.getY()                           : 0;
+        int visRight  = renderRegion != null ? renderRegion.getX() + renderRegion.getWidth() : bufW;
+        int visBottom = renderRegion != null ? renderRegion.getY() + renderRegion.getHeight(): bufH;
+
+        int ox = region.getX();
+        int oy = region.getY();
+        int rh = region.getHeight();
+
+        TextStyle track = trackStyle != null ? trackStyle : new TextStyle();
+        TextStyle thumb = thumbStyle != null ? thumbStyle : new TextStyle();
+
+        // Guard: nothing to scroll
+        if (totalItems <= visibleItems) {
+            // Draw a plain track — no thumb needed
+            for (int row = 0; row < rh; row++) {
+                int cy = oy + row;
+                if (cy >= visTop && cy < visBottom && ox >= visLeft && ox < visRight)
+                    cells[cy][ox].set('│', track);
+            }
+            return;
+        }
+
+        int arrowRows  = showArrows ? 1 : 0;
+        int trackStart = oy + arrowRows;
+        int trackEnd   = oy + rh - arrowRows;      // exclusive
+        int trackH     = trackEnd - trackStart;
+        if (trackH <= 0) return;
+
+        // Thumb geometry
+        int thumbH   = Math.max(1, visibleItems * trackH / Math.max(1, totalItems));
+        int thumbOff = (int)((long)(scrollPos) * (trackH - thumbH)
+                            / Math.max(1, totalItems - visibleItems));
+        thumbOff = Math.max(0, Math.min(thumbOff, trackH - thumbH));
+        int thumbStart = trackStart + thumbOff;
+        int thumbEnd   = thumbStart + thumbH;       // exclusive
+
+        // Top arrow
+        if (showArrows && oy >= visTop && oy < visBottom && ox >= visLeft && ox < visRight)
+            cells[oy][ox].set('▲', track);
+
+        // Track rows
+        for (int cy = trackStart; cy < trackEnd; cy++) {
+            if (cy < visTop || cy >= visBottom) continue;
+            if (ox < visLeft || ox >= visRight)  continue;
+            boolean isThumb = (cy >= thumbStart && cy < thumbEnd);
+            cells[cy][ox].set(isThumb ? '█' : '░', isThumb ? thumb : track);
+        }
+
+        // Bottom arrow
+        int botArrowY = oy + rh - 1;
+        if (showArrows && botArrowY >= visTop && botArrowY < visBottom
+                && ox >= visLeft && ox < visRight)
+            cells[botArrowY][ox].set('▼', track);
     }
 
     private void executeDrawButtonInternal(NoteBytesMap cmd) {
@@ -1003,9 +1642,9 @@ public class ConsoleContainer extends Container<
 
 
     private void drawBorderedTextInternal(TerminalRectangle region, String text, Position textPos,
-                                        BoxStyle boxStyle, TextStyle textStyle, TextStyle borderStyle) {
+                                        LineStyle boxStyle, TextStyle textStyle, TextStyle borderStyle) {
         drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
-                    null, null, boxStyle);
+                    null, null, borderStyle, boxStyle);
         
         if (text != null && !text.isEmpty() && region.getWidth() > 2 && region.getHeight() > 2) {
             int[] coords = calculateTextPosition(region, text, textPos);
@@ -1014,7 +1653,7 @@ public class ConsoleContainer extends Container<
     }
 
     private void drawPanelInternal(TerminalRectangle region, String title, Position titlePos,
-                                BoxStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
+                                LineStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();       
 
@@ -1034,7 +1673,7 @@ public class ConsoleContainer extends Container<
         }
         
         drawBoxInternal(region.getX(), region.getY(), region.getWidth(), region.getHeight(), 
-                    title, titlePos, boxStyle);
+                    title, titlePos, borderStyle, boxStyle);
     }
 
     private void drawButtonInternal(TerminalRectangle region, String label, Position labelPos,
@@ -1096,7 +1735,7 @@ public class ConsoleContainer extends Container<
     }
 
     private void drawPanelInternal(TerminalRectangle region, TerminalRectangle renderRegion,
-                                String title, Position titlePos, BoxStyle boxStyle, 
+                                String title, Position titlePos, LineStyle boxStyle, 
                                 TextStyle borderStyle, TextStyle fillStyle
     ) {
         int height = contentBounds.getHeight();
@@ -1123,7 +1762,7 @@ public class ConsoleContainer extends Container<
             }
         }
         
-        drawBoxInternal(region, renderRegion, title, titlePos, boxStyle);
+        drawBoxInternal(region, renderRegion, title, titlePos, boxStyle,borderStyle);
     }
 
     private int[] calculateTextPosition(TerminalRectangle region, String text, Position pos) {
@@ -1334,8 +1973,14 @@ public class ConsoleContainer extends Container<
         return lines.toArray(new String[0]);
     }
     
-    // ===== RESIZE HANDLING =====
-    
+    // Row-major, MSB-first bit packing.  Returns false for any out-of-bounds access.
+    private static boolean getPixel(byte[] pixels, int pixelWidth, int pixelHeight, int px, int py) {
+        if (px < 0 || px >= pixelWidth || py < 0 || py >= pixelHeight) return false;
+        int bitIndex = py * pixelWidth + px;
+        int byteIdx  = bitIndex >> 3;
+        int bitOff   = 7 - (bitIndex & 7);   // MSB-first
+        return byteIdx < pixels.length && (pixels[byteIdx] & (1 << bitOff)) != 0;
+    }
    
     
     // ===== HELPERS =====

@@ -3,7 +3,7 @@ package io.netnotes.terminal.components;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
@@ -26,7 +26,7 @@ public class TerminalButton extends TerminalRegion {
     private ButtonType type = ButtonType.DEFAULT;
     private boolean enabled = true;
     private boolean showBorder = true;
-    private BoxStyle borderStyle = BoxStyle.SINGLE;
+    private LineStyle borderStyle = LineStyle.SINGLE;
     private Position labelPosition = Position.CENTER;
     
     // Style overrides (null = use defaults based on type)
@@ -77,7 +77,7 @@ public class TerminalButton extends TerminalRegion {
         }
     }
     
-    public void setBorderStyle(BoxStyle style) {
+    public void setBorderStyle(LineStyle style) {
         if (this.borderStyle != style) {
             this.borderStyle = style;
             invalidate();
@@ -279,7 +279,7 @@ public class TerminalButton extends TerminalRegion {
         private ButtonType type = ButtonType.DEFAULT;
         private boolean enabled = true;
         private boolean showBorder = true;
-        private BoxStyle borderStyle = BoxStyle.SINGLE;
+        private LineStyle borderStyle = LineStyle.SINGLE;
         private Position labelPosition = Position.CENTER;
         private int x = 0, y = 0, width = 10, height = 3;
         private Consumer<TerminalButton> onActivate = null;
@@ -289,7 +289,7 @@ public class TerminalButton extends TerminalRegion {
         public Builder type(ButtonType type) { this.type = type; return this; }
         public Builder enabled(boolean enabled) { this.enabled = enabled; return this; }
         public Builder showBorder(boolean showBorder) { this.showBorder = showBorder; return this; }
-        public Builder borderStyle(BoxStyle style) { this.borderStyle = style; return this; }
+        public Builder borderStyle(LineStyle style) { this.borderStyle = style; return this; }
         public Builder labelPosition(Position pos) { this.labelPosition = pos; return this; }
         public Builder position(int x, int y) { this.x = x; this.y = y; return this; }
         public Builder size(int width, int height) { this.width = width; this.height = height; return this; }

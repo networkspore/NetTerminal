@@ -1,5 +1,5 @@
 package io.netnotes.terminal;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -588,7 +588,7 @@ public abstract class TerminalRenderable extends Renderable<
      * Draw box (local coordinates)
      */
     protected void drawBox(TerminalBatchBuilder batch, int x, int y, int width, int height, 
-        String title, Position titlePos, BoxStyle boxStyle, TextStyle textStyle
+        String title, Position titlePos, LineStyle boxStyle, TextStyle textStyle
     ) {
         if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
         
@@ -616,72 +616,189 @@ public abstract class TerminalRenderable extends Renderable<
         regionPool.recycle(renderRegion);
     }
     protected void drawBox(TerminalBatchBuilder batch, TerminalRectangle region, String title, 
-                        Position titlePos, BoxStyle boxStyle) {
+                        Position titlePos, LineStyle boxStyle) {
         drawBox(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(), title, titlePos, boxStyle, null);
     }
 
-    protected void drawBox(TerminalBatchBuilder batch, int x, int y, int width, int height, BoxStyle boxStyle, TextStyle textStyle) {
+    protected void drawBox(TerminalBatchBuilder batch, int x, int y, int width, int height, LineStyle boxStyle, TextStyle textStyle) {
         drawBox(batch, x, y, width, height,null, null, boxStyle, textStyle);
     }
 
-    protected void drawBox(TerminalBatchBuilder batch, int x, int y, int width, int height, BoxStyle boxStyle) {
+    protected void drawBox(TerminalBatchBuilder batch, int x, int y, int width, int height, LineStyle boxStyle) {
         drawBox(batch, x, y, width, height,null, null, boxStyle, null);
     }
 
     /**
      * Draw box using TerminalRectangle (local coordinates)
      */
-    protected void drawBox(TerminalBatchBuilder batch, TerminalRectangle region, String title,Position titlePosition,  BoxStyle boxStyle, TextStyle textStyle) {
+    protected void drawBox(TerminalBatchBuilder batch, TerminalRectangle region, String title,Position titlePosition,  LineStyle boxStyle, TextStyle textStyle) {
          drawBox(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(),title, titlePosition, boxStyle, textStyle);
 
     }
     
-    protected void drawBox(TerminalBatchBuilder batch, TerminalRectangle region, BoxStyle boxStyle) {
+    protected void drawBox(TerminalBatchBuilder batch, TerminalRectangle region, LineStyle boxStyle) {
         drawBox(batch, region, null,null, boxStyle, null);
+    }
+
+    /**
+     * Draw table border (local coordinates) with clipping.
+     */
+    protected void drawTableBorder(
+        TerminalBatchBuilder batch,
+        int x,
+        int y,
+        int width,
+        int height,
+        LineStyle boxStyle,
+        TextStyle textStyle,
+        int[] hSeparators,
+        int[] vSeparators,
+        String title,
+        Position titlePos
+    ) {
+        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        int absX = toAbsoluteX(x);
+        int absY = toAbsoluteY(y);
+
+        int[] absHSeps = hSeparators != null ? translateSeparators(hSeparators, getAbsoluteY()) : null;
+        int[] absVSeps = vSeparators != null  ? translateSeparators(vSeparators, getAbsoluteX()) : null;
+
+        TerminalRectangle boxRegion = regionPool.obtain();
+        boxRegion.set(absX, absY, width, height, 0, 0);
+
+        TerminalRectangle renderRegion = regionPool.obtain();
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+
+        if (clip != null) {
+            if (!boxRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(boxRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.drawTableBorder(
+                boxRegion, renderRegion, boxStyle, textStyle,
+                absHSeps, absVSeps, title, titlePos
+            );
+        } else {
+            batch.drawTableBorder(
+                boxRegion, null, boxStyle, textStyle,
+                absHSeps, absVSeps, title, titlePos
+            );
+        }
+
+        regionPool.recycle(boxRegion);
+        regionPool.recycle(renderRegion);
+    }
+
+    protected void drawTableBorder(
+        TerminalBatchBuilder batch,
+        TerminalRectangle region,
+        LineStyle boxStyle,
+        TextStyle textStyle,
+        int[] hSeparators,
+        int[] vSeparators,
+        String title,
+        Position titlePos
+    ) {
+        drawTableBorder(batch,
+            region.getX(), region.getY(), region.getWidth(), region.getHeight(),
+            boxStyle, textStyle, hSeparators, vSeparators, title, titlePos
+        );
+    }
+
+    protected void drawTableRowBorder(
+        TerminalBatchBuilder batch,
+        int x,
+        int y,
+        int width,
+        int height,
+        LineStyle boxStyle,
+        TextStyle textStyle,
+        int... hSeparators
+    ) {
+        drawTableBorder(batch, x, y, width, height, boxStyle, textStyle, hSeparators, null, null, null);
+    }
+
+    protected void drawTableColBorder(
+        TerminalBatchBuilder batch,
+        int x,
+        int y,
+        int width,
+        int height,
+        LineStyle boxStyle,
+        TextStyle textStyle,
+        int... vSeparators
+    ) {
+        drawTableBorder(batch, x, y, width, height, boxStyle, textStyle, null, vSeparators, null, null);
+    }
+
+    private static int[] translateSeparators(int[] seps, int offset) {
+        if (seps == null || seps.length == 0) return seps;
+        int[] out = new int[seps.length];
+        for (int i = 0; i < seps.length; i++) out[i] = seps[i] + offset;
+        return out;
     }
     
     /**
      * Draw horizontal line (local coordinates)
      */
-    protected void drawHLine(TerminalBatchBuilder batch, int x, int y, int length) {
+    protected void drawHLine(TerminalBatchBuilder batch, int x, int y, int length, LineStyle lineStyle, TextStyle style) {
         if (!isEffectivelyVisible() || length <= 0 || y < 0 || y >= getHeight()) return;
-        
+
+        int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
-        int left = toAbsoluteX(Math.max(0, x));
-        int right = toAbsoluteX(Math.min(getWidth(), x + length));
-        
+
+        TerminalRectangle lineRegion = regionPool.obtain();
+        lineRegion.set(absX, absY, length, 1, 0, 0);
+
         TerminalRectangle clip = batch.getCurrentClipRegion();
         if (clip != null) {
-            if (absY < clip.getY() || absY >= clip.getY() + clip.getHeight()) return;
-            left = Math.max(left, clip.getX());
-            right = Math.min(right, clip.getX() + clip.getWidth());
+            TerminalRectangle renderRegion = regionPool.obtain();
+            if (!lineRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(lineRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            // renderRegion is the clipped 1-row region — emit as x/y/length
+            batch.drawHLine(renderRegion.getX(), renderRegion.getY(),
+                            renderRegion.getWidth(), style, lineStyle);
+            regionPool.recycle(renderRegion);
+        } else {
+            batch.drawHLine(absX, absY, length, style, lineStyle);
         }
-        
-        if (right <= left) return;
-        
-        batch.drawHLine(left, absY, right - left);
+        regionPool.recycle(lineRegion);
     }
     
     /**
      * Draw vertical line (local coordinates)
      */
-    protected void drawVLine(TerminalBatchBuilder batch, int x, int y, int length) {
+    protected void drawVLine(TerminalBatchBuilder batch, int x, int y, int length, LineStyle lineStyle, TextStyle style) {
         if (!isEffectivelyVisible() || length <= 0 || x < 0 || x >= getWidth()) return;
         
         int absX = toAbsoluteX(x);
-        int top = toAbsoluteY(Math.max(0, y));
-        int bottom = toAbsoluteY(Math.min(getHeight(), y + length));
+        int absY = toAbsoluteY(Math.max(0, y));    
         
+        TerminalRectangle lineRegion = regionPool.obtain();
+        lineRegion.set(absX, absY, 1, length, 0, 0);
+
         TerminalRectangle clip = batch.getCurrentClipRegion();
         if (clip != null) {
-            if (absX < clip.getX() || absX >= clip.getX() + clip.getWidth()) return;
-            top = Math.max(top, clip.getY());
-            bottom = Math.min(bottom, clip.getY() + clip.getHeight());
+            TerminalRectangle renderRegion = regionPool.obtain();
+            if (!lineRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(lineRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            // renderRegion is the clipped 1-row region — emit as x/y/length
+            batch.drawVLine(renderRegion.getX(), renderRegion.getY(),
+                            renderRegion.getWidth(), style, lineStyle);
+            regionPool.recycle(renderRegion);
+        } else {
+            batch.drawVLine(absX, absY, length, style, lineStyle);
         }
+        regionPool.recycle(lineRegion);
         
-        if (bottom <= top) return;
-        
-        batch.drawVLine(absX, top, bottom - top);
     }
     
     /**
@@ -714,12 +831,244 @@ public abstract class TerminalRenderable extends Renderable<
         regionPool.recycle(fillRegion);
         regionPool.recycle(renderRegion);
     }
+
+
     
     /**
      * Fill region with character using TerminalRectangle (local coordinates)
      */
     protected void fillRegion(TerminalBatchBuilder batch, TerminalRectangle region, int fillChar, TextStyle style) {
         fillRegion(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(), fillChar, style);
+    }
+    
+    // ===== SPARKLINE =====
+
+    protected void drawSparkline(
+        TerminalBatchBuilder batch,
+        int x, int y, int width, int height,
+        double[] values, TextStyle style, TextStyle peakStyle
+    ) {
+        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        TerminalRectangle sparkRegion = regionPool.obtain();
+        sparkRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
+
+        TerminalRectangle renderRegion = regionPool.obtain();
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+
+        if (clip != null) {
+            if (!sparkRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(sparkRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.drawSparkline(
+                sparkRegion, renderRegion, values, style, peakStyle);
+        } else {
+            batch.drawSparkline(
+                sparkRegion, null, values, style, peakStyle);
+        }
+
+        regionPool.recycle(sparkRegion);
+        regionPool.recycle(renderRegion);
+    }
+
+    protected void drawSparkline(
+        TerminalBatchBuilder batch, TerminalRectangle region,
+        double[] values, TextStyle style, TextStyle peakStyle
+    ) {
+        drawSparkline(batch,
+            region.getX(), region.getY(), region.getWidth(), region.getHeight(),
+            values, style, peakStyle);
+    }
+
+    protected void drawSparkline(
+        TerminalBatchBuilder batch, TerminalRectangle region, double[] values
+    ) {
+        drawSparkline(batch, region, values, null, null);
+    }
+
+    // ===== SCROLLBAR =====
+
+    protected void drawScrollbar(
+        TerminalBatchBuilder batch,
+        int x, int y, int width, int height,
+        int scrollPos, int totalItems, int visibleItems,
+        boolean showArrows, TextStyle trackStyle, TextStyle thumbStyle
+    ) {
+        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        TerminalRectangle scrollRegion = regionPool.obtain();
+        scrollRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
+
+        TerminalRectangle renderRegion = regionPool.obtain();
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+
+        if (clip != null) {
+            if (!scrollRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(scrollRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.drawScrollbar(
+                scrollRegion, renderRegion,
+                scrollPos, totalItems, visibleItems,
+                showArrows, trackStyle, thumbStyle);
+        } else {
+            batch.drawScrollbar(
+                scrollRegion, null,
+                scrollPos, totalItems, visibleItems,
+                showArrows, trackStyle, thumbStyle);
+        }
+
+        regionPool.recycle(scrollRegion);
+        regionPool.recycle(renderRegion);
+    }
+
+    protected void drawScrollbar(
+        TerminalBatchBuilder batch, TerminalRectangle region,
+        int scrollPos, int totalItems, int visibleItems,
+        boolean showArrows, TextStyle trackStyle, TextStyle thumbStyle
+    ) {
+        drawScrollbar(batch,
+            region.getX(), region.getY(), region.getWidth(), region.getHeight(),
+            scrollPos, totalItems, visibleItems, showArrows, trackStyle, thumbStyle);
+    }
+
+    // ===== QUADRANT BITMAP (2×2 sub-pixels) =====
+
+    protected void drawBitmap(
+        TerminalBatchBuilder batch,
+        int x, int y, int width, int height,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ) {
+        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        TerminalRectangle bitmapRegion = regionPool.obtain();
+        bitmapRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
+
+        TerminalRectangle renderRegion = regionPool.obtain();
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+
+        if (clip != null) {
+            if (!bitmapRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(bitmapRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.drawBitmap(
+                bitmapRegion, renderRegion, pixelWidth, pixelHeight, pixels, style);
+        } else {
+            batch.drawBitmap(
+                bitmapRegion, null, pixelWidth, pixelHeight, pixels, style);
+        }
+
+        regionPool.recycle(bitmapRegion);
+        regionPool.recycle(renderRegion);
+    }
+
+    protected void drawBitmap(
+        TerminalBatchBuilder batch, TerminalRectangle region,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ) {
+        drawBitmap(batch,
+            region.getX(), region.getY(), region.getWidth(), region.getHeight(),
+            pixelWidth, pixelHeight, pixels, style);
+    }
+
+    // ===== BRAILLE BITMAP (2×4 sub-pixels) =====
+
+    protected void drawBrailleBitmap(
+        TerminalBatchBuilder batch,
+        int x, int y, int width, int height,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ) {
+        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        TerminalRectangle brailleRegion = regionPool.obtain();
+        brailleRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
+
+        TerminalRectangle renderRegion = regionPool.obtain();
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+
+        if (clip != null) {
+            if (!brailleRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(brailleRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.drawBrailleBitmap(
+                brailleRegion, renderRegion, pixelWidth, pixelHeight, pixels, style);
+        } else {
+            batch.drawBrailleBitmap(
+                brailleRegion, null, pixelWidth, pixelHeight, pixels, style);
+        }
+
+        regionPool.recycle(brailleRegion);
+        regionPool.recycle(renderRegion);
+    }
+
+    protected void drawBrailleBitmap(
+        TerminalBatchBuilder batch, TerminalRectangle region,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ) {
+        drawBrailleBitmap(batch,
+            region.getX(), region.getY(), region.getWidth(), region.getHeight(),
+            pixelWidth, pixelHeight, pixels, style);
+    }
+
+    // ===== SEXTANT BITMAP (2×3 sub-pixels) =====
+    //
+    // Width-safety note: sextant glyphs (U+1FB00–U+1FB3B) may render as double-width
+    // in some terminals. The two special-case masks are handled by ConsoleContainer:
+    //   BLANK_MASK (0b000000)  → transparent cell, left unchanged
+    //   FULL_MASK  (0b111111)  → background-filled space, no glyph emitted
+    // Avoid mixing 0b010101 (▌) and 0b101010 (▐) into sextant grids — they are
+    // single-width block-element characters and will break column alignment.
+
+    protected void drawSextantBitmap(
+        TerminalBatchBuilder batch,
+        int x, int y, int width, int height,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ) {
+        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+
+        TerminalRectangle sextantRegion = regionPool.obtain();
+        sextantRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
+
+        TerminalRectangle renderRegion = regionPool.obtain();
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+
+        if (clip != null) {
+            if (!sextantRegion.intersect(clip, renderRegion)) {
+                regionPool.recycle(sextantRegion);
+                regionPool.recycle(renderRegion);
+                return;
+            }
+            batch.drawSextantBitmap(
+                sextantRegion, renderRegion, pixelWidth, pixelHeight, pixels, style);
+        } else {
+            batch.drawSextantBitmap(
+                sextantRegion, null, pixelWidth, pixelHeight, pixels, style);
+        }
+
+        regionPool.recycle(sextantRegion);
+        regionPool.recycle(renderRegion);
+    }
+
+    protected void drawSextantBitmap(
+        TerminalBatchBuilder batch, TerminalRectangle region,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ) {
+        drawSextantBitmap(batch,
+            region.getX(), region.getY(), region.getWidth(), region.getHeight(),
+            pixelWidth, pixelHeight, pixels, style);
     }
     
     /**
@@ -793,7 +1142,7 @@ public abstract class TerminalRenderable extends Renderable<
      * Combines box drawing with centered text
      */
     protected void drawBorderedText(TerminalBatchBuilder batch, int x, int y, int width, int height,
-        String text, Position textPos, BoxStyle boxStyle, 
+        String text, Position textPos, LineStyle boxStyle, 
         TextStyle textStyle, TextStyle borderStyle
     ) {
         if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
@@ -823,12 +1172,12 @@ public abstract class TerminalRenderable extends Renderable<
     }
 
     protected void drawBorderedText(TerminalBatchBuilder batch, TerminalRectangle region, String text,
-                                    BoxStyle boxStyle, TextStyle textStyle, TextStyle borderStyle) {
+                                    LineStyle boxStyle, TextStyle textStyle, TextStyle borderStyle) {
         drawBorderedText(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(),
                         text,null, boxStyle, textStyle, borderStyle);
     }
 
-    protected void drawBorderedText(TerminalBatchBuilder batch, TerminalRectangle region, String text, BoxStyle boxStyle) {
+    protected void drawBorderedText(TerminalBatchBuilder batch, TerminalRectangle region, String text, LineStyle boxStyle) {
         drawBorderedText(batch, region, text, boxStyle, null, null);
     }
 
@@ -836,7 +1185,7 @@ public abstract class TerminalRenderable extends Renderable<
      * Draw panel - box with filled background (local coordinates)
      */
    protected void drawPanel(TerminalBatchBuilder batch, int x, int y, int width, int height,
-        String title, Position titlePos, BoxStyle boxStyle, 
+        String title, Position titlePos, LineStyle boxStyle, 
         TextStyle borderStyle, TextStyle fillStyle
     ) {
         if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
@@ -866,11 +1215,11 @@ public abstract class TerminalRenderable extends Renderable<
     }
 
 
-    protected void drawPanel(TerminalBatchBuilder batch, TerminalRectangle region, String title, BoxStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
+    protected void drawPanel(TerminalBatchBuilder batch, TerminalRectangle region, String title, LineStyle boxStyle, TextStyle borderStyle, TextStyle fillStyle) {
         drawPanel(batch, region.getX(), region.getY(), region.getWidth(), region.getHeight(), title, null, boxStyle, borderStyle, fillStyle);
     }
 
-    protected void drawPanel(TerminalBatchBuilder batch, TerminalRectangle region, BoxStyle boxStyle) {
+    protected void drawPanel(TerminalBatchBuilder batch, TerminalRectangle region, LineStyle boxStyle) {
         drawPanel(batch, region, null, boxStyle, TextStyle.NORMAL, TextStyle.NORMAL);
     }
 

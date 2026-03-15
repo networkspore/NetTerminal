@@ -5,7 +5,7 @@ import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 
 /**
  * TerminalMessageBox - Self-contained message display with border
@@ -34,7 +34,7 @@ public class TerminalMessageBox extends TerminalRegion {
     private String[] messages = new String[0];
     private String footer = null;
     private MessageType type = MessageType.DEFAULT;
-    private BoxStyle borderStyle = BoxStyle.SINGLE;
+    private LineStyle borderStyle = LineStyle.SINGLE;
     private boolean showIcon = true;
     private int messageSpacing = 1;
     private int padding = 1;
@@ -44,7 +44,7 @@ public class TerminalMessageBox extends TerminalRegion {
     private TextStyle titleStyle = null;
     private TextStyle messageStyle = null;
     private TextStyle footerStyle = null;
-    private BoxStyle boxStyle = null;
+    private LineStyle boxStyle = null;
     
     public TerminalMessageBox(String name) {
         super(name);
@@ -104,7 +104,7 @@ public class TerminalMessageBox extends TerminalRegion {
         }
     }
     
-    public void setBorderStyle(BoxStyle style) {
+    public void setBorderStyle(LineStyle style) {
         if (this.borderStyle != style) {
             this.borderStyle = style;
             invalidate();
@@ -155,7 +155,7 @@ public class TerminalMessageBox extends TerminalRegion {
         invalidate();
     }
     
-    public void setBoxStyle(BoxStyle style) {
+    public void setBoxStyle(LineStyle style) {
         this.boxStyle = style;
         invalidate();
     }
@@ -169,7 +169,7 @@ public class TerminalMessageBox extends TerminalRegion {
         
         if (width < 3 || height < 3) return;
         
-        BoxStyle boxStyle = getBoxStyle();
+        LineStyle boxStyle = getBoxStyle();
         TextStyle titleStyle = getTitleStyle();
         TextStyle msgStyle = getMessageStyle();
         TextStyle footStyle = getFooterStyle();
@@ -270,7 +270,7 @@ public class TerminalMessageBox extends TerminalRegion {
         };
     }
     
-    private BoxStyle getBoxStyle() {
+    private LineStyle getBoxStyle() {
         return boxStyle;
     }
     
@@ -403,7 +403,7 @@ public class TerminalMessageBox extends TerminalRegion {
         private String title = null;
         private String[] messages = new String[0];
         private String footer = null;
-        private BoxStyle borderStyle = BoxStyle.SINGLE;
+        private LineStyle borderStyle = LineStyle.SINGLE;
         private boolean showIcon = true;
         private int messageSpacing = 1;
         private int padding = 1;
@@ -415,7 +415,7 @@ public class TerminalMessageBox extends TerminalRegion {
         public Builder messages(String... messages) { this.messages = messages; return this; }
         public Builder message(String message) { return messages(message); }
         public Builder footer(String footer) { this.footer = footer; return this; }
-        public Builder borderStyle(BoxStyle style) { this.borderStyle = style; return this; }
+        public Builder borderStyle(LineStyle style) { this.borderStyle = style; return this; }
         public Builder showIcon(boolean show) { this.showIcon = show; return this; }
         public Builder messageSpacing(int spacing) { this.messageSpacing = spacing; return this; }
         public Builder padding(int padding) { this.padding = padding; return this; }

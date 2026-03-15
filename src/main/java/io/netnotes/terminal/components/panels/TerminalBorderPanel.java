@@ -105,13 +105,13 @@ public class TerminalBorderPanel extends TerminalRegion {
     @Override
     public void setPercentWidth(float percent) {
         super.setPercentWidth(percent);
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
 
     @Override
     public void setPercentHeight(float percent) {
         super.setPercentHeight(percent);
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
     
     /**
@@ -121,7 +121,7 @@ public class TerminalBorderPanel extends TerminalRegion {
     public void setDefaultTopHeight(int height) {
         if (this.defaultTopHeight != height) {
             this.defaultTopHeight = height;
-            notifyContentChanged();
+            requestLayoutUpdate();
         }
     }
     
@@ -132,7 +132,7 @@ public class TerminalBorderPanel extends TerminalRegion {
     public void setDefaultBottomHeight(int height) {
         if (this.defaultBottomHeight != height) {
             this.defaultBottomHeight = height;
-            notifyContentChanged();
+            requestLayoutUpdate();
         }
     }
     
@@ -143,7 +143,7 @@ public class TerminalBorderPanel extends TerminalRegion {
     public void setDefaultLeftWidth(int width) {
         if (this.defaultLeftWidth != width) {
             this.defaultLeftWidth = width;
-            notifyContentChanged();
+            requestLayoutUpdate();
         }
     }
     
@@ -154,7 +154,7 @@ public class TerminalBorderPanel extends TerminalRegion {
     public void setDefaultRightWidth(int width) {
         if (this.defaultRightWidth != width) {
             this.defaultRightWidth = width;
-            notifyContentChanged();
+            requestLayoutUpdate();
         }
     }
     
@@ -180,7 +180,7 @@ public class TerminalBorderPanel extends TerminalRegion {
             stack.setVisibleContent(child);
         }
         
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
     
     /**
@@ -207,7 +207,7 @@ public class TerminalBorderPanel extends TerminalRegion {
         // Make it the visible content
         stack.setVisibleContent(newChild);
         
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
     
     /**
@@ -245,7 +245,7 @@ public class TerminalBorderPanel extends TerminalRegion {
         TerminalStackPanel stack = regionStacks.get(region);
         stack.removeFromStack(child);
         
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
     
     /**
@@ -278,7 +278,7 @@ public class TerminalBorderPanel extends TerminalRegion {
         TerminalStackPanel stack = regionStacks.get(region);
         stack.clearStack();
         
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
     
     /**
@@ -517,12 +517,12 @@ public class TerminalBorderPanel extends TerminalRegion {
     
     public void setWidthPreference(SizePreference widthPreference) {
         this.widthPreference = widthPreference;
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
 
     public void setHeightPreference(SizePreference heightPreference) {
         this.heightPreference = heightPreference;
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
 
     @Override
@@ -556,12 +556,12 @@ public class TerminalBorderPanel extends TerminalRegion {
 
     public void setMinWidth(int minWidth) {
         this.minWidth = minWidth;
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
 
     public void setMinHeight(int minHeight) {
         this.minHeight = minHeight;
-        notifyContentChanged();
+        requestLayoutUpdate();
     }
 
     @Override

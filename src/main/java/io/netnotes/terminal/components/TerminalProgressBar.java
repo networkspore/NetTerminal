@@ -94,7 +94,7 @@ public class TerminalProgressBar extends TerminalRegion {
         invalidate();
     }
     
-    public void setTextStyle(TextStyle style) {
+    public void setBorderTextStyle(TextStyle style) {
         this.textStyle = style;
         invalidate();
     }

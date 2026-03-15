@@ -1,5 +1,5 @@
 package io.netnotes.terminal;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
@@ -102,6 +102,19 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
         
         // Add command - TerminalRenderable will handle boundary enforcement
         addCommand(TerminalCommands.printAt(x, y, text, style));
+    }
+
+    public void printCodePointAt(int x, int y, int codePoint, TextStyle style) {
+        TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null) {
+            if (y < clip.getY() || y >= clip.getY() + clip.getHeight()) {
+                return;
+            }
+            if (x < clip.getX() || x >= clip.getX() + clip.getWidth()) {
+                return;
+            }
+        }
+        addCommand(TerminalCommands.printCodePointAt(x, y, codePoint, style));
     }
 
     public void printAtPosition(TerminalRectangle region, String text, Position pos, TextStyle style) {
@@ -250,7 +263,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
      * Draw box - CHECKS CLIP REGION
      * TerminalRenderable will handle boundary enforcement of box drawing.
      */
-    public void drawBox(TerminalRectangle region, TerminalRectangle renderRegion, String title, Position titlePos, BoxStyle boxStyle, TextStyle textStyle) {
+    public void drawBox(TerminalRectangle region, TerminalRectangle renderRegion, String title, Position titlePos, LineStyle boxStyle, TextStyle textStyle) {
         TerminalRectangle clip = getCurrentClipRegion();
         
         if (clip != null) {
@@ -269,7 +282,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
      * Draw horizontal line - CHECKS CLIP REGION
      * TerminalRenderable will clamp line to its bounds.
      */
-    public void drawHLine(int x, int y, int length) {
+    public void drawHLine(int x, int y, int length, TextStyle textStyle, LineStyle lineStyle) {
         TerminalRectangle clip = getCurrentClipRegion();
         
         if (clip != null) {
@@ -284,14 +297,14 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
             }
         }
         
-        addCommand(TerminalCommands.drawHLine(x, y, length));
+        addCommand(TerminalCommands.drawHLine(x, y, length, textStyle, lineStyle));
     }
 
     /**
      * Draw vertical line - CHECKS CLIP REGION
      * TerminalRenderable will clamp line to its bounds.
      */
-    public void drawVLine(int x, int y, int length) {
+    public void drawVLine(int x, int y, int length, TextStyle textStyle, LineStyle lineStyle) {
         TerminalRectangle clip = getCurrentClipRegion();
         
         if (clip != null) {
@@ -306,7 +319,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
             }
         }
         
-        addCommand(TerminalCommands.drawVLine(x, y, length));
+        addCommand(TerminalCommands.drawVLine(x, y, length, textStyle, lineStyle));
     }
 
     /**
@@ -347,7 +360,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     }
  
 
-    public void drawBorderedText(TerminalRectangle region,TerminalRectangle renderRegion, String text, Position textPos, BoxStyle boxStyle, 
+    public void drawBorderedText(TerminalRectangle region,TerminalRectangle renderRegion, String text, Position textPos, LineStyle boxStyle, 
         TextStyle textStyle, TextStyle borderStyle
     ) {
         TerminalRectangle clip = getCurrentClipRegion();
@@ -364,7 +377,7 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     /**
      * Draw panel (box with filled background) - CHECKS CLIP REGION
      */
-    public void drawPanel(TerminalRectangle region, TerminalRectangle renderRegion, String title, Position titlePos, BoxStyle boxStyle, 
+    public void drawPanel(TerminalRectangle region, TerminalRectangle renderRegion, String title, Position titlePos, LineStyle boxStyle, 
          TextStyle borderStyle, TextStyle fillStyle
     ) {
         TerminalRectangle clip = getCurrentClipRegion();
@@ -428,7 +441,134 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
         addCommand(TerminalCommands.drawTextBlock(region, renderRegion, text, align, style));
     }
 
-  
+    /**
+     * Draw table border - CHECKS CLIP REGION
+     */
+    public void drawTableBorder(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        LineStyle lineStyle,
+        TextStyle style,
+        int[] hSeparators,
+        int[] vSeparators,
+        String title,
+        Position titlePos
+    ) {
+        TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null && !region.intersects(clip)) {
+            return;
+        }
+        addCommand(TerminalCommands.drawTableBorder(
+            region, renderRegion, lineStyle, style, hSeparators, vSeparators, title, titlePos));
+    }
+
+    public void drawTableRowBorder(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        LineStyle lineStyle,
+        TextStyle style,
+        int... hSeparators
+    ) {
+        drawTableBorder(region, renderRegion, lineStyle, style, hSeparators, null, null, null);
+    }
+
+    public void drawTableColBorder(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        LineStyle lineStyle,
+        TextStyle style,
+        int... vSeparators
+    ) {
+        drawTableBorder(region, renderRegion, lineStyle, style, null, vSeparators, null, null);
+    }
+
+    /**
+     * Draw sparkline - CHECKS CLIP REGION
+     */
+    public void drawSparkline(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        double[] values,
+        TextStyle style,
+        TextStyle peakStyle
+    ) {
+        TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null && !region.intersects(clip)) {
+            return;
+        }
+        addCommand(TerminalCommands.drawSparkline(region, renderRegion, values, style, peakStyle));
+    }
+
+    /**
+     * Draw scrollbar - CHECKS CLIP REGION
+     */
+    public void drawScrollbar(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        int scrollPos,
+        int totalItems,
+        int visibleItems,
+        boolean showArrows,
+        TextStyle trackStyle,
+        TextStyle thumbStyle
+    ) {
+        TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null && !region.intersects(clip)) {
+            return;
+        }
+        addCommand(TerminalCommands.drawScrollbar(
+            region, renderRegion, scrollPos, totalItems, visibleItems, showArrows, trackStyle, thumbStyle));
+    }
+
+    /**
+     * Draw bitmap - CHECKS CLIP REGION
+     */
+    public void drawBitmap(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        int pixelWidth,
+        int pixelHeight,
+        byte[] pixels,
+        TextStyle style
+    ) {
+        TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null && !region.intersects(clip)) {
+            return;
+        }
+        addCommand(TerminalCommands.drawBitmap(region, renderRegion, pixelWidth, pixelHeight, pixels, style));
+    }
+
+    /**
+     * Draw braille bitmap - CHECKS CLIP REGION
+     */
+    public void drawBrailleBitmap(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        int pixelWidth,
+        int pixelHeight,
+        byte[] pixels,
+        TextStyle style
+    ) {
+        TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null && !region.intersects(clip)) {
+            return;
+        }
+        addCommand(TerminalCommands.drawBrailleBitmap(region, renderRegion, pixelWidth, pixelHeight, pixels, style));
+    }
+    //sextantRegion, renderRegion, pixelWidth, pixelHeight, pixels, style
+    public void drawSextantBitmap(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        int pixelWidth, int pixelHeight,
+        byte[] pixels, TextStyle style
+    ){
+         TerminalRectangle clip = getCurrentClipRegion();
+        if (clip != null && !region.intersects(clip)) {
+            return;
+        }
+        addCommand(TerminalCommands.drawSextantBitmap(region, renderRegion, pixelWidth, pixelHeight, pixels, style));
+    }
+
     /**
      * Shade region with character pattern - CHECKS CLIP REGION
      */

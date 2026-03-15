@@ -1,7 +1,7 @@
 package io.netnotes.terminal.components.text;
 
 import io.netnotes.terminal.*;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.*;
@@ -115,21 +115,31 @@ public class ScrollableTextViewer extends TerminalRegion {
         TerminalRectangle region = TerminalRectanglePool.getInstance().obtain();
         region.set(0,0, getWidth(), getHeight(), 0 ,0);
         
-        drawBox(batch, region, title, Position.TOP_CENTER, BoxStyle.SINGLE, titleStyle);
+        drawBox(batch, region, title, Position.TOP_CENTER, LineStyle.SINGLE, titleStyle);
         
         TerminalRectanglePool.getInstance().recycle(region);
         
-        int contentstartY = 1;
-        int contentStartCol = 2;
-        int contentWidth = getWidth() - 4;
-        int contentHeight = getHeight() - 2;
+        int contentstartY = getContentStartY();
+        int contentStartCol = getContentStartX();
+        int contentWidth = getContentWidth();
+        int contentHeight = getContentHeight();
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            return;
+        }
         
         renderLines(batch, currentLines, contentstartY, contentStartCol, 
             contentWidth, contentHeight);
     }
     
     private void renderWithoutBorder(TerminalBatchBuilder batch, List<String> currentLines, TextStyle titleStyle) {
-        renderLines(batch, currentLines, 1, 2, getWidth(), getHeight());
+        int contentstartY = getContentStartY();
+        int contentStartCol = getContentStartX();
+        int contentWidth = getContentWidth();
+        int contentHeight = getContentHeight();
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            return;
+        }
+        renderLines(batch, currentLines, contentstartY, contentStartCol, contentWidth, contentHeight);
     }
     
     private void renderLines(TerminalBatchBuilder batch, List<String> currentLines,
@@ -196,23 +206,25 @@ public class ScrollableTextViewer extends TerminalRegion {
      * Add line - invalidates appropriately based on auto-scroll state
      */
     public void addLine(String line) {
+        int totalLines;
         synchronized (lines) {
             lines.add(line != null ? line : "");
             
             while (lines.size() > maxLines) {
                 lines.remove(0);
             }
+            totalLines = lines.size();
         }
         
-        // If auto-scrolling, stay at bottom
         if (autoScroll) {
             scrollOffset = 0;
-            invalidateNewLines();
         } else {
-            // Not auto-scrolling, increase offset to maintain view position
             scrollOffset++;
-            // No invalidation needed - view doesn't change
         }
+        if (clampScrollOffset(totalLines) && scrollOffset == 0) {
+            autoScroll = true;
+        }
+        onContentChanged();
     }
 
     @Override
@@ -253,6 +265,7 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
     
     public void addLines(String... newLines) {
+        int totalLines;
         synchronized (lines) {
             for (String line : newLines) {
                 lines.add(line != null ? line : "");
@@ -261,14 +274,18 @@ public class ScrollableTextViewer extends TerminalRegion {
             while (lines.size() > maxLines) {
                 lines.remove(0);
             }
+            totalLines = lines.size();
         }
         
         if (autoScroll) {
             scrollOffset = 0;
-            invalidateNewLines();
         } else {
             scrollOffset += newLines.length;
         }
+        if (clampScrollOffset(totalLines) && scrollOffset == 0) {
+            autoScroll = true;
+        }
+        onContentChanged();
     }
     
     /**
@@ -280,7 +297,7 @@ public class ScrollableTextViewer extends TerminalRegion {
                 lines.clear();
                 scrollOffset = 0;
                 autoScroll = true;
-                invalidate(); // Full invalidation
+                onContentChanged();
             }
         }
     }
@@ -313,7 +330,7 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
     
     private void handleScrollUp() {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
+        int contentHeight = getContentHeight();
         int totalLines = getLineCount();
         int maxOffset = Math.max(0, totalLines - contentHeight);
         
@@ -335,7 +352,7 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
     
     private void handlePageUp() {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
+        int contentHeight = getContentHeight();
         int totalLines = getLineCount();
         int maxOffset = Math.max(0, totalLines - contentHeight);
         
@@ -345,7 +362,7 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
     
     private void handlePageDown() {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
+        int contentHeight = getContentHeight();
         
         scrollOffset = Math.max(0, scrollOffset - contentHeight);
         if (scrollOffset == 0) {
@@ -355,7 +372,7 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
     
     private void handleHome() {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
+        int contentHeight = getContentHeight();
         int totalLines = getLineCount();
         int maxOffset = Math.max(0, totalLines - contentHeight);
         
@@ -378,7 +395,7 @@ public class ScrollableTextViewer extends TerminalRegion {
      * Programmatically scroll to a specific line (0 = oldest)
      */
     public void scrollToLine(int lineIndex) {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
+        int contentHeight = getContentHeight();
         int totalLines = getLineCount();
         
         if (lineIndex < 0 || lineIndex >= totalLines) return;
@@ -413,49 +430,73 @@ public class ScrollableTextViewer extends TerminalRegion {
     
     // ===== INVALIDATION HELPERS =====
     
-    /**
-     * Invalidate only the area where new lines appear (bottom)
-     */
-    private void invalidateNewLines() {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
-        int startY = showBorder ? 1 : 0;
-        localDamage = TerminalRectanglePool.getInstance().obtain();
-
-        // Invalidate bottom portion where new lines appear
-        localDamage.set(
-            0, startY +  Math.max(0, contentHeight - 3),
-            getWidth(),
-            Math.min(3, contentHeight) // Last 3 lines
-        );
-        notifyContentChanged();
-    }
-    
-    /**
-     * Invalidate entire content area (for scrolling)
-     */
     private void invalidateContent() {
-        int contentHeight = showBorder ? getHeight() - 2 : getHeight();
-        int startY = showBorder ? 1 : 0;
-        localDamage = TerminalRectanglePool.getInstance().obtain();
+        invalidateContentArea();
+    }
 
-        localDamage.set(
-            0,
-            startY,
-            getWidth(),
-            contentHeight
-        );
-        notifyContentChanged();
+    private void onContentChanged() {
+        if (isSizedByContent()) {
+            requestLayoutUpdate();
+        }
+        invalidateContentArea();
+    }
+
+    private void invalidateContentArea() {
+        int contentWidth = getContentWidth();
+        int contentHeight = getContentHeight();
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            return;
+        }
+        invalidateRegion(getContentStartX(), getContentStartY(), contentWidth, contentHeight);
+    }
+
+    private boolean clampScrollOffset(int totalLines) {
+        int contentHeight = getContentHeight();
+        int maxOffset = contentHeight <= 0 ? 0 : Math.max(0, totalLines - contentHeight);
+        if (scrollOffset > maxOffset) {
+            scrollOffset = maxOffset;
+            return true;
+        }
+        if (scrollOffset < 0) {
+            scrollOffset = 0;
+            return true;
+        }
+        return false;
+    }
+
+    private int getContentStartX() {
+        return showBorder ? 2 : 0;
+    }
+
+    private int getContentStartY() {
+        return showBorder ? 1 : 0;
+    }
+
+    private int getContentWidth() {
+        return Math.max(0, showBorder ? getWidth() - 4 : getWidth());
+    }
+
+    private int getContentHeight() {
+        return Math.max(0, showBorder ? getHeight() - 2 : getHeight());
     }
     
     public void setMaxLines(int maxLines) {
         this.maxLines = Math.max(100, maxLines);
-        
+        boolean trimmed = false;
+        int totalLines;
         synchronized (lines) {
             while (lines.size() > this.maxLines) {
                 lines.remove(0);
+                trimmed = true;
             }
+            totalLines = lines.size();
         }
-        notifyContentChanged();
+        if (trimmed) {
+            if (clampScrollOffset(totalLines) && scrollOffset == 0) {
+                autoScroll = true;
+            }
+            onContentChanged();
+        }
     }
     
     private String truncateLine(String line, int maxWidth) {

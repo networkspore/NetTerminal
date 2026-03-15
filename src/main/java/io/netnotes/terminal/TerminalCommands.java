@@ -1,5 +1,5 @@
 package io.netnotes.terminal;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.consoleRenderer.Cell;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.engine.ui.Position;
@@ -7,8 +7,10 @@ import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
+import io.netnotes.noteBytes.NoteIntegerArray;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.collections.NoteBytesPair;
+import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 
 /**
  * Terminal command factory methods
@@ -27,8 +29,47 @@ import io.netnotes.noteBytes.collections.NoteBytesPair;
  */
 public class TerminalCommands {
     public static final String PRESS_ANY_KEY = "Press any key to continue...";
+    
+    
+    // ==== parameter constants ====
+    public static final NoteBytesReadOnly PEAK_STYLE = 
+        new NoteBytesReadOnly("peak_style");
+    public static final NoteBytesReadOnly LINE_STYLE = 
+        new NoteBytesReadOnly("line_style");
+    public static final NoteBytesReadOnly CODE_POINT =
+        new NoteBytesReadOnly("code_point");
+    public static final NoteBytesReadOnly PROGRESS =
+        new NoteBytesReadOnly("progress");
+    public static final NoteBytesReadOnly ALIGN =
+        new NoteBytesReadOnly("align");
+    public static final NoteBytesReadOnly SHADE_CHAR =
+        new NoteBytesReadOnly("shade_char");
+    public static final NoteBytesReadOnly SELECTED =
+        new NoteBytesReadOnly("selected");
+    public static final NoteBytesReadOnly TITLE_POS = 
+        new NoteBytesReadOnly("title_pos");
+    public static final NoteBytesReadOnly RENDER_REGION = 
+        new NoteBytesReadOnly("render_region");
+    public static final NoteBytesReadOnly SCROLL_POS =
+        new NoteBytesReadOnly("scroll_pos");
+    public static final NoteBytesReadOnly SHOW_ARROWS =
+        new NoteBytesReadOnly("show_arrows");
+    public static final NoteBytesReadOnly TRACK_STYLE =
+        new NoteBytesReadOnly("track_style");
+    public static final NoteBytesReadOnly THUMB_STYLE =
+        new NoteBytesReadOnly("thumb_style");
 
-    // Command type constants
+    // === Command type constants ===
+    public static final NoteBytesReadOnly TERMINAL_DRAW_SEXTANT_BITMAP =
+        new NoteBytesReadOnly("draw_sextant_bitmap");
+    public static final NoteBytesReadOnly TERMINAL_DRAW_BRAILLE_BITMAP =
+        new NoteBytesReadOnly("draw_braille_bitmap");
+    public static final NoteBytesReadOnly TERMINAL_DRAW_BITMAP =
+        new NoteBytesReadOnly("draw_bitmap");
+    public static final NoteBytesReadOnly TERMINAL_DRAW_SCROLLBAR =
+        new NoteBytesReadOnly("draw_scrollbar");
+    public static final NoteBytesReadOnly TERMINAL_DRAW_SPARKLINE =
+        new NoteBytesReadOnly("draw_sparkline");
     public static final NoteBytesReadOnly TERMINAL_CLEAR = 
         new NoteBytesReadOnly("clear");
     public static final NoteBytesReadOnly TERMINAL_PRINT = 
@@ -37,6 +78,8 @@ public class TerminalCommands {
         new NoteBytesReadOnly("println");
     public static final NoteBytesReadOnly TERMINAL_PRINT_AT = 
         new NoteBytesReadOnly("print_at");    
+    public static final NoteBytesReadOnly TERMINAL_PRINT_CODEPOINT_AT =
+        new NoteBytesReadOnly("print_codepoint_at");
     public static final NoteBytesReadOnly TERMINAL_MOVE_CURSOR = 
         new NoteBytesReadOnly("move_cursor");
     public static final NoteBytesReadOnly TERMINAL_SHOW_CURSOR = 
@@ -69,25 +112,16 @@ public class TerminalCommands {
         new NoteBytesReadOnly("draw_text_block");
     public static final NoteBytesReadOnly TERMINAL_SHADE_REGION = 
         new NoteBytesReadOnly("shade_region");
+    public static final NoteBytesReadOnly TERMINAL_DRAW_TABLE_BORDER =
+        new NoteBytesReadOnly("draw_table_border");
+    public static final NoteBytesReadOnly H_SEPARATORS =
+        new NoteBytesReadOnly("h_separators");   // comma-delimited Y positions
+    public static final NoteBytesReadOnly V_SEPARATORS =
+        new NoteBytesReadOnly("v_separators");   // comma-delimited X positions
 
-    // Additional parameter constants
-    public static final NoteBytesReadOnly BOX_STYLE = 
-        new NoteBytesReadOnly("box_style");
-    public static final NoteBytesReadOnly CODE_POINT =
-        new NoteBytesReadOnly("code_point");
-    public static final NoteBytesReadOnly PROGRESS =
-        new NoteBytesReadOnly("progress");
-    public static final NoteBytesReadOnly ALIGN =
-        new NoteBytesReadOnly("align");
-    public static final NoteBytesReadOnly SHADE_CHAR =
-        new NoteBytesReadOnly("shade_char");
-    public static final NoteBytesReadOnly SELECTED =
-        new NoteBytesReadOnly("selected");
-    public static final NoteBytesReadOnly TITLE_POS = 
-        new NoteBytesReadOnly("title_pos");
-    public static final NoteBytesReadOnly RENDER_REGION = 
-        new NoteBytesReadOnly("render_region");
 
+
+  
     // ===== SCREEN OPERATIONS =====
     
     /**
@@ -140,6 +174,23 @@ public class TerminalCommands {
             new NoteBytesPair(Keys.X, x),
             new NoteBytesPair(Keys.Y, y),
             new NoteBytesPair(Keys.TEXT, text),
+            new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
+        });
+    }
+
+    /**
+     * Print a single codepoint at a specific position.
+     * @param x horizontal position
+     * @param y vertical position
+     * @param codePoint Unicode codepoint
+     * @param style text style
+     */
+    public static NoteBytesObject printCodePointAt(int x, int y, int codePoint, TextStyle style) {
+        return new NoteBytesObject(new NoteBytesPair[]{
+            new NoteBytesPair(Keys.CMD, TERMINAL_PRINT_CODEPOINT_AT),
+            new NoteBytesPair(Keys.X, x),
+            new NoteBytesPair(Keys.Y, y),
+            new NoteBytesPair(CODE_POINT, codePoint),
             new NoteBytesPair(Keys.STYLE, style == null ? TextStyle.NORMAL_BYTES : style.toNoteBytes())
         });
     }
@@ -258,7 +309,7 @@ public class TerminalCommands {
      * Draw box with border
      * @param region the box bounds
      * @param title optional title (can be null)
-     * @param boxStyle box border style
+     * @param lineStyle box border style
      * @param style text style for border
      */
     public static NoteBytesObject drawBox(
@@ -266,7 +317,7 @@ public class TerminalCommands {
         TerminalRectangle renderRegion,
         String title, 
         Position titlePosition, 
-        BoxStyle boxStyle, 
+        LineStyle lineStyle, 
         TextStyle style
     ) {
         NoteBytesMap map = new NoteBytesMap();
@@ -281,8 +332,8 @@ public class TerminalCommands {
                 map.put(TITLE_POS, titlePosition.name());
             }
         }
-        if (boxStyle != null) {
-            map.put(BOX_STYLE, boxStyle.name());
+        if (lineStyle != null) {
+            map.put(LINE_STYLE, lineStyle.name());
         }
         if(style != null){
             map.put(Keys.STYLE, style.toNoteBytes());
@@ -298,7 +349,7 @@ public class TerminalCommands {
      * @param length line length
      * @param style text style
      */
-    public static NoteBytes drawHLine(int x, int y, int length, TextStyle style) {
+    public static NoteBytes drawHLine(int x, int y, int length, TextStyle style, LineStyle lineStyle) {
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.CMD, TERMINAL_DRAW_HLINE);
         map.put(Keys.X, x);
@@ -307,6 +358,9 @@ public class TerminalCommands {
         if (style != null) {
             map.put(Keys.STYLE, style.toNoteBytes());
         }
+        if(lineStyle != null){
+            map.put(LINE_STYLE, lineStyle.name());
+        }
         return map.toNoteBytes();
     }
     
@@ -314,7 +368,7 @@ public class TerminalCommands {
      * Draw horizontal line (default style)
      */
     public static NoteBytes drawHLine(int x, int y, int length) {
-        return drawHLine(x, y, length, null);
+        return drawHLine(x, y, length, null, null);
     }
 
     /**
@@ -324,7 +378,7 @@ public class TerminalCommands {
      * @param length line length
      * @param style text style
      */
-    public static NoteBytes drawVLine(int x, int y, int length, TextStyle style) {
+    public static NoteBytes drawVLine(int x, int y, int length, TextStyle style, LineStyle lineStyle) {
         NoteBytesMap map = new NoteBytesMap();
         map.put(Keys.CMD, TERMINAL_DRAW_VLINE);
         map.put(Keys.X, x);
@@ -333,6 +387,9 @@ public class TerminalCommands {
         if (style != null) {
             map.put(Keys.STYLE, style.toNoteBytes());
         }
+        if(lineStyle != null){
+            map.put(LINE_STYLE, lineStyle.name());
+        }
         return map.toNoteBytes();
     }
     
@@ -340,7 +397,7 @@ public class TerminalCommands {
      * Draw vertical line (default style)
      */
     public static NoteBytes drawVLine(int x, int y, int length) {
-        return drawVLine(x, y, length, null);
+        return drawVLine(x, y, length, null, null);
     }
 
     // ===== FILL OPERATIONS =====
@@ -414,7 +471,7 @@ public class TerminalCommands {
      * Draw a panel - box with filled background
      * @param region panel bounds
      * @param title optional title
-     * @param boxStyle border style
+     * @param lineStyle border style
      * @param borderStyle style for border
      * @param fillStyle style for background
      */
@@ -423,7 +480,7 @@ public class TerminalCommands {
         TerminalRectangle renderRegion,
         String title, 
         Position titlePosition,
-        BoxStyle boxStyle, 
+        LineStyle lineStyle, 
         TextStyle borderStyle, 
         TextStyle fillStyle
     ) {
@@ -440,8 +497,8 @@ public class TerminalCommands {
                 map.put(TITLE_POS, titlePosition.name());
             }
         }
-        if (boxStyle != null) {
-            map.put(BOX_STYLE, boxStyle.name());
+        if (lineStyle != null) {
+            map.put(LINE_STYLE, lineStyle.name());
         }
         if (borderStyle != null) {
             map.put(Keys.STYLE, borderStyle.toNoteBytes());
@@ -565,7 +622,7 @@ public class TerminalCommands {
      * Draw bordered text box (box + centered text)
      * @param region bounds
      * @param text text to display
-     * @param boxStyle border style
+     * @param lineStyle border style
      * @param textStyle style for text
      * @param borderStyle style for border
      */
@@ -574,7 +631,7 @@ public class TerminalCommands {
         TerminalRectangle renderRegion,
         String text, 
         Position textPos,
-        BoxStyle boxStyle, 
+        LineStyle lineStyle, 
         TextStyle textStyle, 
         TextStyle borderStyle
     ) {
@@ -590,8 +647,8 @@ public class TerminalCommands {
                 map.put(TITLE_POS, textPos.name());
             }
         }
-        if(boxStyle != null){
-            map.put(BOX_STYLE, boxStyle.name());
+        if(lineStyle != null){
+            map.put(LINE_STYLE, lineStyle.name());
         }
         if(textStyle != null){
             map.put(Keys.STYLE, textStyle.toNoteBytes());
@@ -602,21 +659,231 @@ public class TerminalCommands {
         return map.toNoteBytes();
     }
 
-    // ===== PIXEL-LIKE RENDERING CONSTANTS =====
-    
+    public static NoteBytesObject drawTableBorder(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        LineStyle          lineStyle,
+        TextStyle         style,
+        int[]             hSeparators,
+        int[]             vSeparators,
+        String            title,
+        Position          titlePos
+    ) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD,    TERMINAL_DRAW_TABLE_BORDER);
+        map.put(Keys.REGION, region.toNoteBytes());
+
+        if (renderRegion != null) {
+            map.put(RENDER_REGION, renderRegion.toNoteBytes());
+        }
+        if (lineStyle != null) {
+            map.put(LINE_STYLE, lineStyle.name());
+        }
+        if (style != null) {
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        if (hSeparators != null && hSeparators.length > 0) {
+            map.put(H_SEPARATORS, new NoteIntegerArray(hSeparators));
+        }
+        if (vSeparators != null && vSeparators.length > 0) {
+            map.put(V_SEPARATORS, new NoteIntegerArray(vSeparators));
+        }
+        if (title != null && !title.isEmpty()) {
+            map.put(Keys.TITLE, title);
+            if (titlePos != null) {
+                map.put(TITLE_POS, titlePos.name());
+            }
+        }
+        return map.toNoteBytes();
+    }
+
+    public static NoteBytesObject drawTableRowBorder(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        LineStyle          lineStyle,
+        TextStyle         style,
+        int...            hSeparators
+    ) {
+        return drawTableBorder(region, renderRegion, lineStyle, style,
+            hSeparators, null, null, null);
+    }
+
+    public static NoteBytesObject drawTableColBorder(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        LineStyle          lineStyle,
+        TextStyle         style,
+        int...            vSeparators
+    ) {
+        return drawTableBorder(region, renderRegion, lineStyle, style,
+            null, vSeparators, null, null);
+    }
+
     /**
-     * Quadrant characters for 2x2 "pixel" rendering within a single character cell
-     * These allow basic bitmap-style rendering at 2x resolution
+     * 
+     * @param region full area
+     * @param renderRegion optional - area of region to render
+     * @param values normalised 0.0–1.0
+     * @param style optional - character styling
+     * @param peakStyle  optional — highlights the max value cell
+     * @return
      */
-    public static final String QUADRANT_UPPER_LEFT = "▘";      // U+2598
-    public static final String QUADRANT_UPPER_RIGHT = "▝";     // U+259D
-    public static final String QUADRANT_LOWER_LEFT = "▖";      // U+2596
-    public static final String QUADRANT_LOWER_RIGHT = "▗";     // U+2597
-    public static final String QUADRANT_UPPER_HALF = "▀";      // U+2580
-    public static final String QUADRANT_LOWER_HALF = "▄";      // U+2584
-    public static final String QUADRANT_LEFT_HALF = "▌";       // U+258C
-    public static final String QUADRANT_RIGHT_HALF = "▐";      // U+2590
-    
+    public static NoteBytesObject drawSparkline(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        double[] values,          
+        TextStyle style,
+        TextStyle peakStyle
+    ) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD, TERMINAL_DRAW_SPARKLINE);
+        map.put(Keys.REGION, region.toNoteBytes());
+
+        if (renderRegion != null) {
+            map.put(RENDER_REGION, renderRegion.toNoteBytes());
+        }
+        if (peakStyle != null) {
+            map.put(PEAK_STYLE, peakStyle.toNoteBytes());
+        }
+        if (style != null) {
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+
+        int[] ints = new int[values.length];
+        for(int i = 0; i < values.length ; i++){
+            ints[i] = Float.floatToIntBits((float) values[i]);
+        }
+        map.put(Keys.DATA, new NoteIntegerArray(ints));
+        
+        return map.toNoteBytes();
+    }
+
+    /***
+     * 
+     * @param region
+     * @param renderRegion optional
+     * @param scrollPos
+     * @param totalItems
+     * @param visibleItems
+     * @param showArrows
+     * @param trackStyle
+     * @param thumbStyle
+     * @return
+     */
+    public static NoteBytesObject drawScrollbar(
+        TerminalRectangle region, TerminalRectangle renderRegion,
+        int scrollPos, int totalItems, int visibleItems,
+        boolean showArrows, TextStyle trackStyle, TextStyle thumbStyle
+    ) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD,          TERMINAL_DRAW_SCROLLBAR);
+        map.put(Keys.REGION,       region.toNoteBytes());
+        if (renderRegion != null) map.put(RENDER_REGION, renderRegion.toNoteBytes());
+        map.put(SCROLL_POS,        scrollPos);
+        map.put(Keys.ITEM_COUNT,   totalItems);
+        map.put(Keys.VISIBLE_ITEMS,visibleItems);
+        map.put(SHOW_ARROWS,       showArrows);
+        if (trackStyle != null) map.put(TRACK_STYLE, trackStyle.toNoteBytes());
+        if (thumbStyle != null) map.put(THUMB_STYLE, thumbStyle.toNoteBytes());
+        return map.toNoteBytes();
+    }
+
+    /**
+     * 
+     * @param region
+     * @param renderRegion optional
+     * @param pixelWidth
+     * @param pixelHeight
+     * @param pixels row-major, 1 bit per pixel, packed
+     * @param style optional
+     * @return
+     */
+    public static NoteBytesObject drawBitmap(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        int pixelWidth,
+        int pixelHeight,
+        byte[] pixels,     
+        TextStyle style
+    ){
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.REGION, region.toNoteBytes());
+        map.put(Keys.CMD, TERMINAL_DRAW_BITMAP);
+        if (renderRegion != null) {
+            map.put(RENDER_REGION, renderRegion.toNoteBytes());
+        }
+        map.put(Keys.WIDTH, pixelWidth);
+        map.put(Keys.HEIGHT, pixelHeight);
+        map.put(Keys.DATA, new NoteBytes(pixels, NoteBytesMetaData.IMAGE_TYPE));
+        if(style != null){
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
+    }
+
+    /**
+     * 
+     * @param region
+     * @param renderRegion optional
+     * @param pixelWidth    chars * 2
+     * @param pixelHeight   chars * 4
+     * @param pixels        row-major, 1 bit per pixel, packed
+     * @param style optional
+     * @return
+     */
+    public static NoteBytesObject drawBrailleBitmap(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        int pixelWidth,   
+        int pixelHeight,
+        byte[] pixels,
+        TextStyle style
+    ){
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.REGION, region.toNoteBytes());
+        map.put(Keys.CMD, TERMINAL_DRAW_BRAILLE_BITMAP);
+        if (renderRegion != null) {
+            map.put(RENDER_REGION, renderRegion.toNoteBytes());
+        }
+        map.put(Keys.WIDTH, pixelWidth);
+        map.put(Keys.HEIGHT, pixelHeight);
+        map.put(Keys.DATA, new NoteBytes(pixels, NoteBytesMetaData.IMAGE_TYPE));
+        if(style != null){
+            map.put(Keys.STYLE, style.toNoteBytes());
+        }
+        return map.toNoteBytes();
+    }
+
+    public static NoteBytesObject drawSextantBitmap(
+        TerminalRectangle region, 
+        TerminalRectangle renderRegion,
+        int pixelWidth, 
+        int pixelHeight,
+        byte[] pixels,
+        TextStyle style
+    ) {
+        NoteBytesMap map = new NoteBytesMap();
+        map.put(Keys.CMD,    TERMINAL_DRAW_SEXTANT_BITMAP);
+        map.put(Keys.REGION, region.toNoteBytes());
+        if (renderRegion != null) map.put(RENDER_REGION, renderRegion.toNoteBytes());
+        map.put(Keys.WIDTH,  pixelWidth);
+        map.put(Keys.HEIGHT, pixelHeight);
+        map.put(Keys.DATA,   new NoteBytes(pixels, NoteBytesMetaData.IMAGE_TYPE));
+        if (style != null) map.put(Keys.STYLE, style.toNoteBytes());
+        return map.toNoteBytes();
+    }
+
+    public static NoteBytesObject shadeRegion(
+        TerminalRectangle region,
+        TerminalRectangle renderRegion,
+        float intensity,   // 0.0=space 0.25=░ 0.5=▒ 0.75=▓ 1.0=█
+        TextStyle style
+    ){
+        return TerminalCommands.shadeRegion(region, renderRegion, TextStyle.shadeCharForIntensity(intensity), style);
+    }
+
+    // ===== PIXEL-LIKE RENDERING CONSTANTS =====
+
     /**
      * Sextant characters for 2x3 "pixel" rendering (6 sub-pixels per cell)
      * Added in Unicode 13.0 for legacy computing symbols

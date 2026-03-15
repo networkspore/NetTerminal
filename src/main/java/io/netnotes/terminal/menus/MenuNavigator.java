@@ -2,7 +2,7 @@ package io.netnotes.terminal.menus;
 
 import java.util.*;
 import io.netnotes.terminal.*;
-import io.netnotes.terminal.TextStyle.BoxStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.components.panels.TerminalVStack;
 import io.netnotes.terminal.components.text.TerminalLabel;
@@ -21,60 +21,54 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 /**
  * MenuNavigator - Component-based menu display and keyboard navigation.
  *
- * Each visual section is a child TerminalRegion with its own renderSelf,
- * so sizing flows naturally through the component tree instead of being
- * calculated manually.
+ * Extends TerminalVStack directly so that addChild/removeChild are
+ * layout-group-aware by default. There is no intermediate container —
+ * this IS the stack, eliminating the stale-layout-group problem that
+ * occurs when a plain TerminalRegion wraps a VStack and calls removeChild
+ * without unregistering from the layout group.
  *
- * Layout (managed by internal TerminalVStack):
- *   MenuHeaderView      – box + title, always 3 rows
- *   MenuBreadcrumbView  – breadcrumb trail, 2 rows (only when nested)
- *   TerminalLabel       – description text (only when present)
- *   TerminalLabel       – ↑ scroll indicator (only when scrolled)
- *   MenuItemView × N    – one per visible menu item, 1 row each
- *   TerminalLabel       – ↓ scroll indicator (only when more items below)
+ * Width is FILL  — the parent (typically a BorderPanel CENTER) gives it
+ *                  real horizontal space; FIT_CONTENT here would collapse
+ *                  to minWidth because FILL children are excluded from the
+ *                  FIT_CONTENT preferred-width sum in TerminalVStack.
+ * Height is FIT_CONTENT — grows to accommodate the visible items.
+ *
+ * Visual layout (children rebuilt dynamically by rebuildComponents):
+ *   MenuHeaderView      – border box + title,   always 3 rows
+ *   MenuBreadcrumbView  – breadcrumb trail,      2 rows  (nested menus only)
+ *   TerminalLabel       – description text              (when present)
+ *   TerminalLabel       – ↑ scroll indicator            (when scrolled)
+ *   MenuItemView × N    – one per visible item,  1 row each
+ *   TerminalLabel       – ↓ scroll indicator            (more items below)
  *   MenuFooterView      – separator + help text, 2 rows
  */
-public class MenuNavigator extends TerminalRegion {
+public class MenuNavigator extends TerminalVStack {
 
     // ===== NAVIGATION STATE =====
 
     private final Stack<MenuContext> navigationStack = new Stack<>();
     private MenuContext currentMenu;
-    private int selectedIndex = 0;
-    private int scrollOffset = 0;
+    private int selectedIndex         = 0;
+    private int scrollOffset          = 0;
     private int horizontalScrollOffset = 0;
 
     private static final int MAX_VISIBLE_ITEMS = 15;
-
-    // ===== COMPONENT TREE =====
-
-    /** Single child that owns all the visual sections. */
-    private final TerminalVStack contentStack;
-
+    private final KeyRunTable keyRunTable;
+    private TextStyle textStyle = TextStyle.NORMAL;
+    private TextStyle focusedStyle = TextStyle.INFO;
+    private LineStyle lineStyle = LineStyle.SINGLE;
     /**
-     * Direct references to the item views currently in the stack so that
-     * a selection change can update only the two affected rows instead of
-     * rebuilding the whole child list.
+     * Typed references to the currently visible item views so that
+     * a selection change can call setSelected() on only the two affected
+     * rows, avoiding a full rebuild on every arrow key press.
      */
     private final List<MenuItemView> currentItemViews = new ArrayList<>();
 
     // ===== KEYBOARD =====
 
-    private EventFilter keyboardFilter = null;
-    private NoteBytesReadOnly keyHandlerId = null;
+    private EventFilter       keyboardFilter = null;
+    private NoteBytesReadOnly keyHandlerId   = null;
 
-    private final KeyRunTable keyRunTable = new KeyRunTable(new NoteBytesRunnablePair[]{
-        new NoteBytesRunnablePair(KeyCodeBytes.UP,        this::handleNavigateUp),
-        new NoteBytesRunnablePair(KeyCodeBytes.DOWN,      this::handleNavigateDown),
-        new NoteBytesRunnablePair(KeyCodeBytes.LEFT,      this::handleScrollLeft),
-        new NoteBytesRunnablePair(KeyCodeBytes.RIGHT,     this::handleScrollRight),
-        new NoteBytesRunnablePair(KeyCodeBytes.ENTER,     this::handleSelectCurrent),
-        new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE,    this::handleBack),
-        new NoteBytesRunnablePair(KeyCodeBytes.PAGE_UP,   this::handlePageUp),
-        new NoteBytesRunnablePair(KeyCodeBytes.PAGE_DOWN, this::handlePageDown),
-        new NoteBytesRunnablePair(KeyCodeBytes.HOME,      this::handleHome),
-        new NoteBytesRunnablePair(KeyCodeBytes.END,       this::handleEnd),
-    });
 
     // ===== STATES =====
 
@@ -88,18 +82,26 @@ public class MenuNavigator extends TerminalRegion {
 
     public MenuNavigator(String name) {
         super(name);
-
-        contentStack = new TerminalVStack(name + "-content");
-        contentStack.setSpacing(0);
-        contentStack.setWidthPreference(SizePreference.FILL);
-        contentStack.setHeightPreference(SizePreference.FIT_CONTENT);
-        addChild(contentStack);
-
-        setWidthPreference(SizePreference.FIT_CONTENT);
+        setSpacing(0);
+        setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FIT_CONTENT);
+    
+        keyRunTable = new KeyRunTable(new NoteBytesRunnablePair[]{
+            new NoteBytesRunnablePair(KeyCodeBytes.UP,        this::handleNavigateUp),
+            new NoteBytesRunnablePair(KeyCodeBytes.DOWN,      this::handleNavigateDown),
+            new NoteBytesRunnablePair(KeyCodeBytes.LEFT,      this::handleScrollLeft),
+            new NoteBytesRunnablePair(KeyCodeBytes.RIGHT,     this::handleScrollRight),
+            new NoteBytesRunnablePair(KeyCodeBytes.ENTER,     this::handleSelectCurrent),
+            new NoteBytesRunnablePair(KeyCodeBytes.ESCAPE,    this::handleBack),
+            new NoteBytesRunnablePair(KeyCodeBytes.PAGE_UP,   this::handlePageUp),
+            new NoteBytesRunnablePair(KeyCodeBytes.PAGE_DOWN, this::handlePageDown),
+            new NoteBytesRunnablePair(KeyCodeBytes.HOME,      this::handleHome),
+            new NoteBytesRunnablePair(KeyCodeBytes.END,       this::handleEnd),
+        });
 
         stateMachine.addState(IDLE);
     }
+
 
     @Override
     protected void setupStateTransitions() {
@@ -111,23 +113,26 @@ public class MenuNavigator extends TerminalRegion {
         });
     }
 
-    // ===== FOCUS – invalidate header/footer so box style updates =====
+    // ===== FOCUS — update header/footer styling =====
 
     @Override
     public void onFocusGained() {
         super.onFocusGained();
-        invalidateHeaderAndFooter();
+        invalidateFocusSensitiveChildren();
     }
 
     @Override
     protected void onFocusLost() {
         super.onFocusLost();
-        invalidateHeaderAndFooter();
+        invalidateFocusSensitiveChildren();
     }
 
-    private void invalidateHeaderAndFooter() {
-        for (TerminalRenderable child : contentStack.getChildren()) {
-            if (child instanceof MenuHeaderView || child instanceof MenuFooterView) {
+    private void invalidateFocusSensitiveChildren() {
+        for (TerminalRenderable child : getChildren()) {
+            if (child instanceof MenuHeaderView
+                || child instanceof MenuFooterView
+                || child instanceof MenuBreadcrumbView
+                || child instanceof MenuItemView) {
                 child.invalidate();
             }
         }
@@ -145,8 +150,8 @@ public class MenuNavigator extends TerminalRegion {
 
         currentMenu = menu;
         currentMenu.setOnChanged(this::onMenuChanged);
-        selectedIndex = 0;
-        scrollOffset = 0;
+        selectedIndex          = 0;
+        scrollOffset           = 0;
         horizontalScrollOffset = 0;
 
         rebuildComponents();
@@ -170,54 +175,49 @@ public class MenuNavigator extends TerminalRegion {
     // ===== COMPONENT BUILDING =====
 
     /**
-     * Clears and rebuilds the entire child component list.
-     * Called on menu change, scroll change, and back navigation.
-     * For simple selection changes use {@link #updateSelection} instead.
+     * Clears all children and rebuilds the component tree for the current
+     * menu + scroll state. Because this object IS the VStack, removeChild
+     * and addChild are layout-group-aware — no stale group entries.
      */
     private void rebuildComponents() {
-        // Remove all children from the content stack
-        for (TerminalRenderable child : new ArrayList<>(contentStack.getChildren())) {
-            contentStack.removeChild(child);
+        for (TerminalRenderable child : new ArrayList<>(getChildren())) {
+            removeChild(child);
         }
         currentItemViews.clear();
 
         if (currentMenu == null) return;
 
-        // -- Header --
-        contentStack.addChild(new MenuHeaderView(getName() + "-header"));
+        // --- Header (always present) ---
+        addChild(new MenuHeaderView(getName() + "-header"));
 
-        // -- Breadcrumb (only when there is navigation history) --
+        // --- Breadcrumb (only when inside a sub-menu) ---
         if (!navigationStack.isEmpty()) {
-            contentStack.addChild(new MenuBreadcrumbView(
-                getName() + "-breadcrumb",
-                buildBreadcrumbText()
-            ));
+            addChild(new MenuBreadcrumbView(
+                getName() + "-breadcrumb", buildBreadcrumbText(), this));
         }
 
-        // -- Description --
+        // --- Description (optional) ---
         String desc = currentMenu.getDescription();
         if (desc != null && !desc.isEmpty()) {
-            TerminalLabel descLabel = new TerminalLabel(getName() + "-desc", desc);
+            TerminalLabel descLabel = new TerminalLabel(getName() + "-desc", desc, textStyle);
             descLabel.setWordWrap(true);
             descLabel.setWidthPreference(SizePreference.FILL);
             descLabel.setHeightPreference(SizePreference.FIT_CONTENT);
-            contentStack.addChild(descLabel);
+            addChild(descLabel);
         }
 
-        // -- Scroll-up indicator --
+        // --- Scroll-up indicator ---
         if (scrollOffset > 0) {
-            TerminalLabel upLabel = new TerminalLabel(getName() + "-scroll-up", "↑ More above");
+            TerminalLabel upLabel = new TerminalLabel(
+                getName() + "-scroll-up", "↑ More above", textStyle);
             upLabel.setTextAlignment(TextAlignment.CENTER);
             upLabel.setWidthPreference(SizePreference.FILL);
-            contentStack.addChild(upLabel);
+            addChild(upLabel);
         }
 
-        // -- Visible menu item rows --
+        // --- Visible item rows ---
         List<MenuContext.MenuItem> allItems = new ArrayList<>(currentMenu.getItems());
-        int visibleEnd = Math.min(scrollOffset + MAX_VISIBLE_ITEMS, allItems.size());
-
-        // The selected index tracks across ALL selectable items; we need the
-        // selectable count for items that come before the visible window.
+        int visibleEnd      = Math.min(scrollOffset + MAX_VISIBLE_ITEMS, allItems.size());
         int selectableIndex = countSelectableBefore(allItems, scrollOffset);
 
         for (int i = scrollOffset; i < visibleEnd; i++) {
@@ -226,40 +226,41 @@ public class MenuNavigator extends TerminalRegion {
             boolean isSelected   = isSelectable && (selectableIndex == selectedIndex);
 
             MenuItemView view = new MenuItemView(
-                getName() + "-item-" + i, item, isSelected, horizontalScrollOffset);
+                getName() + "-item-" + i, item, isSelected, horizontalScrollOffset, this);
             currentItemViews.add(view);
-            contentStack.addChild(view);
+            addChild(view);
 
             if (isSelectable) selectableIndex++;
         }
 
-        // -- Scroll-down indicator --
+        // --- Scroll-down indicator ---
         if (visibleEnd < allItems.size()) {
-            TerminalLabel downLabel = new TerminalLabel(getName() + "-scroll-down", "↓ More below");
+            TerminalLabel downLabel = new TerminalLabel(
+                getName() + "-scroll-down", "↓ More below", textStyle);
             downLabel.setTextAlignment(TextAlignment.CENTER);
             downLabel.setWidthPreference(SizePreference.FILL);
-            contentStack.addChild(downLabel);
+            addChild(downLabel);
         }
 
-        // -- Footer --
-        contentStack.addChild(new MenuFooterView(
+        // --- Footer (always present) ---
+        addChild(new MenuFooterView(
             getName() + "-footer",
-            !navigationStack.isEmpty() || currentMenu.hasParent()
-        ));
+            !navigationStack.isEmpty() || currentMenu.hasParent()));
     }
 
     /**
-     * Targeted update for a selection change within the current visible window.
-     * Only the two affected {@link MenuItemView} instances are touched.
+     * Targeted update for a selection change that doesn't cross a scroll
+     * boundary. Only the two affected MenuItemView instances are touched.
      */
     private void updateSelection(int oldSelectableIndex, int newSelectableIndex) {
+        if (currentMenu == null) return;
         List<MenuContext.MenuItem> allItems = new ArrayList<>(currentMenu.getItems());
         int selectableIndex = countSelectableBefore(allItems, scrollOffset);
 
         for (MenuItemView view : currentItemViews) {
             if (!isSelectable(view.item)) continue;
 
-            boolean wasSelected = (selectableIndex == oldSelectableIndex);
+            boolean wasSelected   = (selectableIndex == oldSelectableIndex);
             boolean isNowSelected = (selectableIndex == newSelectableIndex);
 
             if (wasSelected || isNowSelected) {
@@ -269,7 +270,7 @@ public class MenuNavigator extends TerminalRegion {
         }
     }
 
-    // ===== BREADCRUMB =====
+    // ===== HELPERS =====
 
     private String buildBreadcrumbText() {
         List<String> trail = new ArrayList<>();
@@ -280,8 +281,6 @@ public class MenuNavigator extends TerminalRegion {
         }
         return String.join(" > ", trail);
     }
-
-    // ===== HELPERS =====
 
     private static boolean isSelectable(MenuContext.MenuItem item) {
         return item.type != MenuContext.MenuItemType.SEPARATOR
@@ -307,7 +306,7 @@ public class MenuNavigator extends TerminalRegion {
         if (menu == currentMenu) rebuildComponents();
     }
 
-    // ===== KEYBOARD HANDLER REGISTRATION =====
+    // ===== KEYBOARD =====
 
     private void registerKeyboardHandler() {
         if (keyHandlerId != null) return;
@@ -347,10 +346,8 @@ public class MenuNavigator extends TerminalRegion {
     private void handleNavigateUp() {
         List<MenuContext.MenuItem> selectable = getSelectableItems();
         if (selectable.isEmpty()) return;
-
         int oldIndex = selectedIndex;
         selectedIndex = (selectedIndex - 1 + selectable.size()) % selectable.size();
-
         if (selectedIndex < scrollOffset) {
             scrollOffset = selectedIndex;
             rebuildComponents();
@@ -362,10 +359,8 @@ public class MenuNavigator extends TerminalRegion {
     private void handleNavigateDown() {
         List<MenuContext.MenuItem> selectable = getSelectableItems();
         if (selectable.isEmpty()) return;
-
         int oldIndex = selectedIndex;
         selectedIndex = (selectedIndex + 1) % selectable.size();
-
         if (selectedIndex >= scrollOffset + MAX_VISIBLE_ITEMS) {
             scrollOffset = selectedIndex - MAX_VISIBLE_ITEMS + 1;
             rebuildComponents();
@@ -377,7 +372,6 @@ public class MenuNavigator extends TerminalRegion {
     private void handleSelectCurrent() {
         List<MenuContext.MenuItem> selectable = getSelectableItems();
         if (selectedIndex < 0 || selectedIndex >= selectable.size()) return;
-
         MenuContext.MenuItem selectedItem = selectable.get(selectedIndex);
 
         stateMachine.removeState(DISPLAYING_MENU);
@@ -386,7 +380,6 @@ public class MenuNavigator extends TerminalRegion {
         currentMenu.navigate(selectedItem.name)
             .thenAccept(targetMenu -> {
                 stateMachine.removeState(NAVIGATING);
-
                 if (targetMenu == null) {
                     stateMachine.addState(WAITING_PASSWORD);
                 } else if (targetMenu == currentMenu) {
@@ -405,23 +398,19 @@ public class MenuNavigator extends TerminalRegion {
 
     private void handleBack() {
         if (navigationStack.isEmpty()) return;
-
         currentMenu.setOnChanged(null);
         currentMenu = navigationStack.pop();
         currentMenu.setOnChanged(this::onMenuChanged);
         selectedIndex = 0;
-        scrollOffset = 0;
-
+        scrollOffset  = 0;
         stateMachine.removeState(WAITING_PASSWORD);
         stateMachine.removeState(EXECUTING_ACTION);
         stateMachine.addState(DISPLAYING_MENU);
-
         rebuildComponents();
     }
 
     private void handlePageUp() {
-        List<MenuContext.MenuItem> selectable = getSelectableItems();
-        if (selectable.isEmpty()) return;
+        if (getSelectableItems().isEmpty()) return;
         selectedIndex = Math.max(0, selectedIndex - MAX_VISIBLE_ITEMS);
         scrollOffset  = Math.max(0, scrollOffset  - MAX_VISIBLE_ITEMS);
         rebuildComponents();
@@ -431,8 +420,9 @@ public class MenuNavigator extends TerminalRegion {
         List<MenuContext.MenuItem> selectable = getSelectableItems();
         if (selectable.isEmpty()) return;
         selectedIndex = Math.min(selectable.size() - 1, selectedIndex + MAX_VISIBLE_ITEMS);
-        int maxScroll = Math.max(0, selectable.size() - MAX_VISIBLE_ITEMS);
-        scrollOffset  = Math.min(maxScroll, scrollOffset + MAX_VISIBLE_ITEMS);
+        scrollOffset  = Math.min(
+            Math.max(0, selectable.size() - MAX_VISIBLE_ITEMS),
+            scrollOffset + MAX_VISIBLE_ITEMS);
         rebuildComponents();
     }
 
@@ -453,7 +443,6 @@ public class MenuNavigator extends TerminalRegion {
     private void handleScrollRight() {
         List<MenuContext.MenuItem> selectable = getSelectableItems();
         if (selectable.isEmpty() || selectedIndex >= selectable.size()) return;
-        // Clamp generously; the item view will clamp to text length on render
         horizontalScrollOffset = Math.min(horizontalScrollOffset + 5, 500);
         updateSelection(selectedIndex, selectedIndex);
     }
@@ -470,7 +459,6 @@ public class MenuNavigator extends TerminalRegion {
         if (!stateMachine.hasState(WAITING_PASSWORD)) return;
         stateMachine.removeState(WAITING_PASSWORD);
         stateMachine.addState(NAVIGATING);
-
         currentMenu.navigate(menuItemName)
             .thenAccept(targetMenu -> {
                 stateMachine.removeState(NAVIGATING);
@@ -500,24 +488,64 @@ public class MenuNavigator extends TerminalRegion {
     }
 
     public EventFilter getKeyboardFilter() { return keyboardFilter; }
-
-    public void cleanup() { removeKeyboardHandler(); }
+    public void cleanup()                  { removeKeyboardHandler(); }
 
     // ===== GETTERS =====
 
-    public MenuContext getCurrentMenu()        { return currentMenu; }
-    public boolean hasMenu()                   { return currentMenu != null; }
-    public boolean isDisplayingMenu()          { return stateMachine.hasState(DISPLAYING_MENU); }
-    public boolean isWaitingForPassword()      { return stateMachine.hasState(WAITING_PASSWORD); }
+    public MenuContext getCurrentMenu()   { return currentMenu; }
+    public boolean hasMenu()              { return currentMenu != null; }
+    public boolean isDisplayingMenu()     { return stateMachine.hasState(DISPLAYING_MENU); }
+    public boolean isWaitingForPassword() { return stateMachine.hasState(WAITING_PASSWORD); }
+    public TextStyle getTextStyle() { return textStyle; }
+    public LineStyle getLineStyle() { return lineStyle; }
 
+    
+
+    public TextStyle getFocusedStyle() {
+        return focusedStyle;
+    }
+    
+    public void setFocusedStyle(TextStyle focusedStyle) {
+        TextStyle next = focusedStyle != null ? focusedStyle : TextStyle.INFO;
+        if (this.focusedStyle != next) {
+            this.focusedStyle = next;
+            onStyleChanged();
+        }
+    }
+
+
+    public void setTextStyle(TextStyle textStyle) { 
+        TextStyle next = textStyle != null ? textStyle : TextStyle.NORMAL;
+        if (this.textStyle != next) {
+            this.textStyle = next; 
+            onStyleChanged();
+        }
+    }
+
+    public void setLineStyle(LineStyle lineStyle) { 
+        LineStyle next = lineStyle != null ? lineStyle : LineStyle.SINGLE;
+        if (this.lineStyle != next) {
+            this.lineStyle = next; 
+            onStyleChanged();
+        }
+    }
+
+    private void onStyleChanged() {
+        for (TerminalRenderable child : getChildren()) {
+            if (child instanceof TerminalLabel label) {
+                label.setTextStyle(textStyle);
+            } else {
+                child.invalidate();
+            }
+        }
+    }
     // =========================================================================
     // INNER COMPONENT CLASSES
     // =========================================================================
 
     /**
-     * Renders the titled box at the top of the menu.
-     * Always exactly 3 rows tall.
-     * Non-static so it can read the outer MenuNavigator's focus state for box style.
+     * Titled border box. Always 3 rows.
+     * Non-static: reads hasFocus() from the outer MenuNavigator for box style.
      */
     private class MenuHeaderView extends TerminalRegion {
 
@@ -528,86 +556,91 @@ public class MenuNavigator extends TerminalRegion {
             setMinHeight(3);
         }
 
-        @Override
-        public int getPreferredHeight() { return 3; }
+        @Override public int getPreferredHeight() { return 3; }
 
         @Override
         protected void renderSelf(TerminalBatchBuilder batch) {
             int w = getWidth();
             if (w <= 0 || getHeight() < 3) return;
 
-            // Use outer navigator's focus to pick box style
-            BoxStyle  boxStyle   = MenuNavigator.this.hasFocus() ? BoxStyle.DOUBLE : BoxStyle.SINGLE;
-            TextStyle titleStyle = MenuNavigator.this.hasFocus() ? TextStyle.BOLD  : TextStyle.NORMAL;
+            LineStyle boxStyle = MenuNavigator.this.getLineStyle();
+            TextStyle titleStyle = MenuNavigator.this.hasFocus()
+                ? MenuNavigator.this.getFocusedStyle().copy().bold()
+                : MenuNavigator.this.getTextStyle();
 
-            String title = currentMenu != null && currentMenu.getTitle() != null
-                ? currentMenu.getTitle()
-                : "";
+            String title = (currentMenu != null && currentMenu.getTitle() != null)
+                ? currentMenu.getTitle() : "";
 
             drawBox(batch, 0, 0, w, 3, title, Position.CENTER, boxStyle, titleStyle);
         }
     }
 
     /**
-     * Renders the breadcrumb trail centred on one row, with a blank row below.
-     * Always 2 rows tall.
+     * Centred breadcrumb trail (row 0) plus one blank spacing row (row 1).
+     * Always 2 rows. Static: no outer state needed.
      */
     private static class MenuBreadcrumbView extends TerminalRegion {
         private final String breadcrumb;
+        private final MenuNavigator nav;
 
-        MenuBreadcrumbView(String name, String breadcrumb) {
+        MenuBreadcrumbView(String name, String breadcrumb, MenuNavigator navigator) {
             super(name);
             this.breadcrumb = breadcrumb != null ? breadcrumb : "";
+            this.nav = navigator;
             setWidthPreference(SizePreference.FILL);
             setHeightPreference(SizePreference.FIT_CONTENT);
             setMinHeight(2);
         }
 
-        @Override
-        public int getPreferredHeight() { return 2; }
+        @Override public int getPreferredHeight() { return 2; }
 
         @Override
         protected void renderSelf(TerminalBatchBuilder batch) {
             int w = getWidth();
             if (w <= 0) return;
-
             String text = breadcrumb;
             if (text.length() > w - 4) {
                 text = "..." + text.substring(text.length() - Math.max(0, w - 7));
             }
-            int x = Math.max(0, (w - text.length()) / 2);
-            printAt(batch, x, 0, text, TextStyle.INFO);
-            // Row 1 is intentionally blank (spacing below breadcrumb)
+            TextStyle style = nav.hasFocus() ? nav.getFocusedStyle() : nav.getTextStyle();
+            printAt(batch, Math.max(0, (w - text.length()) / 2), 0, text, style);
+            // row 1 intentionally blank
         }
     }
 
     /**
-     * Renders a single menu item on one row.
-     * Mutable: call {@link #setSelected} to flip selection state without rebuilding.
+     * One menu item row. Mutable via setSelected() for targeted redraws.
+     * Package-private so the outer class can hold a typed list.
      */
     static class MenuItemView extends TerminalRegion {
 
         final MenuContext.MenuItem item;
         private boolean selected;
-        private int horizScroll;
+        private int     horizScroll;
+        private final MenuNavigator nav;
 
-        MenuItemView(String name, MenuContext.MenuItem item,
-                     boolean selected, int horizScroll) {
+        MenuItemView(
+            String name,
+            MenuContext.MenuItem item,
+            boolean selected,
+            int horizScroll,
+            MenuNavigator nav
+        ) {
             super(name);
-            this.item       = item;
-            this.selected   = selected;
+            this.item        = item;
+            this.selected    = selected;
             this.horizScroll = horizScroll;
+            this.nav         = nav;
             setWidthPreference(SizePreference.FILL);
             setHeightPreference(SizePreference.FIT_CONTENT);
             setMinHeight(1);
         }
 
-        @Override
-        public int getPreferredHeight() { return 1; }
+        @Override public int getPreferredHeight() { return 1; }
 
         void setSelected(boolean selected, int horizScroll) {
             if (this.selected != selected || this.horizScroll != horizScroll) {
-                this.selected   = selected;
+                this.selected    = selected;
                 this.horizScroll = horizScroll;
                 invalidate();
             }
@@ -617,7 +650,6 @@ public class MenuNavigator extends TerminalRegion {
         protected void renderSelf(TerminalBatchBuilder batch) {
             int w = getWidth();
             if (w <= 0) return;
-
             switch (item.type) {
                 case SEPARATOR -> renderSeparator(batch, w);
                 case INFO      -> renderInfo(batch, w);
@@ -627,60 +659,54 @@ public class MenuNavigator extends TerminalRegion {
 
         private void renderSeparator(TerminalBatchBuilder batch, int w) {
             int lineW = Math.max(0, w - 4);
-            printAt(batch, 2, 0, "─".repeat(lineW), TextStyle.NORMAL);
+            drawHLine(batch, 2, 0, lineW, nav.getLineStyle(), nav.getTextStyle());
             if (item.description != null && !item.description.isEmpty()) {
                 int labelX = 2 + Math.max(0, (lineW - item.description.length()) / 2);
-                printAt(batch, labelX, 0, " " + item.description + " ", TextStyle.BOLD);
+                printAt(batch, labelX, 0, " " + item.description + " ", nav.getTextStyle().copy().bold());
             }
         }
 
         private void renderInfo(TerminalBatchBuilder batch, int w) {
             String text = item.description != null ? item.description : "";
-            int x = Math.max(0, (w - text.length()) / 2);
-            printAt(batch, x, 0, text, TextStyle.INFO);
+            printAt(batch, Math.max(0, (w - text.length()) / 2), 0, text, nav.getFocusedStyle());
         }
 
         private void renderAction(TerminalBatchBuilder batch, int w) {
             String badge    = item.badge != null ? " [" + item.badge + "]" : "";
             String fullText = (item.description != null ? item.description : "") + badge;
-            int contentW    = Math.max(0, w - 4); // 2-char left pad + 2-char right pad
+            int    contentW = Math.max(0, w - 4);
 
             if (selected) {
                 String indicator = "> ";
                 int    textW     = Math.max(0, contentW - indicator.length());
-
                 String displayText;
                 if (fullText.length() <= textW) {
                     displayText = fullText;
                 } else {
-                    int start = Math.min(horizScroll,
-                        Math.max(0, fullText.length() - textW));
+                    int start = Math.min(horizScroll, Math.max(0, fullText.length() - textW));
                     displayText = fullText.substring(start,
                         Math.min(fullText.length(), start + textW));
                 }
-
-                // Pad to full width so the inverse highlight covers the whole row
                 displayText = String.format("%-" + textW + "s", displayText);
-                printAt(batch, 2, 0, indicator + displayText, TextStyle.INVERSE);
-
+                TextStyle base = nav.hasFocus() ? nav.getFocusedStyle() : nav.getTextStyle();
+                printAt(batch, 2, 0, indicator + displayText, base.copy().inverse());
             } else {
                 String displayText = "  " + truncate(fullText, Math.max(0, contentW - 2));
-                TextStyle style    = item.enabled ? TextStyle.NORMAL : TextStyle.INFO;
-                printAt(batch, 2, 0, displayText, style);
+                printAt(batch, 2, 0, displayText,
+                    item.enabled ? nav.getTextStyle() : nav.getFocusedStyle());
             }
         }
 
         private static String truncate(String text, int max) {
-            if (max <= 0)              return "";
-            if (text.length() <= max)  return text;
+            if (max <= 0)             return "";
+            if (text.length() <= max) return text;
             return text.substring(0, Math.max(0, max - 3)) + "...";
         }
     }
 
     /**
-     * Renders the separator line and keyboard help text at the bottom.
-     * Always exactly 2 rows tall.
-     * Non-static so it can read the outer MenuNavigator's focus state for text style.
+     * Horizontal separator (row 0) + keyboard help text (row 1). Always 2 rows.
+     * Non-static: reads hasFocus() from the outer MenuNavigator for help text style.
      */
     private class MenuFooterView extends TerminalRegion {
         private final boolean hasBack;
@@ -693,27 +719,26 @@ public class MenuNavigator extends TerminalRegion {
             setMinHeight(2);
         }
 
-        @Override
-        public int getPreferredHeight() { return 2; }
+        @Override public int getPreferredHeight() { return 2; }
 
         @Override
         protected void renderSelf(TerminalBatchBuilder batch) {
             int w = getWidth();
             if (w <= 0) return;
-
-            drawHLine(batch, 0, 0, w);
-
+            TextStyle borderStyle = MenuNavigator.this.hasFocus()
+                ? MenuNavigator.this.getFocusedStyle()
+                : MenuNavigator.this.getTextStyle();
+            drawHLine(batch, 0, 0, w, lineStyle, borderStyle);
             String help = hasBack
                 ? "↑↓: Navigate  ←→: Scroll  Enter: Select  ESC: Back  Home/End: Jump"
                 : "↑↓: Navigate  ←→: Scroll  Enter: Select  Home/End: Jump";
-
             if (help.length() > w - 4) {
                 help = help.substring(0, Math.max(0, w - 7)) + "...";
             }
-
-            int helpX = Math.max(0, (w - help.length()) / 2);
-            TextStyle style = MenuNavigator.this.hasFocus() ? TextStyle.INFO : TextStyle.NORMAL;
-            printAt(batch, helpX, 1, help, style);
+            TextStyle style = MenuNavigator.this.hasFocus()
+                ? MenuNavigator.this.getFocusedStyle()
+                : MenuNavigator.this.getTextStyle();
+            printAt(batch, Math.max(0, (w - help.length()) / 2), 1, help, style);
         }
     }
 }

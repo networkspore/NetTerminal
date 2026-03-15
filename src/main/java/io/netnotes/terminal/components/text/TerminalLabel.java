@@ -3,8 +3,6 @@ package io.netnotes.terminal.components.text;
 import io.netnotes.engine.ui.LabelTruncation;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
-import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.components.TerminalRegion;
@@ -91,26 +89,40 @@ public class TerminalLabel extends TerminalRegion {
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
         if (text == null || text.isEmpty()) return;
-        Log.logMsg("[TerminalLabel] rendering: " + text, LogLevel.IMPORTANT);
-        int width = getWidth();
+
+        int width  = getWidth();
         int height = getHeight();
         if (width <= 0 || height <= 0) return;
-        
-        if (wordWrap && height > 1) {
-            // Use drawTextBlock for word wrapping
-            drawTextBlock(batch, 0, 0, width, height, text, alignment, style);
-        } else {
-            // Single line or no wrapping
-            String displayText = truncateText(text, width);
-            
-            int x = switch (alignment) {
-                case CENTER -> Math.max(0, (width - displayText.length()) / 2);
-                case RIGHT -> Math.max(0, width - displayText.length());
-                default -> 0;
-            };
-            
-            printAt(batch, x, 0, displayText, style);
+
+        String[] lines = text.split("\\R", -1);
+
+        int y = 0;
+        for (String line : lines) {
+            if (y >= height) break;
+
+            if (wordWrap && line.length() > width) {
+                // Soft-wrap this line across however many rows remain
+                while (!line.isEmpty() && y < height) {
+                    String chunk = line.length() <= width ? line : line.substring(0, width);
+                    printAligned(batch, chunk, y, width);
+                    line = line.length() <= width ? "" : line.substring(width);
+                    y++;
+                }
+            } else {
+                String displayText = truncateText(line, width);
+                printAligned(batch, displayText, y, width);
+                y++;
+            }
         }
+    }
+
+    private void printAligned(TerminalBatchBuilder batch, String text, int y, int width) {
+        int x = switch (alignment) {
+            case CENTER -> Math.max(0, (width - text.length()) / 2);
+            case RIGHT  -> Math.max(0, width - text.length());
+            default     -> 0;
+        };
+        printAt(batch, x, y, text, style);
     }
     
     private String truncateText(String text, int maxWidth) {

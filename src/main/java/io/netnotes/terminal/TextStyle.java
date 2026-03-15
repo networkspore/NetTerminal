@@ -27,21 +27,21 @@ public class TextStyle {
         BRIGHT_BLACK, BRIGHT_RED, BRIGHT_GREEN, BRIGHT_YELLOW,
         BRIGHT_BLUE, BRIGHT_MAGENTA, BRIGHT_CYAN, BRIGHT_WHITE
     }
-
+    
     /**
      * Box drawing styles for component borders
      */
-    public enum BoxStyle {
-        SINGLE(new char[]{'─', '│', '┌', '┐', '└', '┘'}),
-        DOUBLE(new char[]{'═', '║', '╔', '╗', '╚', '╝'}),
-        ROUNDED(new char[]{'─', '│', '╭', '╮', '╰', '╯'}),
-        THICK(new char[]{'━', '┃', '┏', '┓', '┗', '┛'}),
-        // ASCII fallback for limited terminal support
-        ASCII(new char[]{'-', '|', '+', '+', '+', '+'});
+    public enum LineStyle {
+        SINGLE(new char[]{'─','│','┌','┐','└','┘','├','┤','┬','┴','┼'}),
+        DOUBLE(new char[]{'═','║','╔','╗','╚','╝','╠','╣','╦','╩','╬'}),
+        DOUBLE_SINGLE(new char[]{'═','│','╒','╕','╘','╛','╞','╡','╤','╧','╪'}),
+        ROUNDED(new char[]{'─','│','╭','╮','╰','╯','├','┤','┬','┴','┼'}),
+        THICK(new char[]{'━','┃','┏','┓','┗','┛','┣','┫','┳','┻','╋'}),
+        ASCII(new char[]{'-','|','+','+','+','+','+','+','+','+','+'});
         
         private final char[] chars;
         
-        BoxStyle(char[] chars) {
+        LineStyle(char[] chars) {
             this.chars = chars;
         }
         
@@ -49,13 +49,229 @@ public class TextStyle {
             return chars;
         }
         
-        public char horizontal() { return chars[0]; }
-        public char vertical() { return chars[1]; }
-        public char topLeft() { return chars[2]; }
-        public char topRight() { return chars[3]; }
-        public char bottomLeft() { return chars[4]; }
-        public char bottomRight() { return chars[5]; }
+        public char horizontal()    { return chars[0]; }
+        public char vertical()      { return chars[1]; }
+        public char topLeft()       { return chars[2]; }
+        public char topRight()      { return chars[3]; }
+        public char bottomLeft()    { return chars[4]; }
+        public char bottomRight()   { return chars[5]; }
+        public char leftTee()       { return chars[6]; }   // ├
+        public char rightTee()      { return chars[7]; }   // ┤
+        public char topTee()        { return chars[8]; }   // ┬
+        public char bottomTee()     { return chars[9]; }   // ┴
+        public char cross()         { return chars[10]; }  // ┼
     }
+
+
+    public enum Quadrant {
+        BLANK(0b0000, ' '),                // 
+        LOWER_RIGHT(0b0001, 0x2597),       // ▗
+        LOWER_LEFT(0b0010,0x2596),         //  ▖
+        LOWER_HALF(0b0011,0x2584),         //  ▄
+        UPPER_RIGHT(0b0100,0x259D),        //  ▝
+        RIGHT_HALF(0b0101,0x2590),         //  ▐
+        DIAGONAL_LR_UL(0b0110,0x259E),     //  ▞
+        THREE_QUARTERS_LR(0b0111,0x259F),  //  ▟
+        UPPER_LEFT(0b1000,0x2598),         //  ▘
+        DIAGONAL_LL_UR(0b1001,0x259A),     //  ▚
+        LEFT_HALF(0b1010,0x258C),          //  ▌
+        THREE_QUARTERS_LL(0b1011,0x2599),  //  ▙
+        UPPER_HALF(0b1100,0x2580),         //  ▀
+        THREE_QUARTERS_UR(0b1101,0x259C),  //  ▜
+        THREE_QUARTERS_UL(0b1110,0x259B),  //  ▛
+        FULL(0b1111,0x2588);               //  █
+
+        private final int codepoint;
+        private static final Quadrant[] QUADRANT_LOOKUP = {
+            BLANK,
+            LOWER_RIGHT,
+            LOWER_LEFT,
+            LOWER_HALF,
+            UPPER_RIGHT,
+            RIGHT_HALF,
+            DIAGONAL_LR_UL,
+            THREE_QUARTERS_LR,
+            UPPER_LEFT,
+            DIAGONAL_LL_UR,
+            LEFT_HALF,
+            THREE_QUARTERS_LL,
+            UPPER_HALF,
+            THREE_QUARTERS_UR,
+            THREE_QUARTERS_UL,
+            FULL
+        };
+
+        Quadrant(int mask, int codepoint) {
+            this.codepoint = codepoint;
+        }
+
+        public int getCodepoint() {
+            return codepoint;
+        }
+
+        public char toChar() {
+            return (char) codepoint;
+        }
+
+        public static Quadrant quadrantFromMask(int mask) {
+            return QUADRANT_LOOKUP[mask & 0xF];
+        }
+    }
+
+    public static int shadeCharForIntensity(float intensity) {
+        if (intensity < 0.2f) return ' ';
+        if (intensity < 0.45f) return '░';
+        if (intensity < 0.7f)  return '▒';
+        if (intensity < 0.95f) return '▓';
+        return '█';
+    }
+
+    public enum Sextant {
+        
+        // ── Blank / full ──────────────────────────────────────────────────────────
+        BLANK       (0b000000, ' '),        //
+        FULL        (0b111111, -1),     
+
+        // ── Single sub-pixels ─────────────────────────────────────────────────────
+        TL          (0b000001, 0x1FB00),    // 🬀  top-left
+        TR          (0b000010, 0x1FB01),    // 🬁  top-right
+        ML          (0b000100, 0x1FB03),    // 🬃  middle-left
+        MR          (0b001000, 0x1FB07),    // 🬇  middle-right
+        BL          (0b010000, 0x1FB0F),    // 🬏  bottom-left
+        BR          (0b100000, 0x1FB1E),    // 🬞  bottom-right
+
+        // ── Full rows ─────────────────────────────────────────────────────────────
+        TOP_ROW     (0b000011, 0x1FB02),    // 🬂  TL+TR
+        MID_ROW     (0b001100, 0x1FB0B),    // 🬋  ML+MR
+        BOT_ROW     (0b110000, 0x1FB2D),    // 🬭  BL+BR
+
+        // ── Two-row bands ─────────────────────────────────────────────────────────
+        TOP_TWO     (0b001111, 0x1FB0E),    // 🬎  TL+TR+ML+MR  (top 4 of 6)
+        BOT_TWO     (0b111100, 0x1FB39),    // 🬹  ML+MR+BL+BR  (bottom 4 of 6)
+        OUTER_ROWS  (0b110011, 0x1FB30),    // 🬰  TL+TR+BL+BR  (top and bottom, no middle)
+
+        // ── Column pairs (partial — full columns use ▌ and ▐) ────────────────────
+        // LEFT_COL (0b010101) → U+258C ▌  not a sextant — already in Unicode
+        // RIGHT_COL(0b101010) → U+2590 ▐  not a sextant — already in Unicode
+
+        TL_ML       (0b000101, 0x1FB04),    // 🬄  left column, top two rows
+        TR_MR       (0b001010, 0x1FB09),    // 🬉  right column, top two rows
+        ML_BL       (0b010100, 0x1FB13),    // 🬓  left column, bottom two rows
+        MR_BR       (0b101000, 0x1FB26),    // 🬦  right column, bottom two rows
+        TL_BL       (0b010001, 0x1FB10),    // 🬐  left column, top + bottom (skip middle)
+        TR_BR       (0b100010, 0x1FB20),    // 🬠  right column, top + bottom (skip middle)
+
+        // ── Diagonal pairs ────────────────────────────────────────────────────────
+        TL_MR       (0b001001, 0x1FB08),    // 🬈  top-left + middle-right
+        TR_ML       (0b000110, 0x1FB05),    // 🬅  top-right + middle-left
+        ML_BR       (0b100100, 0x1FB22),    // 🬢  middle-left + bottom-right
+        MR_BL       (0b011000, 0x1FB16),    // 🬖  middle-right + bottom-left
+        TL_BR       (0b100001, 0x1FB1F),    // 🬟  top-left + bottom-right (long diagonal)
+        TR_BL       (0b010010, 0x1FB11),    // 🬑  top-right + bottom-left (long diagonal)
+
+        // ── Corners — three filled, one missing ───────────────────────────────────
+        ALL_BUT_BR  (0b011111, 0x1FB1D),    // 🬝  everything except bottom-right
+        ALL_BUT_BL  (0b101111, 0x1FB2C),    // 🬬  everything except bottom-left
+        ALL_BUT_TR  (0b110111, 0x1FB34),    // 🬴  everything except top-right
+        ALL_BUT_TL  (0b111110, 0x1FB3B),    // 🬻  everything except top-left
+        ALL_BUT_MR  (0b110101, 0x1FB32),    // 🬲  everything except middle-right
+        ALL_BUT_ML  (0b111010, 0x1FB37);    // 🬷  everything except middle-left
+
+        // ─────────────────────────────────────────────────────────────────────────
+
+        private final int mask;
+        private final int codepoint;
+
+        public static final int FULL_MASK = 0b111111;
+        public static final int BLANK_MASK = 0b000000;
+        public static final int FILL_SENTINAL = -1;
+
+        Sextant(int mask, int codepoint) {
+            this.mask      = mask;
+            this.codepoint = codepoint;
+        }
+
+        public int mask()       { return mask; }
+        public int codepoint()  { return codepoint; }
+
+        public String glyph() {
+            return new String(Character.toChars(codepoint));
+        }
+
+        // ── Static lookup table — converts any 6-bit mask to a codepoint ──────────
+
+        /** Codepoints for all 64 possible 6-bit masks (0b000000–0b111111).
+         *  0b010101 and 0b101010 resolve to their pre-existing Unicode chars. */
+        private static final int[] CODEPOINTS = buildTable();
+
+        /**
+         * Sextant display width contract:
+         *
+         * DOUBLE-WIDTH (safe for bitmap grids):
+         *   All entries with codepoints in U+1FB00–U+1FB3B
+         *
+         * SINGLE-WIDTH (cannot be mixed into double-width grids):
+         *   BLANK_MASK  → space, or background fill
+         *   FULL_MASK   → background fill only (no safe glyph exists)
+         *   0b010101    → U+258C ▌
+         *   0b101010    → U+2590 ▐
+         *
+         * The drawBrailleBitmap / drawSextantBitmap command must handle the
+         * FULL_SENTINEL and BLANK cases as fillRegion calls rather than printAt.
+         */
+        private static int[] buildTable() {
+            int[] table = new int[64];
+            table[0b000000] = 0;           // space / transparent — caller chooses
+            table[0b111111] = -1; // full — must be rendered as filled cell, not a char
+
+            table[0b010101] = 0x258C;      // ▌ left half block  (single-width — same caveat)
+            table[0b101010] = 0x2590;      // ▐ right half block (single-width — same caveat)
+
+            int codepoint = 0x1FB00;
+            for (int mask = 1; mask <= 62; mask++) {
+                if (mask == 0b010101 || mask == 0b101010 || mask == 0b111111) continue;
+                table[mask] = codepoint++;
+            }
+            return table;
+        }
+
+        public static boolean requiresFill(int mask) {
+            return CODEPOINTS[mask & 0x3F] == FILL_SENTINAL;
+        }
+
+        public static boolean isBlank(int mask) {
+            return (mask & 0x3F) == 0;
+        }
+
+        /** Returns the codepoint for any 6-bit sextant mask.
+         *  Callers can OR together bit constants (TL.mask() | BR.mask() etc.)
+         *  and resolve to a character without needing a named enum entry. */
+        public static int codepointForMask(int mask) {
+            if (mask < 0 || mask > 63)
+                throw new IllegalArgumentException("Sextant mask must be 0–63, got: " + mask);
+            return CODEPOINTS[mask];
+        }
+
+        /** Returns the glyph string for any 6-bit sextant mask. */
+        public static String glyphForMask(int mask) {
+            return new String(Character.toChars(codepointForMask(mask)));
+        }
+
+        /** OR the masks of the given values and return the resulting codepoint.
+         *  Example: Sextant.combine(TL, MR, BL) → codepoint for 🬉 */
+        public static int combine(Sextant... parts) {
+            int mask = 0;
+            for (Sextant s : parts) mask |= s.mask;
+            return codepointForMask(mask);
+        }
+
+        /** OR the masks of the given values and return the resulting glyph. */
+        public static String combineGlyph(Sextant... parts) {
+            return new String(Character.toChars(combine(parts)));
+        }
+    }
+ 
+
     public static final NoteBytesMap NORMAL_BYTES = new TextStyle().toNoteBytes();
 
     /**

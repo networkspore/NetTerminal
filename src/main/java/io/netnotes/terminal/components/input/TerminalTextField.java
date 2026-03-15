@@ -101,7 +101,7 @@ public class TerminalTextField extends TerminalRegion {
         super.onFocusGained();
         // Restore cursor position when gaining focus
         ensureCursorVisible();
-        notifyContentChanged();
+        invalidate();
     }
     
     @Override
@@ -165,9 +165,35 @@ public class TerminalTextField extends TerminalRegion {
         this.onChange = handler;
         return this;
     }
+
+    
     
     // ===== TEXT MANAGEMENT =====
     
+    public Consumer<String> getOnComplete() {
+        return onComplete;
+    }
+
+    public void setOnComplete(Consumer<String> onComplete) {
+        this.onComplete = onComplete;
+    }
+
+    public Consumer<String> getOnEscape() {
+        return onEscape;
+    }
+
+    public void setOnEscape(Consumer<String> onEscape) {
+        this.onEscape = onEscape;
+    }
+
+    public Consumer<String> getOnChange() {
+        return onChange;
+    }
+
+    public void setOnChange(Consumer<String> onChange) {
+        this.onChange = onChange;
+    }
+
     public String getText() {
         return buffer.toString();
     }

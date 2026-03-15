@@ -89,7 +89,7 @@ public class TerminalHStack extends TerminalRegion {
     public void setSpacing(int spacing) {
         if (this.spacing != spacing) {
             this.spacing = Math.max(0, spacing);
-            notifyContentChanged();
+            requestLayoutUpdate();
         }
     }
     
@@ -101,7 +101,7 @@ public class TerminalHStack extends TerminalRegion {
             this.insets.getBottom() != clamped ||
             this.insets.getLeft() != clamped) {
             this.insets.setAll(clamped);
-            notifyContentChanged();
+            requestLayoutUpdate();
         }
     }
 
