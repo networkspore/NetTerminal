@@ -4,17 +4,12 @@ import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.*;
 import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 /**
- * TerminalProgressBar - Enhanced progress bar with color support
- * 
- * FEATURES:
- * - Multiple visual styles
- * - Custom colors for filled/empty portions
- * - Optional label and percentage display
- * - Vertical or horizontal orientation
+ * TerminalProgressBar - Single-line progress display with optional percentage text.
  */
 public class TerminalProgressBar extends TerminalRegion {
-    public final static int MIN_WIDTH = 8;
+    public final static int MIN_SIZE = 5;
     public enum Style {
         CLASSIC,    // |25%|=====-----|
         BLOCKS,     // [█████░░░░░] 25%
@@ -27,8 +22,7 @@ public class TerminalProgressBar extends TerminalRegion {
     private final TerminalInsets insets = new TerminalInsets();
     
     private double currentPercent = 0;
-    private String label = null;
-    private final Style style;
+    private Style style;
     private final Orientation orientation;
     private boolean showPercentage = true;
     
@@ -51,32 +45,28 @@ public class TerminalProgressBar extends TerminalRegion {
         super(name);
         this.style = style;
         this.orientation = orientation;
-        setMinWidth(MIN_WIDTH);
-        setMinHeight(1);
+
+        if(orientation == Orientation.VERTICAL){
+            setMinSize(1, MIN_SIZE);
+       
+        }else{
+            setMinSize(MIN_SIZE, 1);
+        }
+      
         setWidthPreference(SizePreference.STATIC);
         setHeightPreference(SizePreference.STATIC);
     }
 
     public TerminalProgressBar(Builder builder){
         this(builder.name, builder.style, builder.orientation);
-        this.label = builder.label;
         this.showPercentage = builder.showPercentage;
-        setMinWidth(builder.minWidth);
-        setMinHeight(builder.minHeight);
+        
         setBounds(builder.x, builder.y, builder.width, builder.height);
-        updatePercent(builder.initialPercent);
+        updatePercentDouble(builder.initialPercent);
     }
     
     // ===== CONFIGURATION =====
-    
-    public void setLabel(String label) {
-        if ((this.label == null && label != null) || 
-            (this.label != null && !this.label.equals(label))) {
-            this.label = label;
-            invalidate();
-        }
-    }
-    
+
     public void setShowPercentage(boolean show) {
         if (this.showPercentage != show) {
             this.showPercentage = show;
@@ -100,41 +90,7 @@ public class TerminalProgressBar extends TerminalRegion {
     }
     
 
-    @Override
-    public int getPreferredWidth() {
-        SizePreference pref = getWidthPreference();
-        
-        // Handle STATIC - delegate to parent which uses region.getWidth()
-        if (pref == SizePreference.STATIC) {
-            return super.getPreferredWidth();
-        }
-        
-        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinWidth();
-        }
    
-        return getMinWidth();
-        
-    }
-
-    @Override
-    public int getPreferredHeight() {
-        SizePreference pref = getHeightPreference();
-        
-        // Handle STATIC - delegate to parent which uses region.getHeight()
-        if (pref == SizePreference.STATIC) {
-            return super.getPreferredHeight();
-        }
-        
-        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinHeight();
-        }
-
-
-        return Math.max(getMinHeight(), 1 + getInsets().getVertical());
-    }
     
     
     @Override
@@ -142,45 +98,35 @@ public class TerminalProgressBar extends TerminalRegion {
         int width = getWidth();
         int height = getHeight();
         if (width <= 0 || height <= 0) return;
-        int drawWidth = Math.max (getMinWidth() - insets.getHorizontal(), width - insets.getHorizontal());
-        int drawHeight = Math.max (getMinHeight() - insets.getVertical(), height - insets.getVertical());
+        int drawX = insets.getLeft();
+        int drawY = insets.getTop();
+        int drawWidth = width - insets.getHorizontal();
+        int drawHeight = height - insets.getVertical();
+        if (drawWidth <= 0 || drawHeight <= 0) return;
 
-        if (style == Style.SMOOTH) {
-            
-          
-
-            drawProgressBar(batch, insets.getLeft(), insets.getTop(),drawWidth , drawHeight, 
-                currentPercent / 100.0, filledStyle, emptyStyle);
-            
-            // Overlay label/percentage if needed
-            if (label != null || showPercentage) {
-                String text = buildOverlayText();
-                int x = (width - text.length()) / 2;
-                int y = height / 2;
-                printAt(batch, x, y, text, textStyle);
-            }
-        } else if (orientation == Orientation.HORIZONTAL) {
-            renderHorizontal(batch, drawWidth, drawHeight);
+        if (orientation == Orientation.HORIZONTAL) {
+            renderHorizontal(batch, drawX, drawY, drawWidth, drawHeight);
+        } else if (style == Style.SMOOTH) {
+            drawProgressBar(batch, drawX, drawY, drawWidth, drawHeight,
+                currentPercent, filledStyle, emptyStyle);
         } else {
-            renderVertical(batch, drawWidth, drawHeight);
+            renderVertical(batch, drawX, drawY, drawWidth, drawHeight);
         }
     }
     
-    private void renderHorizontal(TerminalBatchBuilder batch, int width, int height) {
-        String bar = generateHorizontalBar(currentPercent, width);
-        int y = height / 2;
-        printAt(batch, 0, y, bar, TextStyle.NORMAL);
-        
-        // Label on line above if present
-        if (label != null && height > 1) {
-            int x = (width - label.length()) / 2;
-            printAt(batch, Math.max(0, x), y - 1, label, textStyle);
+    private void renderHorizontal(TerminalBatchBuilder batch, int x, int y, int width, int height) {
+        int row = y + Math.max(0, (height - 1) / 2);
+        if (style == Style.SMOOTH) {
+            renderSmoothHorizontal(batch, x, row, width);
+            return;
         }
+
+        renderStyledHorizontal(batch, x, row, width);
     }
     
-    private void renderVertical(TerminalBatchBuilder batch, int width, int height) {
-        int pct = (int) Math.max(0, Math.min(100, currentPercent));
-        int filled = (int) ((pct / 100.0) * height);
+    private void renderVertical(TerminalBatchBuilder batch, int x, int y, int width, int height) {
+        double pct = Math.max(0.0, Math.min(1.0, currentPercent));
+        int filled = (int) (pct * height);
         
         String fillChar = switch (style) {
             case BLOCKS -> "█";
@@ -195,30 +141,28 @@ public class TerminalProgressBar extends TerminalRegion {
         };
         
         // Draw from bottom to top
-        for (int y = 0; y < height; y++) {
-            int invertedY = height - 1 - y;
-            String ch = (y < filled) ? fillChar : emptyChar;
-            TextStyle style = (y < filled) ? filledStyle : emptyStyle;
-            printAt(batch, 0, invertedY, ch, style);
+        for (int row = 0; row < height; row++) {
+            int invertedY = y + (height - 1 - row);
+            String ch = (row < filled) ? fillChar : emptyChar;
+            TextStyle style = (row < filled) ? filledStyle : emptyStyle;
+            printAt(batch, x, invertedY, ch, style);
         }
         
         // Percentage overlay
         if (showPercentage && width > 3) {
-            String pctText = pct + "%";
-            int y = height / 2;
-            int x = (width - pctText.length()) / 2;
-            printAt(batch, Math.max(0, x), y, pctText, textStyle);
+            String pctText = getPercentText();
+            int row = y + (height / 2);
+            int textX = x + Math.max(0, (width - pctText.length()) / 2);
+            printAt(batch, textX, row, pctText, textStyle);
         }
     }
     
-    private String generateHorizontalBar(double percent, int width) {
-        int pct = (int) Math.max(0, Math.min(100, percent));
-        
-        // Calculate bar width (reserve space for percentage if shown)
-        int reservedSpace = showPercentage ? 5 : 0; // " 25%"
-        int barWidth = Math.max(1, width - reservedSpace - 2); // -2 for brackets
-        int filled = (int) ((pct / 100.0) * barWidth);
-        
+    private void renderStyledHorizontal(TerminalBatchBuilder batch, int x, int y, int width) {
+        int pct = (int) Math.max(0, Math.min(1, currentPercent));
+        String percentText = showPercentage ? " " + getPercentText() : "";
+        int barWidth = Math.max(1, width - percentText.length() - 2);
+        int filled = (int) (pct * barWidth);
+
         String fillChar = switch (style) {
             case BLOCKS -> "█";
             case SHADED -> "▓";
@@ -232,57 +176,89 @@ public class TerminalProgressBar extends TerminalRegion {
             case ARROWS -> "-";
             default -> "-";
         };
-        
-        String bar = fillChar.repeat(filled) + emptyChar.repeat(barWidth - filled);
-        
-        if (style == Style.CLASSIC) {
-            return String.format("|%s|%s", bar, showPercentage ? String.format(" %2d%%", pct) : "");
-        } else {
-            return String.format("[%s]%s", bar, showPercentage ? String.format(" %2d%%", pct) : "");
+
+        String leftCap = style == Style.CLASSIC ? "|" : "[";
+        String rightCap = style == Style.CLASSIC ? "|" : "]";
+
+        printAt(batch, x, y, leftCap, textStyle);
+        if (filled > 0) {
+            printAt(batch, x + 1, y, fillChar.repeat(filled), filledStyle);
+        }
+        if (barWidth - filled > 0) {
+            printAt(batch, x + 1 + filled, y, emptyChar.repeat(barWidth - filled), emptyStyle);
+        }
+        printAt(batch, x + 1 + barWidth, y, rightCap, textStyle);
+        if (!percentText.isEmpty()) {
+            printAt(batch, x + 2 + barWidth, y, percentText, textStyle);
         }
     }
-    
-    private String buildOverlayText() {
-        if (label != null && showPercentage) {
-            return label + " " + (int)currentPercent + "%";
-        } else if (label != null) {
-            return label;
-        } else if (showPercentage) {
-            return (int)currentPercent + "%";
+
+    private void renderSmoothHorizontal(TerminalBatchBuilder batch, int x, int y, int width) {
+        String percentText = showPercentage ? " " + getPercentText() : "";
+        int barWidth = Math.max(0, width - percentText.length());
+
+        if (barWidth > 0) {
+            drawProgressBar(batch, x, y, barWidth, 1, currentPercent, filledStyle, emptyStyle);
         }
-        return "";
+        if (!percentText.isEmpty()) {
+            int textX = barWidth > 0 ? x + barWidth : x;
+            printAt(batch, textX, y, percentText, textStyle);
+        }
+    }
+
+    public String getProgressNumberString(){
+        return String.format("%.1f",currentPercent * 100.0);
+    }
+
+    private String getPercentText() {
+        return getProgressNumberString() + "%";
     }
     
     // ===== STATE UPDATES =====
-    
-    public void updatePercent(double percent) {
-        double clamped = Math.max(0, Math.min(100, percent));
+    /**
+     * 
+     * @param percent 0.0 - 1.0
+     */
+    public void updatePercentDouble(double percent) {
+        double clamped = Math.max(0, Math.min(1, percent));
         if (this.currentPercent != clamped) {
             this.currentPercent = clamped;
             invalidate();
         }
     }
+
+    public void setProgress(double percent){
+        updatePercentDouble(percent);
+    }
     
-    public void complete() { updatePercent(100); }
-    public void reset() { updatePercent(0); }
+    public void complete() { updatePercentDouble(1); }
+    public void reset() { updatePercentDouble(0); }
     
-    public void increment(double delta) { updatePercent(currentPercent + delta); }
-    public void decrement(double delta) { updatePercent(currentPercent - delta); }
+    public void incrementDouble(double delta) { updatePercentDouble(currentPercent + delta); }
+    public void decrementDouble(double delta) { updatePercentDouble(currentPercent - delta); }
     
+
+    public void incrementInt(int delta) { updatePercentDouble(currentPercent + (delta/100.0)); }
+    public void decrementInt(int delta) { updatePercentDouble(currentPercent - (delta/100.0)); }
     // ===== GETTERS =====
     
     public double getCurrentPercent() { return currentPercent; }
-    public String getLabel() { return label; }
     public Style getStyle() { return style; }
     public Orientation getOrientation() { return orientation; }
     public boolean isComplete() { return currentPercent >= 100; }
-    public double getFraction() { return currentPercent / 100.0; }
+
     
+
+    public void setProgressStyle(Style style){
+        this.style = style;
+        invalidate();
+    }
 
     
     @Override
-    public void setMinWidth(int minWidth) {
-        super.setMinWidth(Math.max(minWidth, MIN_WIDTH));
+    public void setMinSize(int minWidth, int minHeight) {
+        super.setMinWidth(Math.max(minWidth, 1));
+        super.setMinHeight(Math.max(minHeight, MIN_SIZE));
     }
 
     @Override
@@ -318,17 +294,15 @@ public class TerminalProgressBar extends TerminalRegion {
         protected Style style = Style.SMOOTH;
         protected Orientation orientation = Orientation.HORIZONTAL;
         protected double initialPercent = 0;
-        protected String label = null;
         protected boolean showPercentage = true;
         protected int x = 0, y = 0, width = 20, height = 1;
-        protected int minWidth = MIN_WIDTH;
+        protected int minWidth = MIN_SIZE;
         protected int minHeight = 1;
         
         public Builder name(String name) { this.name = name; return this; }
         public Builder style(Style style) { this.style = style; return this; }
         public Builder orientation(Orientation orient) { this.orientation = orient; return this; }
         public Builder percent(double pct) { this.initialPercent = pct; return this; }
-        public Builder label(String label) { this.label = label; return this; }
         public Builder showPercentage(boolean show) { this.showPercentage = show; return this; }
         public Builder position(int x, int y) { this.x = x; this.y = y; return this; }
         public Builder size(int width, int height) { this.width = width; this.height = height; return this; }
@@ -336,11 +310,44 @@ public class TerminalProgressBar extends TerminalRegion {
             this.x = x; this.y = y; this.width = width; this.height = height;
             return this;
         }
-        public Builder minWidth(int minWidth) { this.minWidth = Math.max(minWidth, MIN_WIDTH); return this; }
+        public Builder minWidth(int minWidth) { this.minWidth = Math.max(minWidth, MIN_SIZE); return this; }
         public Builder minHeight(int minHeight) { this.minHeight = Math.max(1, minHeight); return this; }
         public TerminalProgressBar build() {
             return new TerminalProgressBar(this);
         }
     }
 
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int measuredWidth = getWidthPreference() == SizePreference.FIT_CONTENT
+            ? measureContentWidth()
+            : super.getMinWidth() + insets.getHorizontal();
+
+        int measuredHeight = getHeightPreference() == SizePreference.FIT_CONTENT
+            ? measureContentHeight()
+            : super.getMinHeight() + insets.getVertical();
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
+    }
+
+    private int measureContentWidth() {
+        int contentWidth;
+        if (orientation == Orientation.VERTICAL) {
+            contentWidth = showPercentage ? Math.max(1, getPercentText().length()) : 1;
+        } else {
+            int barWidth = switch (style) {
+                case CLASSIC, BLOCKS -> 3;
+                default -> 1;
+            };
+            contentWidth = barWidth + (showPercentage ? 1 + getPercentText().length() : 0);
+        }
+
+        return Math.max(super.getMinWidth() + insets.getHorizontal(), contentWidth + insets.getHorizontal());
+    }
+
+    private int measureContentHeight() {
+        int contentHeight = orientation == Orientation.VERTICAL ? MIN_SIZE : 1;
+        return Math.max(super.getMinHeight() + insets.getVertical(), contentHeight + insets.getVertical());
+    }
 }

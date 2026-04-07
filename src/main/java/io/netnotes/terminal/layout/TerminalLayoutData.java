@@ -4,6 +4,7 @@ import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.engine.ui.renderer.layout.LayoutData;
 
 
@@ -19,22 +20,16 @@ public final class TerminalLayoutData extends LayoutData<
     TerminalLayoutData, 
     TerminalLayoutData.TerminalLayoutDataBuilder
 >{
-    protected boolean setX = false;
-    protected boolean setY = false;
-    protected boolean setWidth = false;
-    protected boolean setHeight = false;
-
     public TerminalLayoutData(){
         super();
     }
 
     public void initialize(TerminalLayoutDataBuilder builder) {
         super.initialize(builder);
-        this.setX = builder.setX;
-        this.setY = builder.setY;
-        this.setWidth = builder.setWidth;
-        this.setHeight = builder.setHeight;
-
+        if (builder.setX)      setAxisChange(TerminalRegion.AXIS_X);
+        if (builder.setY)      setAxisChange(TerminalRegion.AXIS_Y);
+        if (builder.setWidth)  setAxisChange(TerminalRegion.AXIS_W);
+        if (builder.setHeight) setAxisChange(TerminalRegion.AXIS_H);
         TerminalLayoutDataPool.getInstance().recycleBuilder(builder);
     }
 
@@ -55,13 +50,35 @@ public final class TerminalLayoutData extends LayoutData<
     }
 
     public void reset(){
-        super.reset();
-        setX = false;
-        setY = false;
-        setWidth = false;
-        setHeight = false;
+        super.reset(); // clears axisXSet/axisYSet/axisWidthSet/axisHeightSet
     }
 
+
+    /**
+     * Axis-selective merge: copies {@code current} into {@code target}, then
+     * overwrites only the axes that were explicitly set by the builder.
+     *
+     * Called by Renderable.applySpatialChange so that a top-down pass never
+     * overwrites a FIT_CONTENT dimension committed by the bottom-up pass, and
+     * vice versa.
+     *
+     * The parent's absolute screen position is stored on spatialRegion by
+     * apply() via setParentAbsolutePosition(parentRegion.getAbsolutePosition()).
+     * We must forward that stored value — NOT spatialRegion.getX()/getY(),
+     * which are the child's relative coords and have nothing to do with the
+     * parent's screen offset.
+     */
+    @Override
+    public void mergeIntoRegion(TerminalRectangle current, TerminalRectangle target) {
+        target.copyFrom(current);
+        if (spatialRegion != null) {
+            target.setParentAbsolutePosition(spatialRegion.getParentAbsolutePosition());
+            if (hasAxisChange(TerminalRegion.AXIS_X)) target.setX(spatialRegion.getX());
+            if (hasAxisChange(TerminalRegion.AXIS_Y)) target.setY(spatialRegion.getY());
+            if (hasAxisChange(TerminalRegion.AXIS_W)) target.setWidth(spatialRegion.getWidth());
+            if (hasAxisChange(TerminalRegion.AXIS_H)) target.setHeight(spatialRegion.getHeight());
+        }
+    }
 
     public static TerminalLayoutDataBuilder getBuilder(){
         return TerminalLayoutDataPool.getInstance().obtainBuilder();

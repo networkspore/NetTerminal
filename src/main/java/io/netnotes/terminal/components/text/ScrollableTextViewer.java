@@ -1,8 +1,10 @@
 package io.netnotes.terminal.components.text;
 
+import io.netnotes.engine.ui.LabelTruncation;
 import io.netnotes.terminal.*;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
 import io.netnotes.engine.io.input.ephemeralEvents.*;
 import io.netnotes.engine.io.input.events.*;
@@ -11,6 +13,7 @@ import io.netnotes.noteBytes.KeyRunTable;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.ui.Position;
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.renderer.RenderableStates;
 
 import java.util.ArrayList;
@@ -24,6 +27,7 @@ import java.util.List;
  * - Scroll with Up/Down, PageUp/PageDown, Home/End
  * - Auto-scrolls to bottom when new lines added (unless manually scrolled)
  * - Shows scroll indicators when not at top/bottom
+ * - Optional wrapping with content-aware measurement
  * - Thread-safe line management
  * 
  * DAMAGE TRACKING:
@@ -44,9 +48,14 @@ public class ScrollableTextViewer extends TerminalRegion {
 
     private final boolean showBorder;
     private final String title;
+    private boolean wordWrap = false;
+    private LabelTruncation truncation = LabelTruncation.END;
+    private TerminalLabel.WrappedHeightStrategy wrappedHeightStrategy =
+        TerminalLabel.WrappedHeightStrategy.EXPLICIT_LINES_ONLY;
+    private int wrapWidthHint = 0;
     
     // Scroll state
-    private int scrollOffset = 0;  // Lines from bottom (0 = showing latest)
+    private int scrollOffset = 0;  // Rendered rows from bottom (0 = showing latest)
     private boolean autoScroll = true;  // Auto-scroll to bottom on new lines
     
     // Keyboard handling
@@ -82,6 +91,55 @@ public class ScrollableTextViewer extends TerminalRegion {
 
         setRegion(region);
     }
+
+    public void setWordWrap(boolean wordWrap) {
+        if (this.wordWrap != wordWrap) {
+            this.wordWrap = wordWrap;
+            onPresentationSettingsChanged(true);
+        }
+    }
+
+    public boolean isWordWrap() {
+        return wordWrap;
+    }
+
+    public void setTruncation(LabelTruncation truncation) {
+        LabelTruncation next = truncation != null ? truncation : LabelTruncation.END;
+        if (this.truncation != next) {
+            this.truncation = next;
+            invalidateContentArea();
+        }
+    }
+
+    public LabelTruncation getTruncation() {
+        return truncation;
+    }
+
+    public void setWrappedHeightStrategy(TerminalLabel.WrappedHeightStrategy strategy) {
+        TerminalLabel.WrappedHeightStrategy next = strategy != null
+            ? strategy
+            : TerminalLabel.WrappedHeightStrategy.EXPLICIT_LINES_ONLY;
+        if (this.wrappedHeightStrategy != next) {
+            this.wrappedHeightStrategy = next;
+            onPresentationSettingsChanged(true);
+        }
+    }
+
+    public TerminalLabel.WrappedHeightStrategy getWrappedHeightStrategy() {
+        return wrappedHeightStrategy;
+    }
+
+    public void setWrapWidthHint(int wrapWidthHint) {
+        int clamped = Math.max(0, wrapWidthHint);
+        if (this.wrapWidthHint != clamped) {
+            this.wrapWidthHint = clamped;
+            onPresentationSettingsChanged(true);
+        }
+    }
+
+    public int getWrapWidthHint() {
+        return wrapWidthHint;
+    }
     
     @Override
     protected void setupStateTransitions() {
@@ -98,103 +156,90 @@ public class ScrollableTextViewer extends TerminalRegion {
     
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
-        List<String> currentLines;
-        synchronized (lines) {
-            currentLines = new ArrayList<>(lines);
-        }
+        List<String> currentLines = snapshotLines();
         TextStyle titleStyle = hasFocus() ? TextStyle.NORMAL : TextStyle.DIM;
         
         if (showBorder) {
-            renderWithBorder(batch, currentLines, titleStyle);
-        } else {
-            renderWithoutBorder(batch, currentLines, titleStyle);
+            renderFrame(batch, titleStyle);
         }
+
+        int contentStartY = getContentStartY();
+        int contentStartX = getContentStartX();
+        int contentWidth = getContentWidth();
+        int contentHeight = getContentHeight();
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            return;
+        }
+
+        renderLines(batch, currentLines, contentStartY, contentStartX, contentWidth, contentHeight);
     }
     
-    private void renderWithBorder(TerminalBatchBuilder batch, List<String> currentLines, TextStyle titleStyle) {
-        TerminalRectangle region = TerminalRectanglePool.getInstance().obtain();
-        region.set(0,0, getWidth(), getHeight(), 0 ,0);
-        
+    private void renderFrame(TerminalBatchBuilder batch, TextStyle titleStyle) {
+        TerminalRectangle region = getRegionPool().obtain();
+        region.set(0, 0, getWidth(), getHeight(), 0, 0);
         drawBox(batch, region, title, Position.TOP_CENTER, LineStyle.SINGLE, titleStyle);
-        
-        TerminalRectanglePool.getInstance().recycle(region);
-        
-        int contentstartY = getContentStartY();
-        int contentStartCol = getContentStartX();
-        int contentWidth = getContentWidth();
-        int contentHeight = getContentHeight();
-        if (contentWidth <= 0 || contentHeight <= 0) {
-            return;
-        }
-        
-        renderLines(batch, currentLines, contentstartY, contentStartCol, 
-            contentWidth, contentHeight);
-    }
-    
-    private void renderWithoutBorder(TerminalBatchBuilder batch, List<String> currentLines, TextStyle titleStyle) {
-        int contentstartY = getContentStartY();
-        int contentStartCol = getContentStartX();
-        int contentWidth = getContentWidth();
-        int contentHeight = getContentHeight();
-        if (contentWidth <= 0 || contentHeight <= 0) {
-            return;
-        }
-        renderLines(batch, currentLines, contentstartY, contentStartCol, contentWidth, contentHeight);
+        getRegionPool().recycle(region);
     }
     
     private void renderLines(TerminalBatchBuilder batch, List<String> currentLines,
                             int startY, int startX, int width, int height) {
-        int totalLines = currentLines.size();
+        List<String> renderableRows = buildRenderableRows(currentLines, width);
+        int totalRows = renderableRows.size();
+        if (clampScrollOffset(totalRows, height) && scrollOffset == 0) {
+            autoScroll = true;
+        }
         
         // Calculate visible range based on scroll offset
-        // scrollOffset = 0 means show latest lines (bottom)
+        // scrollOffset = 0 means show latest rendered rows (bottom)
         // scrollOffset > 0 means scrolled up from bottom
-        int visibleEnd = totalLines - scrollOffset;
+        int visibleEnd = totalRows - scrollOffset;
         int visibleStart = Math.max(0, visibleEnd - height);
         
         // Clamp to valid range
-        visibleEnd = Math.min(totalLines, visibleEnd);
+        visibleEnd = Math.min(totalRows, visibleEnd);
         visibleStart = Math.max(0, visibleStart);
         
-        // Render visible lines
+        // Render visible rows
         int currentY = startY;
         for (int i = visibleStart; i < visibleEnd && currentY < startY + height; i++) {
-            String line = currentLines.get(i);
-            String truncated = truncateLine(line, width);
-            printAt(batch, startX, currentY, truncated, TextStyle.NORMAL);
+            printAt(batch, startX, currentY, fitLineToWidth(renderableRows.get(i), width), TextStyle.NORMAL);
             currentY++;
         }
         
         // Show scroll indicators
-        if (totalLines > height) {
-            renderScrollIndicators(batch, currentLines, startY, startX, width, height);
+        if (totalRows > height) {
+            renderScrollIndicators(batch, totalRows, visibleStart, visibleEnd, startY, startX, width, height);
         }
     }
     
-    private void renderScrollIndicators(TerminalBatchBuilder batch, List<String> currentLines,
-                                       int startY, int startX, int width, int height) {
-        int totalLines = currentLines.size();
-        int visibleEnd = totalLines - scrollOffset;
-        int visibleStart = Math.max(0, visibleEnd - height);
-        
-        // Top indicator (more content above)
+    private void renderScrollIndicators(
+        TerminalBatchBuilder batch,
+        int totalRows,
+        int visibleStart,
+        int visibleEnd,
+        int startY,
+        int startX,
+        int width,
+        int height
+    ) {
+        // Top indicator (more content above).
         if (visibleStart > 0) {
             String indicator = String.format("↑ %d more", visibleStart);
-            int indicatorX = startX + width - indicator.length() - 1;
+            int indicatorX = Math.max(startX, startX + width - indicator.length() - 1);
             printAt(batch, indicatorX,startY, indicator, TextStyle.INFO);
         }
         
-        // Bottom indicator (more content below)
+        // Bottom indicator (more content below).
         int remainingBelow = scrollOffset;
         if (remainingBelow > 0) {
             String indicator = String.format("↓ %d more", remainingBelow);
-            int indicatorX = startX + width - indicator.length() - 1;
+            int indicatorX = Math.max(startX, startX + width - indicator.length() - 1);
             printAt(batch, indicatorX,startY + height - 1, indicator, TextStyle.INFO);
         }
         
-        // Show position indicator if scrolled
+        // Show position indicator if scrolled.
         if (!autoScroll) {
-            String position = String.format("[%d/%d]", visibleEnd, totalLines);
+            String position = String.format("[%d/%d]", visibleEnd, totalRows);
             int posX = startX + 1;
             printAt(batch, posX, startY, position, TextStyle.INFO);
         }
@@ -206,53 +251,26 @@ public class ScrollableTextViewer extends TerminalRegion {
      * Add line - invalidates appropriately based on auto-scroll state
      */
     public void addLine(String line) {
-        int totalLines;
         synchronized (lines) {
             lines.add(line != null ? line : "");
             
             while (lines.size() > maxLines) {
                 lines.remove(0);
             }
-            totalLines = lines.size();
         }
         
         if (autoScroll) {
             scrollOffset = 0;
         } else {
-            scrollOffset++;
+            scrollOffset += countVisualRows(line, resolveCurrentWrapWidth());
         }
-        if (clampScrollOffset(totalLines) && scrollOffset == 0) {
+        if (clampScrollOffset(getScrollableRowCount(), getContentHeight()) && scrollOffset == 0) {
             autoScroll = true;
         }
         onContentChanged();
     }
 
-    @Override
-    public int getPreferredWidth() {
-        int maxLine = 0;
-        synchronized (lines) {
-            for (String line : lines) {
-                if (line != null) {
-                    maxLine = Math.max(maxLine, line.length());
-                }
-            }
-        }
-        if (title != null) {
-            maxLine = Math.max(maxLine, title.length());
-        }
-        int borderExtra = showBorder ? 4 : 2;
-        return Math.max(getMinWidth(), maxLine + borderExtra);
-    }
 
-    @Override
-    public int getPreferredHeight() {
-        int lineCount;
-        synchronized (lines) {
-            lineCount = Math.max(1, lines.size());
-        }
-        int borderExtra = showBorder ? 2 : 0;
-        return Math.max(getMinHeight(), lineCount + borderExtra);
-    }
 
     @Override
     public int getMinWidth() {
@@ -263,9 +281,23 @@ public class ScrollableTextViewer extends TerminalRegion {
     public int getMinHeight() {
         return Math.max(super.getMinHeight(), showBorder ? 2 : 1);
     }
+
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int measuredWidth = getWidthPreference() == SizePreference.FIT_CONTENT
+            ? measureOuterWidth()
+            : getMinWidth();
+
+        int measuredHeight = getHeightPreference() == SizePreference.FIT_CONTENT
+            ? measureOuterHeight()
+            : getMinHeight();
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
+    }
     
     public void addLines(String... newLines) {
-        int totalLines;
         synchronized (lines) {
             for (String line : newLines) {
                 lines.add(line != null ? line : "");
@@ -274,15 +306,14 @@ public class ScrollableTextViewer extends TerminalRegion {
             while (lines.size() > maxLines) {
                 lines.remove(0);
             }
-            totalLines = lines.size();
         }
         
         if (autoScroll) {
             scrollOffset = 0;
         } else {
-            scrollOffset += newLines.length;
+            scrollOffset += countVisualRows(newLines, resolveCurrentWrapWidth());
         }
-        if (clampScrollOffset(totalLines) && scrollOffset == 0) {
+        if (clampScrollOffset(getScrollableRowCount(), getContentHeight()) && scrollOffset == 0) {
             autoScroll = true;
         }
         onContentChanged();
@@ -331,8 +362,8 @@ public class ScrollableTextViewer extends TerminalRegion {
     
     private void handleScrollUp() {
         int contentHeight = getContentHeight();
-        int totalLines = getLineCount();
-        int maxOffset = Math.max(0, totalLines - contentHeight);
+        int totalRows = getScrollableRowCount();
+        int maxOffset = Math.max(0, totalRows - contentHeight);
         
         if (scrollOffset < maxOffset) {
             scrollOffset++;
@@ -353,8 +384,8 @@ public class ScrollableTextViewer extends TerminalRegion {
     
     private void handlePageUp() {
         int contentHeight = getContentHeight();
-        int totalLines = getLineCount();
-        int maxOffset = Math.max(0, totalLines - contentHeight);
+        int totalRows = getScrollableRowCount();
+        int maxOffset = Math.max(0, totalRows - contentHeight);
         
         scrollOffset = Math.min(maxOffset, scrollOffset + contentHeight);
         autoScroll = false;
@@ -373,8 +404,8 @@ public class ScrollableTextViewer extends TerminalRegion {
     
     private void handleHome() {
         int contentHeight = getContentHeight();
-        int totalLines = getLineCount();
-        int maxOffset = Math.max(0, totalLines - contentHeight);
+        int totalRows = getScrollableRowCount();
+        int maxOffset = Math.max(0, totalRows - contentHeight);
         
         if (scrollOffset != maxOffset) {
             scrollOffset = maxOffset;
@@ -400,9 +431,12 @@ public class ScrollableTextViewer extends TerminalRegion {
         
         if (lineIndex < 0 || lineIndex >= totalLines) return;
         
-        // Calculate offset needed to show this line at top
-        int targetOffset = totalLines - lineIndex - contentHeight;
-        scrollOffset = Math.max(0, Math.min(totalLines - contentHeight, targetOffset));
+        int totalRows = getScrollableRowCount();
+        int targetRow = getRenderableRowIndexForLine(lineIndex);
+
+        // Calculate offset needed to show this logical line at the top.
+        int targetOffset = totalRows - targetRow - contentHeight;
+        scrollOffset = Math.max(0, Math.min(totalRows - contentHeight, targetOffset));
         autoScroll = (scrollOffset == 0);
         invalidateContent();
     }
@@ -451,8 +485,11 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
 
     private boolean clampScrollOffset(int totalLines) {
-        int contentHeight = getContentHeight();
-        int maxOffset = contentHeight <= 0 ? 0 : Math.max(0, totalLines - contentHeight);
+        return clampScrollOffset(totalLines, getContentHeight());
+    }
+
+    private boolean clampScrollOffset(int totalRows, int contentHeight) {
+        int maxOffset = contentHeight <= 0 ? 0 : Math.max(0, totalRows - contentHeight);
         if (scrollOffset > maxOffset) {
             scrollOffset = maxOffset;
             return true;
@@ -465,48 +502,36 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
 
     private int getContentStartX() {
-        return showBorder ? 2 : 0;
+        return getBaseContentStartX() + getInsets().getLeft();
     }
 
     private int getContentStartY() {
-        return showBorder ? 1 : 0;
+        return getBaseContentStartY() + getInsets().getTop();
     }
 
     private int getContentWidth() {
-        return Math.max(0, showBorder ? getWidth() - 4 : getWidth());
+        return Math.max(0, getWidth() - getFrameHorizontalPadding() - getInsets().getHorizontal());
     }
 
     private int getContentHeight() {
-        return Math.max(0, showBorder ? getHeight() - 2 : getHeight());
+        return Math.max(0, getHeight() - getFrameVerticalPadding() - getInsets().getVertical());
     }
     
     public void setMaxLines(int maxLines) {
         this.maxLines = Math.max(100, maxLines);
         boolean trimmed = false;
-        int totalLines;
         synchronized (lines) {
             while (lines.size() > this.maxLines) {
                 lines.remove(0);
                 trimmed = true;
             }
-            totalLines = lines.size();
         }
         if (trimmed) {
-            if (clampScrollOffset(totalLines) && scrollOffset == 0) {
+            if (clampScrollOffset(getScrollableRowCount(), getContentHeight()) && scrollOffset == 0) {
                 autoScroll = true;
             }
             onContentChanged();
         }
-    }
-    
-    private String truncateLine(String line, int maxWidth) {
-        if (line.length() <= maxWidth) return line;
-        
-        if (maxWidth > 3) {
-            return line.substring(0, maxWidth - 3) + "...";
-        }
-        
-        return line.substring(0, maxWidth);
     }
     
     public int getLineCount() {
@@ -516,15 +541,228 @@ public class ScrollableTextViewer extends TerminalRegion {
     }
     
     public List<String> getAllLines() {
+        return snapshotLines();
+    }
+
+    private int measureOuterWidth() {
+        int maxLine = 0;
         synchronized (lines) {
-            return new ArrayList<>(lines);
+            for (String line : lines) {
+                if (line != null) {
+                    maxLine = Math.max(maxLine, line.length());
+                }
+            }
         }
+
+        if (showBorder && title != null) {
+            maxLine = Math.max(maxLine, title.length());
+        }
+
+        return Math.max(getMinWidth(), maxLine + getFrameHorizontalPadding() + getInsets().getHorizontal());
+    }
+
+    private int measureOuterHeight() {
+        return Math.max(
+            getMinHeight(),
+            countMeasuredRows() + getFrameVerticalPadding() + getInsets().getVertical()
+        );
+    }
+
+    private int countMeasuredRows() {
+        List<String> snapshot = snapshotLines();
+        if (snapshot.isEmpty()) {
+            return 1;
+        }
+
+        int wrapWidth = resolveWrapMeasureWidth();
+        return Math.max(1, countVisualRows(snapshot, wrapWidth));
     }
     
     public boolean isEmpty() {
         synchronized (lines) {
             return lines.isEmpty();
         }
+    }
+
+    private void onPresentationSettingsChanged(boolean affectsMeasurement) {
+        if (clampScrollOffset(getScrollableRowCount()) && scrollOffset == 0) {
+            autoScroll = true;
+        }
+        if (affectsMeasurement) {
+            requestLayoutUpdate();
+        }
+        invalidateContentArea();
+    }
+
+    private List<String> snapshotLines() {
+        synchronized (lines) {
+            return new ArrayList<>(lines);
+        }
+    }
+
+    private List<String> buildRenderableRows(List<String> sourceLines, int wrapWidth) {
+        if (!wordWrap || wrapWidth <= 0) {
+            return sourceLines;
+        }
+
+        List<String> rows = new ArrayList<>();
+        for (String line : sourceLines) {
+            appendWrappedRows(rows, sanitizeLine(line), wrapWidth);
+        }
+        return rows;
+    }
+
+    private void appendWrappedRows(List<String> rows, String line, int wrapWidth) {
+        if (line.isEmpty()) {
+            rows.add("");
+            return;
+        }
+
+        for (int start = 0; start < line.length(); start += wrapWidth) {
+            rows.add(line.substring(start, Math.min(line.length(), start + wrapWidth)));
+        }
+    }
+
+    private int getScrollableRowCount() {
+        if (getLineCount() <= 0) {
+            return 0;
+        }
+        return countVisualRows(snapshotLines(), resolveCurrentWrapWidth());
+    }
+
+    private int getRenderableRowIndexForLine(int lineIndex) {
+        if (!wordWrap) {
+            return lineIndex;
+        }
+
+        int wrapWidth = resolveCurrentWrapWidth();
+        if (wrapWidth <= 0) {
+            return lineIndex;
+        }
+
+        int rowIndex = 0;
+        synchronized (lines) {
+            int boundedIndex = Math.min(lineIndex, lines.size());
+            for (int i = 0; i < boundedIndex; i++) {
+                rowIndex += countVisualRows(lines.get(i), wrapWidth);
+            }
+        }
+        return rowIndex;
+    }
+
+    private int countVisualRows(List<String> sourceLines, int wrapWidth) {
+        int total = 0;
+        for (String line : sourceLines) {
+            total += countVisualRows(line, wrapWidth);
+        }
+        return total;
+    }
+
+    private int countVisualRows(String[] sourceLines, int wrapWidth) {
+        int total = 0;
+        for (String line : sourceLines) {
+            total += countVisualRows(line, wrapWidth);
+        }
+        return total;
+    }
+
+    private int countVisualRows(String line, int wrapWidth) {
+        if (!wordWrap || wrapWidth <= 0) {
+            return 1;
+        }
+        String safeLine = sanitizeLine(line);
+        return Math.max(1, (safeLine.length() + wrapWidth - 1) / wrapWidth);
+    }
+
+    private int resolveWrapMeasureWidth() {
+        if (!wordWrap) {
+            return 0;
+        }
+        if (getWidthPreference() == SizePreference.FIT_CONTENT) {
+            return measureIntrinsicContentWidth();
+        }
+
+        return switch (wrappedHeightStrategy) {
+            case EXPLICIT_LINES_ONLY -> 0;
+            case CURRENT_WIDTH -> resolveCurrentWrapWidth();
+            case WIDTH_HINT -> Math.max(0, wrapWidthHint);
+            case CURRENT_WIDTH_OR_HINT -> {
+                int currentWidth = resolveCurrentWrapWidth();
+                yield currentWidth > 0 ? currentWidth : Math.max(0, wrapWidthHint);
+            }
+        };
+    }
+
+    private int resolveCurrentWrapWidth() {
+        TerminalRectangle requested = getRequestedRegion();
+        if (requested != null) {
+            return Math.max(0, requested.getWidth() - getFrameHorizontalPadding() - getInsets().getHorizontal());
+        }
+        return getContentWidth();
+    }
+
+    private int measureIntrinsicContentWidth() {
+        int maxLine = 0;
+        synchronized (lines) {
+            for (String line : lines) {
+                maxLine = Math.max(maxLine, sanitizeLine(line).length());
+            }
+        }
+        return maxLine;
+    }
+
+    private String fitLineToWidth(String line, int maxWidth) {
+        if (maxWidth <= 0) {
+            return "";
+        }
+        String safeLine = sanitizeLine(line);
+        if (wordWrap) {
+            return safeLine;
+        }
+        return truncateLine(safeLine, maxWidth);
+    }
+
+    private String truncateLine(String line, int maxWidth) {
+        if (line.length() <= maxWidth || truncation == LabelTruncation.NONE) {
+            return line;
+        }
+        if (maxWidth <= 3) {
+            return line.substring(0, maxWidth);
+        }
+
+        return switch (truncation) {
+            case END -> line.substring(0, maxWidth - 3) + "...";
+            case START -> "..." + line.substring(Math.max(0, line.length() - (maxWidth - 3)));
+            case MIDDLE -> {
+                if (maxWidth < 5) {
+                    yield line.substring(0, maxWidth);
+                }
+                int head = (maxWidth - 3) / 2;
+                int tail = maxWidth - 3 - head;
+                yield line.substring(0, head) + "..." + line.substring(line.length() - tail);
+            }
+            case NONE -> line;
+        };
+    }
+
+    private String sanitizeLine(String line) {
+        return line != null ? line : "";
+    }
+
+    private int getBaseContentStartX() {
+        return showBorder ? 2 : 0;
+    }
+
+    private int getBaseContentStartY() {
+        return showBorder ? 1 : 0;
+    }
+
+    private int getFrameHorizontalPadding() {
+        return showBorder ? 4 : 0;
+    }
+
+    private int getFrameVerticalPadding() {
+        return showBorder ? 2 : 0;
     }
     
     private void removeKeyboardHandler() {

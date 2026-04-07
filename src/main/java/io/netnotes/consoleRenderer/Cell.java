@@ -40,6 +40,8 @@ public class Cell {
         this.style = style != null ? style.copy() : new TextStyle();
     }
 
+   
+
     /**
      * Set this cell as a continuation placeholder for a preceding wide character.
      * displayWidth == 0 tells the renderer to skip this column.
@@ -80,6 +82,14 @@ public class Cell {
         this.codepoint = other.codepoint;
         this.displayWidth = other.displayWidth;
         this.style = other.style.copy();
+    }
+
+     public Cell copy() {
+        Cell c = new Cell();
+        c.codepoint = this.codepoint;
+        c.style = this.style.copy(); // TextStyle already has copyFrom — add a copy() that does new+copyFrom
+        c.displayWidth = this.displayWidth;
+        return c;
     }
 
     /**

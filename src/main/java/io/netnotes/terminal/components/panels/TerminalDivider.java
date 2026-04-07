@@ -5,6 +5,8 @@ import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
+import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
 
@@ -28,8 +30,11 @@ import io.netnotes.engine.ui.TextAlignment;
  *
  * SIZING:
  * <ul>
- *   <li>HORIZONTAL: height = 1 (FIT_CONTENT → getPreferredHeight() == 1), width = FILL
- *   <li>VERTICAL:   width  = 1 (FIT_CONTENT → getPreferredWidth()  == 1), height = FILL
+ *   <li>HORIZONTAL: height = 1 (FIT_CONTENT, driven by minHeight), width = FILL.
+ *       The label collapses with "…" when constrained. Set width to FIT_CONTENT
+ *       to use the label length as a minimum (wedge behaviour).
+ *   <li>VERTICAL:   width  = 1 (FIT_CONTENT, driven by minWidth),  height = FILL.
+ *       Set height to FIT_CONTENT for wedge behaviour.
  * </ul>
  *
  * USAGE:
@@ -43,12 +48,6 @@ import io.netnotes.engine.ui.TextAlignment;
  */
 public class TerminalDivider extends TerminalRegion {
 
-    // ===== TYPES =====
-
-    public enum Orientation {
-        HORIZONTAL,
-        VERTICAL
-    }
 
     // ===== CONSTANTS =====
 
@@ -96,31 +95,20 @@ public class TerminalDivider extends TerminalRegion {
 
     // ===== SIZING =====
 
-    /**
-     * A horizontal divider is always exactly 1 row tall.
-     * A vertical divider defers to the parent for height (FILL), so this
-     * returns minHeight for the layout's minimum-size pass.
-     */
-    @Override
-    public int getPreferredHeight() {
-        if (orientation == Orientation.HORIZONTAL) {
-            return 1;
-        }
-        // FILL — layout will assign height; report minimum so parent can plan
-        return getMinHeight();
-    }
 
-    /**
-     * A vertical divider is always exactly 1 column wide.
-     * A horizontal divider defers to the parent for width (FILL).
-     */
     @Override
-    public int getPreferredWidth() {
-        if (orientation == Orientation.VERTICAL) {
-            return 1;
-        }
-        // FILL — report minimum so parent can plan
-        return getMinWidth();
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int measuredWidth = getWidthPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinWidth(), measureIntrinsicWidth() + getInsets().getHorizontal())
+            : getMinWidth();
+
+        int measuredHeight = getHeightPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinHeight(), measureIntrinsicHeight() + getInsets().getVertical())
+            : getMinHeight();
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
     }
 
     // ===== CONFIGURATION =====
@@ -211,8 +199,14 @@ public class TerminalDivider extends TerminalRegion {
         int labelLen = displayed.length();
 
         if (labelLen + 2 * LABEL_PAD >= width) {
-            // Not enough room — just render the label, no line
-            printAt(batch, 0, 0, truncate(displayed, width), labelTextStyle);
+            // Not enough room for label + flanking line segments.
+            // Show as much of the label as fits, with a trailing ellipsis.
+            if (width >= 2) {
+                String clipped = displayed.substring(0, Math.max(0, width - 1)) + "…";
+                printAt(batch, 0, 0, clipped, labelTextStyle);
+            } else if (width == 1) {
+                printAt(batch, 0, 0, "…", labelTextStyle);
+            }
             return;
         }
 
@@ -240,11 +234,16 @@ public class TerminalDivider extends TerminalRegion {
             return;
         }
 
-        // Label chars stacked vertically along the column
+        // Label chars stacked vertically along the column.
         String displayed = label.trim();
         int labelLen = Math.min(displayed.length(), height - 2 * LABEL_PAD);
+
         if (labelLen <= 0) {
-            drawVLine(batch, 0, 0, height, lineStyle, lineTextStyle);
+            // No room for any label chars — show an ellipsis char if there is at least 1 row.
+            if (height >= 1) {
+                drawVLine(batch, 0, 0, Math.max(0, height - 1), lineStyle, lineTextStyle);
+                printAt(batch, 0, height - 1, "…", labelTextStyle);
+            }
             return;
         }
 
@@ -277,7 +276,28 @@ public class TerminalDivider extends TerminalRegion {
         }
     }
 
-    private static String truncate(String s, int maxLen) {
-        return s.length() <= maxLen ? s : s.substring(0, maxLen);
+    private int measureIntrinsicWidth() {
+        if (orientation == Orientation.VERTICAL) {
+            return 1;
+        }
+
+        if (label == null || label.isEmpty()) {
+            return 1;
+        }
+
+        return label.length() + 2 + (2 * LABEL_PAD);
     }
+
+    private int measureIntrinsicHeight() {
+        if (orientation == Orientation.HORIZONTAL) {
+            return 1;
+        }
+
+        if (label == null || label.isEmpty()) {
+            return 1;
+        }
+
+        return Math.max(1, label.trim().length() + (2 * LABEL_PAD));
+    }
+
 }

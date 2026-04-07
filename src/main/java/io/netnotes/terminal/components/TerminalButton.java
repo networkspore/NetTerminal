@@ -1,9 +1,11 @@
 package io.netnotes.terminal.components;
 
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.engine.io.input.events.keyboardEvents.KeyDownEvent;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.io.input.Keyboard.KeyCodeBytes;
@@ -227,44 +229,20 @@ public class TerminalButton extends TerminalRegion {
     // ===== SIZEABLE IMPLEMENTATION (FIXED) =====
 
     @Override
-    public int getPreferredWidth() {
-        SizePreference pref = getWidthPreference();
-        
-        // Handle STATIC - delegate to parent which uses region.getWidth()
-        if (pref == SizePreference.STATIC) {
-            return super.getPreferredWidth();
-        }
-        
-        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinWidth();
-        }
-        
-        // FIT_CONTENT: Calculate based on text content
-        int textLen = text != null ? text.length() : 0;
-        int borderExtra = showBorder ? 4 : 0;
-        
-        // Add border spacing + insets
-        return Math.max(getMinWidth(), textLen + borderExtra + getInsets().getHorizontal());
-    }
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int measuredWidth = getWidthPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinWidth(), (text != null ? text.length() : 0)
+                + (showBorder ? 4 : 0)
+                + getInsets().getHorizontal())
+            : getMinWidth();
 
-    @Override
-    public int getPreferredHeight() {
-        SizePreference pref = getHeightPreference();
-        
-        // Handle STATIC - delegate to parent which uses region.getHeight()
-        if (pref == SizePreference.STATIC) {
-            return super.getPreferredHeight();
-        }
-        
-        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinHeight();
-        }
-        
-        // FIT_CONTENT: Calculate based on content
-        int baseHeight = showBorder ? 3 : 1;
-        return Math.max(getMinHeight(), baseHeight + getInsets().getVertical());
+        int measuredHeight = getHeightPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinHeight(), (showBorder ? 3 : 1) + getInsets().getVertical())
+            : getMinHeight();
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
     }
     
     // ===== BUILDER =====

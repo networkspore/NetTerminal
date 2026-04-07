@@ -1,8 +1,11 @@
 package io.netnotes.terminal.components;
 
+import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.TerminalBatchBuilder;
+import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.engine.ui.ScrollIndicator;
 
 /**
@@ -38,6 +41,7 @@ public class VScrollIndicator extends TerminalRegion implements ScrollIndicator<
     public VScrollIndicator(String name, Style style) {
         super(name);
         this.style = style;
+        setMinHeight(3);
     }
     
     @Override
@@ -53,21 +57,6 @@ public class VScrollIndicator extends TerminalRegion implements ScrollIndicator<
             this.viewportSize = viewportSize;
             invalidate();
         }
-    }
-    
-    @Override
-    public int getPreferredSize() {
-        return 1;
-    }
-
-    @Override
-    public int getPreferredWidth() {
-        return Math.max(getMinWidth(), 1);
-    }
-
-    @Override
-    public int getPreferredHeight() {
-        return Math.max(getMinHeight(), 1);
     }
 
     @Override
@@ -164,6 +153,21 @@ public class VScrollIndicator extends TerminalRegion implements ScrollIndicator<
         }
     }
 
+
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int measuredWidth = getWidthPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinWidth(), 1 + getInsets().getHorizontal())
+            : getMinWidth();
+
+        int measuredHeight = getHeightPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinHeight(), (style == Style.ARROWS ? 3 : 1) + getInsets().getVertical())
+            : getMinHeight();
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
+    }
 
     
 }

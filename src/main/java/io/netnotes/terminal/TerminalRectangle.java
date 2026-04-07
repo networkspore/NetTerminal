@@ -116,17 +116,13 @@ public class TerminalRectangle extends SpatialRegion<
         return this.x == other.x &&
             this.y == other.y &&
             this.width == other.width &&
-            this.height == other.height;
-    }
-
-    public boolean absEquals(TerminalRectangle other) {
-        if (other == null) return false;
-        return this.x == other.x &&
-            this.y == other.y &&
-            this.width == other.width &&
             this.height == other.height &&
             this.parentAbsoluteX == other.parentAbsoluteX &&
             this.parentAbsoluteY == other.parentAbsoluteY;
+    }
+
+    public boolean absEquals(TerminalRectangle other) {
+        return equals(other);
     }
     
     @Override
@@ -385,6 +381,12 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         this.y = point.getY();
     }
     
+    @Override
+    public void setToIdentityPosition(){
+        this.x = 0;
+        this.y = 0;
+    }
+
     /**
      * Set width
      */

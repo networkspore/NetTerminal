@@ -1,5 +1,6 @@
 package io.netnotes.consoleRenderer;
 
+import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.engine.io.ContextPath;
 import io.netnotes.engine.messaging.NoteMessaging.Keys;
 import io.netnotes.noteBytes.NoteBytes;
@@ -56,6 +57,7 @@ public class ConsoleContainer extends Container<
     // Cell buffers (indexed as [y][x] for natural row-major ordering)
     private Cell[][] cells;
     private Cell[][] prevCells;
+    private Cell[][] pendingPrev;
     private boolean fullRepaintPending = false;
     private final AtomicBoolean boundsChangedPending = new AtomicBoolean(false);
     private TerminalRectangle[] pendingDamageRects = null;
@@ -164,7 +166,7 @@ public class ConsoleContainer extends Container<
     
     @Override
     protected CompletableFuture<Void> initializeRenderer() {
-        Log.logMsg("[ConsoleContainer] Renderer initialized: " + id, LogLevel.GENERAL);
+        Log.logMsg("[ConsoleContainer] Renderer initialized: " + id, LOG_LEVEL);
         return CompletableFuture.completedFuture(null);
     }
     
@@ -189,12 +191,25 @@ public class ConsoleContainer extends Container<
         int h = getHeight(), w = getWidth();
         boolean boundsChanged = boundsChangedPending.get();
 
-        // Consume both pending flags atomically on the container thread
         boolean repaint = fullRepaintPending || boundsChanged;
         fullRepaintPending = false;
 
         TerminalRectangle[] snapDamage = pendingDamageRects;
         pendingDamageRects = null;
+
+        if (w <= 0 || h <= 0) {
+            RenderDiagnostics.logRenderBlocker(
+                "console-snapshot-empty:" + getId(),
+                "ConsoleContainer.createStateSnapshot",
+                "non-positive-bounds",
+                () -> "container=" + getId()
+                    + "\n\tcontentBounds=" + RenderDiagnostics.summarizeRegion(contentBounds)
+                    + "\n\tallocatedBounds=" + RenderDiagnostics.summarizeRegion(allocatedBounds)
+                    + "\n\trepaint=" + repaint
+                    + "\n\tboundsChanged=" + boundsChanged
+                    + "\n\tdamage=" + RenderDiagnostics.summarizeDamage(snapDamage, 6)
+            );
+        }
 
         Cell[][] snapCells = new Cell[h][w];
         Cell[][] snapPrev = repaint ? null : new Cell[h][w];
@@ -206,8 +221,6 @@ public class ConsoleContainer extends Container<
                     snapCells[y][x].copyFrom(cells[y][x]);
                 } else {
                     Cell current = cells[y][x];
-                    // Damaged blank cell must snapshot as explicit space so the renderer
-                    // physically clears that terminal position rather than skipping it.
                     if (current.isBlank() && prevCells[y][x].isForceRepaint()) {
                         snapCells[y][x].set(' ', new TextStyle());
                     } else {
@@ -218,6 +231,10 @@ public class ConsoleContainer extends Container<
                 }
             }
         }
+
+        // Store the snapshot so commitRender() installs it as prevCells rather than
+        // copying whatever cells contains at commit time (which may have advanced).
+        pendingPrev = snapCells;
 
         return new RenderableState(
             h, w, allocatedBounds.getX(), allocatedBounds.getY(),
@@ -248,28 +265,48 @@ public class ConsoleContainer extends Container<
     }
 
     public  CompletableFuture<Void> setAllocatedBounds(int x, int y, int width, int height, boolean isManaged, boolean isOffScreen){
-        return containerExecutor.execute(()->{
-            setBoundsStates(isManaged, isOffScreen);
+        if(containerExecutor.isCurrentThread()){
             TerminalRectangle region = regionPool.obtain();
             region.set(x, y, width, height);
-            setAllocatedBoundsInternal(region);
-        });
+            setAllocatedBoundsInternal(region, isManaged, isOffScreen);
+            return CompletableFuture.completedFuture(null);
+        }else{
+            return containerExecutor.execute(()->{
+                TerminalRectangle region = regionPool.obtain();
+                region.set(x, y, width, height);
+                setAllocatedBoundsInternal(region, isManaged, isOffScreen);
+            });
+        }
     }
 
     public CompletableFuture<Void> setAllocatedBoundsOffScreen(boolean isManaged, boolean isOffScreen){
-        return containerExecutor.execute(()->{
-            setBoundsStates(isManaged, isOffScreen);
+        if(containerExecutor.isCurrentThread()){
             TerminalRectangle region = regionPool.obtain();
             region.copyFrom(allocatedBounds);
-            setAllocatedBoundsInternal(region);
-        });
+            setAllocatedBoundsInternal(region, isManaged, isOffScreen);
+            return CompletableFuture.completedFuture(null);
+        }else{
+            return containerExecutor.execute(()->{
+                TerminalRectangle region = regionPool.obtain();
+                region.copyFrom(allocatedBounds);
+                setAllocatedBoundsInternal(region, isManaged, isOffScreen);
+            });
+        }
     }
 
     @Override
     public CompletableFuture<Void> setAllocatedBounds(TerminalRectangle region){
-        return containerExecutor.execute(()->{
-            setAllocatedBoundsInternal(region);
-        });
+        boolean wasBoundsManaged = isBoundsManaged();
+        boolean wasOffScreen = isOffScreen();
+
+        if(containerExecutor.isCurrentThread()){
+            setAllocatedBoundsInternal(region, wasBoundsManaged, wasOffScreen);
+            return CompletableFuture.completedFuture(null);
+        }else{
+            return containerExecutor.execute(()->{
+                setAllocatedBoundsInternal(region, wasBoundsManaged, wasOffScreen);
+            });
+        }
     }
 
   
@@ -282,14 +319,29 @@ public class ConsoleContainer extends Container<
         return stateMachine.hasState(Container.STATE_OFF_SCREEN);
     }
 
-    private void setAllocatedBoundsInternal(TerminalRectangle region){
-        boundsChangedPending.set(true);
+    private void setAllocatedBoundsInternal(TerminalRectangle region, boolean isBoundsManaged, boolean isOffScreen){
+
+        boolean wasBoundsManaged = isBoundsManaged();
+        boolean wasOffScreen = isOffScreen();
+        boolean allocatedBoundsChanged = !region.equals(allocatedBounds);
+        boolean contentBoundsChanged = isBoundsManaged && !region.equals(contentBounds);
+        boolean syncContentToAllocated = !isOffScreen && !isBoundsManaged && !region.equals(contentBounds);
+        setBoundsStates(isBoundsManaged, isOffScreen);
+
+        if(wasOffScreen && isOffScreen){
+            //Change produces no visual impact
+            return;
+        }
+        if (allocatedBoundsChanged || contentBoundsChanged
+            || wasBoundsManaged != isBoundsManaged
+            || wasOffScreen != isOffScreen) {
+            boundsChangedPending.set(true);
+        }
+        
         allocatedBounds.copyFrom(region);
 
-        boolean isBoundsManaged = stateMachine.hasState(Container.STATE_LAYOUT_MANAGED);
-        boolean isOffScreen = stateMachine.hasState(Container.STATE_OFF_SCREEN);
 
-        if(isBoundsManaged){
+        if (contentBoundsChanged || syncContentToAllocated) {
             handleContentBoundsInternal(region);
         }
         region.setPosition(0, 0);
@@ -300,6 +352,13 @@ public class ConsoleContainer extends Container<
             isOffScreen
         );
         emitEvent(resizeEvent);
+
+        if (!isOffScreen && (allocatedBoundsChanged || contentBoundsChanged
+            || wasBoundsManaged != isBoundsManaged
+            || wasOffScreen != isOffScreen)) {
+            requestRenderInternal();
+        }
+        
         regionPool.recycle(region);
     }
 
@@ -365,9 +424,36 @@ public class ConsoleContainer extends Container<
         if(!newContentBounds.equals(contentBounds)){
             handleContentBoundsInternal(newContentBounds);
         }else{
+            clearDamageRegions(damageRegions);
             invalidateDamageRegions(damageRegions);
         }
         regionPool.recycle(newContentBounds);
+    }
+
+    private void clearDamageRegions(TerminalRectangle[] damageRegions) {
+        if (damageRegions == null) return;
+
+        int height = contentBounds.getHeight();
+        int width  = contentBounds.getWidth();
+
+        for (TerminalRectangle damage : damageRegions) {
+            if (damage == null) continue;
+
+            int startY = Math.max(0, damage.getY());
+            int endY   = Math.min(height, damage.getY() + damage.getHeight());
+            int startX = Math.max(0, damage.getX());
+            int endX   = Math.min(width,  damage.getX() + damage.getWidth());
+
+            if (endY <= startY || endX <= startX) {
+                continue;
+            }
+
+            for (int y = startY; y < endY; y++) {
+                for (int x = startX; x < endX; x++) {
+                    cells[y][x].clear();
+                }
+            }
+        }
     }
 
 
@@ -390,7 +476,6 @@ public class ConsoleContainer extends Container<
             
             for (int y = startY; y < endY; y++) {
                 for (int x = startX; x < endX; x++) {
-                    cells[y][x].clear();
                     prevCells[y][x].markForceRepaint();
                 }
             }
@@ -426,6 +511,7 @@ public class ConsoleContainer extends Container<
 
         this.cells     = newCells;
         this.prevCells = newPrevCells;
+        this.pendingPrev = null; 
         this.fullRepaintPending = true;
     }
     
@@ -434,10 +520,21 @@ public class ConsoleContainer extends Container<
      * Updates prevCells to match cells (for differential rendering)
      */
     public CompletableFuture<Void> commitRender() {
-        return containerExecutor.execute(() -> {
-            swapBuffersInternal();
-        });
+        if(containerExecutor.isCurrentThread()){
+            commitRenderInternal();
+            return CompletableFuture.completedFuture(null);
+        }else{
+            return containerExecutor.execute(this::commitRenderInternal);
+        }
     }
+
+        private void commitRenderInternal() {
+            if (pendingPrev != null) {
+                prevCells = pendingPrev;
+                pendingPrev = null;
+            }
+            boundsChangedPending.set(false);
+        }
     
     /**
      * Request render - sets RENDER_REQUESTED state
@@ -759,7 +856,6 @@ public class ConsoleContainer extends Container<
     // ===== LOW-LEVEL DRAWING OPERATIONS =====
     
     private void clearInternal() {
-        Log.logMsg("[ConsoleContainer] CLEAR executing", LOG_LEVEL);
 
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
@@ -801,7 +897,7 @@ public class ConsoleContainer extends Container<
     }
     
     private void printAtInternal(int x, int y, String text, TextStyle style) {
-        Log.logMsg("[ConsoleContainer] printAt:" + x + "," + y + Cell.SPACE_STR + text, LOG_LEVEL);
+ 
         int height = contentBounds.getHeight();
         int width = contentBounds.getWidth();
         
@@ -1429,17 +1525,7 @@ public class ConsoleContainer extends Container<
         }
     }
     
-    private void swapBuffersInternal() {
-        int height = contentBounds.getHeight();
-        int width = contentBounds.getWidth();
 
-        for (int y = 0; y < height; y++) {
-            for (int x = 0; x < width; x++) {
-                prevCells[y][x].copyFrom(cells[y][x]);
-            }
-        }
-        boundsChangedPending.set(false);
-    }
 
 
     private void executeDrawBorderedTextInternal(NoteBytesMap cmd) {

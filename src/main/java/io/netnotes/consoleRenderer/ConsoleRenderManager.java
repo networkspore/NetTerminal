@@ -1,7 +1,9 @@
 package io.netnotes.consoleRenderer;
 
 
+import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.engine.state.BitFlagStateMachine;
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.state.BitFlagStateMachine.StateSnapshot;
 import io.netnotes.engine.ui.containers.Container;
 import io.netnotes.engine.ui.containers.ContainerId;
@@ -175,45 +177,45 @@ public class ConsoleRenderManager {
      * Process pending requests for a single container
      */
     private void processContainerRequests(ConsoleContainer container) {
-       
+
 
         Log.logMsg("[ConsoleRenderManager] processing container requests", LOG_LEVEL);
         
-        StateSnapshot snap = container.getState();
+        ConcurrentBitFlagStateMachine state = container.getStateMachine();
         
         // DESTROY takes precedence over everything
-        if (snap.hasState(Container.STATE_DESTROY_REQUESTED)) {
-            handleDestroyRequest(container, snap);
+        if (state.hasState(Container.STATE_DESTROY_REQUESTED)) {
+            handleDestroyRequest(container);
             return;
         }
 
-        if (snap.hasState(Container.STATE_RENDER_REQUESTED)) {
-            handleRenderRequest(container, snap);
+        if (state.hasState(Container.STATE_RENDER_REQUESTED)) {
+            handleRenderRequest(container);
         }
      
-        if (snap.hasState(Container.STATE_UPDATE_REQUESTED)) {
-            handleUpdateRequest(container, snap);
+        if (state.hasState(Container.STATE_UPDATE_REQUESTED)) {
+            handleUpdateRequest(container);
         }
         
         // Process in order of priority
-        if (snap.hasState(Container.STATE_FOCUS_REQUESTED)) {
-            handleFocusRequest(container, snap);
+        if (state.hasState(Container.STATE_FOCUS_REQUESTED)) {
+            handleFocusRequest(container, state);
         }
         
-        if (snap.hasState(Container.STATE_SHOW_REQUESTED)) {
-            handleShowRequest(container, snap);
+        if (state.hasState(Container.STATE_SHOW_REQUESTED)) {
+            handleShowRequest(container);
         }
         
-        if (snap.hasState(Container.STATE_HIDE_REQUESTED)) {
-            handleHideRequest(container, snap);
+        if (state.hasState(Container.STATE_HIDE_REQUESTED)) {
+            handleHideRequest(container);
         }
         
-        if (snap.hasState(Container.STATE_MAXIMIZE_REQUESTED)) {
-            handleMaximizeRequest(container, snap);
+        if (state.hasState(Container.STATE_MAXIMIZE_REQUESTED)) {
+            handleMaximizeRequest(container);
         }
         
-        if (snap.hasState(Container.STATE_RESTORE_REQUESTED)) {
-            handleRestoreRequest(container, snap);
+        if (state.hasState(Container.STATE_RESTORE_REQUESTED)) {
+            handleRestoreRequest(container);
         }
         
         // Re-enqueue if container still has pending requests (re-read current state)
@@ -240,7 +242,7 @@ public class ConsoleRenderManager {
     /**
      * Handle update request (content change)
      */
-    private void handleUpdateRequest(ConsoleContainer container, StateSnapshot snap) {
+    private void handleUpdateRequest(ConsoleContainer container) {
         // Container.handleUpdateContainer() → grantUpdate() owns STATE_UPDATE_REQUESTED and the updateFuture.
         // RenderManager's only job here is to mark the screen dirty if this container is visible.
         if (container.shouldRender()) markDirty();
@@ -248,7 +250,7 @@ public class ConsoleRenderManager {
     /**
      * Handle render request
      */
-    private void handleRenderRequest(ConsoleContainer container, StateSnapshot snap) {
+    private void handleRenderRequest(ConsoleContainer container) {
         if (container.shouldRender()) markDirty();
         container.getStateMachine().removeState(Container.STATE_RENDER_REQUESTED);
     }
@@ -263,8 +265,9 @@ public class ConsoleRenderManager {
      *  - renderer.onFocusGranted/Revoked() are the single authority for Renderer.focusedContainerId
      *  - layoutManager.onFocusGranted() is called last (for reflow) — it must NOT call requestFocus() again
      */
-    private void handleFocusRequest(ConsoleContainer container, StateSnapshot snap) {
-        if (!snap.hasState(Container.STATE_VISIBLE) || snap.hasState(Container.STATE_HIDDEN)) {
+    private void handleFocusRequest(ConsoleContainer container, ConcurrentBitFlagStateMachine stateMachine) {
+
+        if (!stateMachine.hasAnyState(Container.STATE_VISIBLE, Container.STATE_HIDDEN)) {
             container.clearRequest(Container.STATE_FOCUS_REQUESTED);
             return;
         }
@@ -272,7 +275,7 @@ public class ConsoleRenderManager {
             container.clearRequest(Container.STATE_FOCUS_REQUESTED);
             return;
         }
-        if (snap.hasState(Container.STATE_FOCUSED)) {
+        if (stateMachine.hasState(Container.STATE_FOCUSED)) {
             // Already focused — clear request flag without re-granting or calling onFocusGranted again.
             container.getStateMachine().removeState(Container.STATE_FOCUS_REQUESTED);
             return;
@@ -301,7 +304,7 @@ public class ConsoleRenderManager {
     /**
      * Handle show request
      */
-    private void handleShowRequest(ConsoleContainer container, StateSnapshot snap) {
+    private void handleShowRequest(ConsoleContainer container) {
         container.getStateMachine().removeState(Container.STATE_SHOW_REQUESTED);
         container.grantShow().thenRun(() -> {
             renderer.getLayoutManager().onContainerShown(container);
@@ -313,7 +316,7 @@ public class ConsoleRenderManager {
     /**
      * Handle hide request
      */
-    private void handleHideRequest(ConsoleContainer container, StateSnapshot snap) {
+    private void handleHideRequest(ConsoleContainer container) {
         container.getStateMachine().removeState(Container.STATE_HIDE_REQUESTED);
         container.grantHide().thenRun(() -> {
             renderer.getLayoutManager().onContainerHidden(container);
@@ -324,9 +327,8 @@ public class ConsoleRenderManager {
     /**
      * Handle maximize request
      */
-    private void handleMaximizeRequest(ConsoleContainer container, 
-                                       BitFlagStateMachine.StateSnapshot snap) {
-        boolean canGrant = snap.hasState(Container.STATE_FOCUSED);
+    private void handleMaximizeRequest(ConsoleContainer container) {
+        boolean canGrant = container.getStateMachine().hasState(Container.STATE_FOCUSED);
         
         if (canGrant) {
             container.getStateMachine().removeState(Container.STATE_MAXIMIZE_REQUESTED);
@@ -345,9 +347,8 @@ public class ConsoleRenderManager {
     /**
      * Handle restore request
      */
-    private void handleRestoreRequest(ConsoleContainer container, 
-                                      BitFlagStateMachine.StateSnapshot snap) {
-        boolean canGrant = snap.hasState(Container.STATE_MAXIMIZED);
+    private void handleRestoreRequest(ConsoleContainer container) {
+        boolean canGrant = container.getStateMachine().hasState(Container.STATE_MAXIMIZED);
         
         if (canGrant) {
             container.getStateMachine().removeState(Container.STATE_RESTORE_REQUESTED);
@@ -366,7 +367,7 @@ public class ConsoleRenderManager {
     /**
      * Handle destroy request
      */
-    private void handleDestroyRequest(ConsoleContainer container, StateSnapshot snap) {
+    private void handleDestroyRequest(ConsoleContainer container) {
         container.getStateMachine().removeState(Container.STATE_DESTROY_REQUESTED);
         container.grantDestroy().thenRun(() -> {
             renderer.getLayoutManager().onContainerRemoved(container);
@@ -392,15 +393,30 @@ public class ConsoleRenderManager {
 
         List<ConsoleContainer> all = renderer.getLayoutManager().getVisibleContainers();
         List<ConsoleContainer> toRender = new ArrayList<>(all.size());
+        boolean hasVisibleInFlight = false;
 
         for (ConsoleContainer c : all) {
-            if (c.shouldRender() && !renderInFlight.containsKey(c.getId())) {
+            if (!c.shouldRender()) {
+                continue;
+            }
+            if (renderInFlight.containsKey(c.getId())) {
+                hasVisibleInFlight = true;
+            } else {
                 toRender.add(c);
             }
         }
  
         if (toRender.isEmpty()) {
-            renderer.clearScreen();
+            if (hasVisibleInFlight) {
+                RenderDiagnostics.logRenderBlocker(
+                    "render-loop-inflight-only",
+                    250_000_000L,
+                    "ConsoleRenderManager.renderVisibleContainers",
+                    "all-visible-containers-already-in-flight",
+                    () -> "frameTime=" + frameTime
+                );
+                markDirty();
+            }
             return;
         }
 
@@ -413,7 +429,6 @@ public class ConsoleRenderManager {
             futureArray[i] = toRender.get(i).getRenderableState()
                 .thenAccept(s -> states[idx] = s);
         }
-
         CompletableFuture.allOf(futureArray).thenRun(() -> {
             if (!isGenerationCurrent(currentGen)) return;
 
@@ -425,16 +440,65 @@ public class ConsoleRenderManager {
                 }
             }
 
-            if (boundsChanged) renderer.clearScreen();
+            if (boundsChanged) {
+                if (hasVisibleInFlightVisibleSet(all)) {
+                    RenderDiagnostics.logRenderBlocker(
+                        "render-bounds-change-deferred",
+                        250_000_000L,
+                        "ConsoleRenderManager.renderVisibleContainers",
+                        "bounds-change-deferred-by-in-flight-render",
+                        () -> "frameTime=" + frameTime
+                    );
+                    markDirty();
+                    return;
+                }
+                renderer.clearScreen();
+            }
 
             for (int i = 0; i < size; i++) {
                 if (states[i] != null) {
-                    renderWithState(toRender.get(i), states[i], currentGen, frameTime);
+                    RenderableState stateToRender = boundsChanged
+                        ? forceFullRepaint(states[i])
+                        : states[i];
+                    renderWithState(toRender.get(i), stateToRender, currentGen, frameTime);
                 }
             }
 
-            renderer.applyCursorState((ConsoleContainer) renderer.getFocusedContainer());
+            renderer.applyCursorState(resolveFocusedContainerForCursor());
         });
+    }
+
+    private boolean hasVisibleInFlightVisibleSet(List<ConsoleContainer> visibleContainers) {
+        for (ConsoleContainer container : visibleContainers) {
+            if (container.shouldRender() && renderInFlight.containsKey(container.getId())) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private RenderableState forceFullRepaint(RenderableState state) {
+        return new RenderableState(
+            state.rows(),
+            state.cols(),
+            state.offsetX(),
+            state.offsetY(),
+            state.cursorRow(),
+            state.cursorCol(),
+            state.cursorVisible(),
+            null,
+            state.cells(),
+            null
+        );
+    }
+
+    private ConsoleContainer resolveFocusedContainerForCursor() {
+        for (ConsoleContainer container : renderer.getAllContainers()) {
+            if (container.getStateMachine().hasState(Container.STATE_FOCUSED)) {
+                return container;
+            }
+        }
+        return (ConsoleContainer) renderer.getFocusedContainer();
     }
     
     /**
@@ -448,14 +512,41 @@ public class ConsoleRenderManager {
     ) {
         ContainerId id = container.getId();
         if (renderInFlight.containsKey(id)) {
+            RenderDiagnostics.logRenderDrop(
+                "render-inflight-skip:" + id,
+                250_000_000L,
+                "ConsoleRenderManager.renderWithState",
+                "already-in-flight",
+                () -> "container=" + id
+            );
             markDirty();
             return;
         }
 
         RenderFailureTracker tracker = failureTrackers.computeIfAbsent(id, k -> new RenderFailureTracker());
         if (tracker.shouldSkipRender(frameTime)) {
+            RenderDiagnostics.logRenderDrop(
+                "render-skip-after-failures:" + id,
+                "ConsoleRenderManager.renderWithState",
+                "failure-backoff",
+                () -> "container=" + id
+                    + "\n\thealth=" + getRenderHealth(id)
+            );
             container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
             return;
+        }
+
+        if (state.rows() <= 0 || state.cols() <= 0) {
+            RenderDiagnostics.logRenderDrop(
+                "render-state-empty:" + id,
+                "ConsoleRenderManager.renderWithState",
+                "non-positive-render-state",
+                () -> "container=" + id
+                    + "\n\trows=" + state.rows()
+                    + "\n\tcols=" + state.cols()
+                    + "\n\toffset=(" + state.offsetX() + "," + state.offsetY() + ")"
+                    + "\n\tboundsChanged=" + state.hasBoundsChanged()
+            );
         }
 
         if (!isGenerationCurrent(currentGen)) return;
@@ -484,6 +575,8 @@ public class ConsoleRenderManager {
                 tracker.recordFailure(System.nanoTime());
                 container.getStateMachine().addState(Container.STATE_RENDER_ERROR);
                 escalateContainerError(tracker, container);
+                // Re-mark dirty so the frame gets retried
+                markDirty();
             }
         });
     }

@@ -142,7 +142,6 @@ public class ConsoleContainerLayoutManager implements ContainerLayoutManager
         maxVisible = 1;
         focusedIndex = idx;
         requestFocus(id);
-        reflow();
     }
 
     public void unlockContainer() {

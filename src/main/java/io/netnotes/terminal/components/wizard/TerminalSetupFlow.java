@@ -3,7 +3,9 @@ package io.netnotes.terminal.components.wizard;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
+import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
@@ -12,8 +14,14 @@ import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.components.panels.TerminalDivider;
 import io.netnotes.terminal.components.panels.TerminalVStack;
-import io.netnotes.terminal.components.panels.TerminalVStack.VAlignment;
+import io.netnotes.terminal.components.panels.TerminalAbstractStack.HAlignment;
+import io.netnotes.terminal.components.panels.TerminalAbstractStack.VAlignment;
+import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
+import io.netnotes.terminal.layout.TerminalLayoutData;
+import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
 
 /**
  * TerminalSetupFlow - Interactive multi-step user-driven wizard.
@@ -71,6 +79,8 @@ import io.netnotes.engine.ui.SizePreference;
  * </pre>
  */
 public class TerminalSetupFlow extends TerminalRegion {
+
+    private static final String INNER_GROUP = "setup-flow-inner";
 
     // ===== INNER TYPES =====
 
@@ -150,6 +160,8 @@ public class TerminalSetupFlow extends TerminalRegion {
     private final TerminalDivider headerDivider;
     private final TerminalVStack  bodySlot;
     private final TerminalDivider footerDivider;
+    private final String innerGroupName;
+    private TerminalLayoutGroupCallback innerGroupCallback = null;
 
     private TerminalRenderable mountedBody = null;
 
@@ -165,21 +177,27 @@ public class TerminalSetupFlow extends TerminalRegion {
         headerDivider = new TerminalDivider(name + "-hdiv");
         bodySlot      = new TerminalVStack(name + "-body");
         footerDivider = new TerminalDivider(name + "-fdiv");
+        innerGroupName = name + INNER_GROUP;
 
         buildLayout();
+        innerGroupCallback = this::layoutRootStack;
+        registerChildGroupCallback(innerGroupName, innerGroupCallback);
         addChild(rootStack);
+        addToLayoutGroup(rootStack, innerGroupName);
         hide();
     }
 
     private void buildLayout() {
         rootStack.setSpacing(0);
         rootStack.setVAlignment(VAlignment.TOP);
+        rootStack.setHAlignment(HAlignment.LEFT);
 
         headerDivider.setLineStyle(borderStyle);
         headerDivider.setLineTextStyle(styleBorder);
 
         bodySlot.setWidthPreference(SizePreference.FILL);
         bodySlot.setHeightPreference(SizePreference.FIT_CONTENT);
+        bodySlot.setHAlignment(HAlignment.LEFT);
         bodySlot.setSpacing(0);
 
         footerDivider.setLineStyle(borderStyle);
@@ -190,12 +208,74 @@ public class TerminalSetupFlow extends TerminalRegion {
         rootStack.addChild(footerDivider);
     }
 
+    private void layoutRootStack(
+        TerminalLayoutContext[] contexts,
+        Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
+    ) {
+        if (contexts.length == 0) return;
+        TerminalRectangle parent = contexts[0].getParentRegion();
+        if (parent == null) return;
+
+        int innerX = showBorder ? 1 : 0;
+        int innerY = showBorder ? 2 : 1;
+        int innerW = parent.getWidth() - (showBorder ? 2 : 0);
+        int innerH = parent.getHeight() - innerY - (showBorder ? 2 : 1);
+
+        if (innerW <= 0 || innerH <= 0) {
+            RenderDiagnostics.logRenderBlocker(
+                "setupflow-inner-space:" + getName(),
+                "TerminalSetupFlow.layout",
+                "non-positive-inner-layout-bounds",
+                () -> "flow=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\tparent=" + RenderDiagnostics.summarizeRegion(parent)
+                    + "\n\tshowBorder=" + showBorder
+                    + "\n\tinnerX=" + innerX
+                    + "\n\tinnerY=" + innerY
+                    + "\n\tinnerW=" + innerW
+                    + "\n\tinnerH=" + innerH
+            );
+        }
+
+        dataInterfaces.get(rootStack.getName()).setLayoutData(
+            TerminalLayoutData.getBuilder()
+                .setX(innerX)
+                .setY(innerY)
+                .setWidth(Math.max(0, innerW))
+                .setHeight(Math.max(0, innerH))
+                .build()
+        );
+    }
+
+    private int renderOverheadRows() {
+        return 4 + (showBorder ? 2 : 0);
+    }
+
+    @Override
+    public int getMinHeight() {
+        return Math.max(super.getMinHeight(), renderOverheadRows());
+    }
+
+    public int getPreferredHeight() {
+        return resolveMeasuredHeight();
+    }
+
+    public int getPreferredWidth() {
+        return resolveMeasuredWidth();
+    }
+
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, resolveMeasuredWidth(), resolveMeasuredHeight());
+        return measured;
+    }
+
     // ===== STEP MANAGEMENT =====
 
     public TerminalSetupFlow addStep(FlowStep step) {
         if (step == null) return this;
         steps.add(step);
-        invalidate();
+        notifyContentChanged();
         return this;
     }
 
@@ -203,7 +283,7 @@ public class TerminalSetupFlow extends TerminalRegion {
         steps.clear();
         if (newSteps != null) steps.addAll(newSteps);
         currentIndex = 0;
-        invalidate();
+        notifyContentChanged();
         return this;
     }
 
@@ -304,22 +384,22 @@ public class TerminalSetupFlow extends TerminalRegion {
 
     // ===== CONFIGURATION =====
 
-    public TerminalSetupFlow setFlowTitle(String title)    { this.flowTitle  = title != null ? title : ""; invalidate(); return this; }
-    public TerminalSetupFlow setShowBorder(boolean show)   { this.showBorder = show; invalidate(); return this; }
-    public TerminalSetupFlow setShowCancel(boolean show)   { this.showCancel = show; invalidate(); return this; }
+    public TerminalSetupFlow setFlowTitle(String title)    { String resolved = title != null ? title : ""; if (!this.flowTitle.equals(resolved)) { this.flowTitle = resolved; notifyContentChanged(); } return this; }
+    public TerminalSetupFlow setShowBorder(boolean show)   { if (this.showBorder != show) { this.showBorder = show; requestLayoutUpdate(); invalidate(); } return this; }
+    public TerminalSetupFlow setShowCancel(boolean show)   { if (this.showCancel != show) { this.showCancel = show; notifyContentChanged(); } return this; }
 
     // ===== STYLE SETTERS =====
 
-    public void setBorderStyle(LineStyle s)        { this.borderStyle = s; headerDivider.setLineStyle(s); footerDivider.setLineStyle(s); }
-    public void setStyleBorder(TextStyle s)        { this.styleBorder = s; headerDivider.setLineTextStyle(s); footerDivider.setLineTextStyle(s); }
-    public void setStyleFlowTitle(TextStyle s)     { this.styleFlowTitle     = s; }
-    public void setStyleStepTitle(TextStyle s)     { this.styleStepTitle     = s; }
-    public void setStyleDotActive(TextStyle s)     { this.styleDotActive     = s; }
-    public void setStyleDotDone(TextStyle s)       { this.styleDotDone       = s; }
-    public void setStyleDotPending(TextStyle s)    { this.styleDotPending    = s; }
-    public void setStyleNavBtn(TextStyle s)        { this.styleNavBtn        = s; }
-    public void setStyleNavBtnPrimary(TextStyle s) { this.styleNavBtnPrimary = s; }
-    public void setStyleValidationErr(TextStyle s) { this.styleValidationErr = s; }
+    public void setBorderStyle(LineStyle s)        { this.borderStyle = s; headerDivider.setLineStyle(s); footerDivider.setLineStyle(s); invalidate(); }
+    public void setStyleBorder(TextStyle s)        { this.styleBorder = s; headerDivider.setLineTextStyle(s); footerDivider.setLineTextStyle(s); invalidate(); }
+    public void setStyleFlowTitle(TextStyle s)     { this.styleFlowTitle     = s; invalidate(); }
+    public void setStyleStepTitle(TextStyle s)     { this.styleStepTitle     = s; invalidate(); }
+    public void setStyleDotActive(TextStyle s)     { this.styleDotActive     = s; invalidate(); }
+    public void setStyleDotDone(TextStyle s)       { this.styleDotDone       = s; invalidate(); }
+    public void setStyleDotPending(TextStyle s)    { this.styleDotPending    = s; invalidate(); }
+    public void setStyleNavBtn(TextStyle s)        { this.styleNavBtn        = s; invalidate(); }
+    public void setStyleNavBtnPrimary(TextStyle s) { this.styleNavBtnPrimary = s; invalidate(); }
+    public void setStyleValidationErr(TextStyle s) { this.styleValidationErr = s; invalidate(); }
 
     // ===== RENDERING =====
 
@@ -332,6 +412,11 @@ public class TerminalSetupFlow extends TerminalRegion {
         if (w <= 0 || h <= 0) return;
 
         if (showBorder) {
+            fillRegion(batch, 1, 1, Math.max(0, w - 2), Math.max(0, h - 2), ' ', TextStyle.NORMAL);
+        } else {
+            fillRegion(batch, 0, 0, w, h, ' ', TextStyle.NORMAL);
+        }
+        if (showBorder) {
             renderOuterBorder(batch, w, h);
         }
 
@@ -343,6 +428,11 @@ public class TerminalSetupFlow extends TerminalRegion {
         if (footerRow > (showBorder ? 1 : 0)) {
             renderFooter(batch, w, footerRow);
         }
+    }
+
+    @Override
+    protected TerminalInsets getChildRenderInsets() {
+        return showBorder ? new TerminalInsets(1) : null;
     }
 
     private void renderOuterBorder(TerminalBatchBuilder batch, int w, int h) {
@@ -463,5 +553,95 @@ public class TerminalSetupFlow extends TerminalRegion {
     private static String truncate(String s, int max) {
         if (s == null || max <= 0) return "";
         return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    }
+
+    private int resolveMeasuredWidth() {
+        return switch (getWidthPreference()) {
+            case STATIC -> getRegion().getWidth();
+            case FIT_CONTENT -> Math.max(getMinWidth(), calculateFitContentWidth());
+            default -> getMinWidth();
+        };
+    }
+
+    private int resolveMeasuredHeight() {
+        return switch (getHeightPreference()) {
+            case STATIC -> getRegion().getHeight();
+            case FIT_CONTENT -> Math.max(getMinHeight(), calculateFitContentHeight());
+            default -> getMinHeight();
+        };
+    }
+
+    private int calculateFitContentWidth() {
+        int bodyWidth = 0;
+        int maxStepTitleWidth = 0;
+        for (FlowStep step : steps) {
+            bodyWidth = Math.max(bodyWidth, measureRenderableDimension(step.getBody(), true));
+            maxStepTitleWidth = Math.max(maxStepTitleWidth, step.getTitle().length());
+        }
+
+        int stepCount = Math.max(1, steps.size());
+        String stepCounter = "Step " + stepCount + " of " + stepCount;
+        String leftText = "  " + flowTitle + "  ·  " + stepCounter;
+        int dotsWidth = steps.isEmpty() ? 0 : (steps.size() * 2) - 1;
+        int headerWidth = leftText.length();
+        if (dotsWidth > 0) {
+            headerWidth += 2 + dotsWidth;
+        }
+        if (maxStepTitleWidth > 0) {
+            headerWidth += 2 + maxStepTitleWidth;
+        }
+
+        int footerWidth = "[ Finish ]".length() + 1;
+        if (steps.size() > 1) {
+            footerWidth += "[ ← Back ]".length() + 1;
+        }
+        if (showCancel) {
+            footerWidth += "[✕ Cancel]".length() + 1;
+        }
+
+        int innerWidth = Math.max(bodyWidth, Math.max(headerWidth, footerWidth));
+        return innerWidth + (showBorder ? 2 : 0);
+    }
+
+    private int calculateFitContentHeight() {
+        int bodyHeight = 0;
+        for (FlowStep step : steps) {
+            bodyHeight = Math.max(bodyHeight, measureRenderableDimension(step.getBody(), false));
+        }
+        return bodyHeight + renderOverheadRows();
+    }
+
+    private int measureRenderableDimension(TerminalRenderable renderable, boolean width) {
+        if (renderable == null || renderable.isLayoutExcluded()) {
+            return 0;
+        }
+
+        TerminalRectangle requested = renderable.getRequestedRegion();
+        if (requested != null) {
+            return width ? requested.getWidth() : requested.getHeight();
+        }
+
+        TerminalRectangle region = renderable.getRegion();
+        int currentDimension = width ? region.getWidth() : region.getHeight();
+        if (currentDimension > 0) {
+            return currentDimension;
+        }
+
+        if (renderable instanceof TerminalRegion terminalRegion) {
+            TerminalRectangle measured = terminalRegion.measureContent(null);
+            int measuredDimension = width ? measured.getWidth() : measured.getHeight();
+            terminalRegion.getRegionPool().recycle(measured);
+            if (measuredDimension > 0) {
+                return measuredDimension;
+            }
+        }
+
+        return currentDimension;
+    }
+
+    @Override
+    protected void onDestroying() {
+        destroyLayoutGroup(innerGroupName);
+        innerGroupCallback = null;
     }
 }

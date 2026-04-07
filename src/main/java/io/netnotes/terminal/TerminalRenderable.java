@@ -1,18 +1,20 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.LineStyle;
-import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
+import io.netnotes.debug.RenderDiagnostics;
+import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroup;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
+import io.netnotes.terminal.layout.TerminalLayoutNode;
+import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.renderer.Renderable;
-import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
+import io.netnotes.engine.ui.renderer.RenderableStates;
 
 /**
  * TerminalRenderable - Abstract base class for terminal renderables
@@ -46,17 +48,15 @@ public abstract class TerminalRenderable extends Renderable<
     TerminalBatchBuilder,
     Point2D,
     TerminalRectangle,
+    TerminalLayoutNode,
     TerminalLayoutContext,
     TerminalLayoutData,
     TerminalLayoutCallback,
     TerminalLayoutGroupCallback,
-    TerminalGroupCallbackEntry,
     TerminalRenderable.TerminalGroupStateEntry,
     TerminalLayoutGroup,
     TerminalRenderable
 > {
-
-    private static final LogLevel LOG_LEVEL = LogLevel.IMPORTANT;
     
     private boolean clampCursor = true;          // Default to clamping cursor
     
@@ -67,6 +67,10 @@ public abstract class TerminalRenderable extends Renderable<
      */
     protected TerminalRenderable(String name) {
         super(name, TerminalRectanglePool.getInstance());  
+    }
+
+    public boolean isLayoutExcluded() {
+        return hasState(RenderableStates.STATE_HIDDEN_DESIRED);
     }
 
     @Override
@@ -288,63 +292,29 @@ public abstract class TerminalRenderable extends Renderable<
     }
     
     // ===== 2D CONVENIENCE SETTERS =====
-    // These create temporary regions and delegate to setRegion()
-    // NOT zero-allocation - use sparingly in hot paths
-    
-    /**
-     * Get base region for mutations - requested if pending, else allocated
-     * Returns null if hidden (mutations are no-op)
-     * Caller must recycle returned region after use
-     */
     private TerminalRectangle getMutationBase() {
-        if (isHidden()) {
-            return null;  // Hidden - no mutations allowed
-        }
-        
-        return hasRequestedRegion() 
-            ? getRequestedRegion().copy()
-            : region.copy();
+        TerminalRectangle base = regionPool.obtain();
+        base.copyFrom(requestedRegion != null ? requestedRegion : region);
+        return base;
     }
 
-
-    
-    /**
-     * Set X position (left edge)
-     * Convenience method - creates temporary region
-     */
     public void setX(int x) {
-        TerminalRectangle base = getMutationBase();
-        if (base == null) return;
-        
-        base.setX(x);
-        setRegion(base);
-        // Don't recycle - setRegion takes ownership
+        ensureRequestedRegion();
+        requestedRegion.setX(x);
+        requestLayoutUpdate();
     }
     
-    /**
-     * Set Y position (top edge)
-     * Convenience method - creates temporary region
-     */
     public void setY(int y) {
-        TerminalRectangle base = getMutationBase();
-        if (base == null) return;
-        
-        base.setY(y);
-        setRegion(base);
-        // Don't recycle - setRegion takes ownership
+        ensureRequestedRegion();
+        requestedRegion.setY(y);
+        requestLayoutUpdate();
     }
-    
-    /**
-     * Set position (x, y)
-     * Convenience method - creates temporary region
-     */
-    public void setPosition(int x, int y) {
-        TerminalRectangle base = getMutationBase();
-        if (base == null) return;
+
         
-        base.setPosition(x, y);
-        setRegion(base);
-        // Don't recycle - setRegion takes ownership
+    public void setPosition(int x, int y) {
+        ensureRequestedRegion();
+        requestedRegion.setPosition(x, y);
+        requestLayoutUpdate();
     }
     
     /**
@@ -391,28 +361,17 @@ public abstract class TerminalRenderable extends Renderable<
      * Convenience method - creates temporary region
      */
     public void setRegion(int x, int y, int width, int height) {
-        TerminalRectangle base = getMutationBase();
-        if (base == null) return;
-        
-        base.setBounds(x, y, width, height);
-        setRegion(base);
-        // Don't recycle - setRegion takes ownership
+        if (isHidden()) return;
+        ensureRequestedRegion();
+        requestedRegion.set(x, y, width, height);
+        requestLayoutUpdate();
     }
 
     public void setBounds(int x, int y, int width, int height){
         setRegion(x, y, width, height);
     }
 
-    @Override
-    public void setRegion(TerminalRectangle bounds) {
-        TerminalRectangle base = getMutationBase();
-        if (base == null) return;
-        
-        base.setBounds(bounds.getX(), bounds.getY(), bounds.getWidth(), bounds.getHeight());
-        super.setRegion(base);
-        // Don't recycle - setRegion takes ownership
-    }
-    
+  
     /**
      * Translate by offset
      * Convenience method - creates temporary region
@@ -468,11 +427,6 @@ public abstract class TerminalRenderable extends Renderable<
         return new TerminalGroupStateEntry();
     }
 
-    @Override
-    protected TerminalGroupCallbackEntry createGroupCallbackEntry(TerminalLayoutGroupCallback groupCallback) {
-        return new TerminalGroupCallbackEntry(groupCallback);
-    }
-
 
     // ===== RENDERING COMMANDS WITH BOUNDARY ENFORCEMENT =====
     
@@ -485,55 +439,242 @@ public abstract class TerminalRenderable extends Renderable<
     }
     
     protected void printAt(TerminalBatchBuilder batch, int x, int y, String text, TextStyle style) {
-        if (!isEffectivelyVisible() || text.isEmpty()){ 
-            Log.logMsg("[TerminalRenderable] printAt dropped"
-                + "\n\ttext:" + text
-                + "\n\tisEffectivelyVisible: " + isEffectivelyVisible()
-                + "\n\ttext.isEmpty: " + text.isEmpty() 
-            , LOG_LEVEL);
+        if (text.isEmpty()) {
             return;
         }
-        if (y < 0 || y >= getHeight()){ 
-            Log.logMsg("[TerminalRenderable] printAt dropped"
-                + "\n\ttext:" + text
-                + "\n\ty: " + y
-                + "\n\ty<0: " + (y < 0)
-                + "\n\ty>=getHeight(): " + (y>=getHeight())
-                + "\n\theight: " + getHeight() 
-            , LOG_LEVEL);
+        if (!isEffectivelyVisible()) {
+            RenderDiagnostics.logRenderDrop(
+                "printAt-hidden:" + getName(),
+                "TerminalRenderable.printAt",
+                "not-effectively-visible",
+                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
+            );
+            return;
+        }
+        if (y < 0 || y >= getHeight()) {
+            RenderDiagnostics.logRenderDrop(
+                "printAt-y-oob:" + getName(),
+                "TerminalRenderable.printAt",
+                "y-out-of-bounds",
+                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
+                    + "\n\tlocalY=" + y
+                    + "\n\theight=" + getHeight()
+            );
             return;
         }
         
         int absY = toAbsoluteY(y);
+        int absX = toAbsoluteX(x);
         int left = toAbsoluteX(Math.max(0, x));
         int right = toAbsoluteX(Math.min(getWidth(), x + text.length()));
-        
-        TerminalRectangle clip = batch.getCurrentClipRegion();
-        if (clip != null) {
-            if (absY < clip.getY() || absY >= clip.getY() + clip.getHeight()) return;
-            left = Math.max(left, clip.getX());
-            right = Math.min(right, clip.getX() + clip.getWidth());
-        }
-        
+
         if (right <= left) {
-            Log.logMsg("[TerminalRenderable] printAt dropped"
-                + "\n\ttext:" + text
-                + "\n\tright <= left: " + (right<=left)
-                + "\n\tright:" + right
-                + "\n\tleft:" + left
-            , LOG_LEVEL);
+            RenderDiagnostics.logRenderDrop(
+                "printAt-x-oob:" + getName(),
+                "TerminalRenderable.printAt",
+                "x-outside-renderable-bounds",
+                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
+                    + "\n\tlocalX=" + x
+                    + "\n\twidth=" + getWidth()
+                    + "\n\tabsRange=[" + left + "," + right + ")"
+            );
             return;
         }
         
-        int startIdx = left - toAbsoluteX(x);
-        int endIdx = right - toAbsoluteX(x);
-        text = text.substring(Math.max(0, startIdx), Math.min(text.length(), endIdx));
-        Log.logMsg("[TerminalRenderable] printAt"
-                + "\n\ttext:" + text
-                + "\n\tleft:" + left
-                + "\n\tabsY" + absY
-        , LOG_LEVEL);
-        batch.printAt(left, absY, text, style);
+        TerminalRectangle clip = batch.getCurrentClipRegion();
+        final int clippedLeft;
+        final int clippedRight;
+        if (clip != null) {
+            if (absY < clip.getY() || absY >= clip.getY() + clip.getHeight()) {
+                RenderDiagnostics.logRenderDrop(
+                    "printAt-clip-y:" + getName(),
+                    "TerminalRenderable.printAt",
+                    "clip-excluded-y",
+                    () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                        + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
+                        + "\n\tabsY=" + absY
+                        + "\n\tclip=" + RenderDiagnostics.summarizeRegion(clip)
+                );
+                return;
+            }
+            clippedLeft = Math.max(left, clip.getX());
+            clippedRight = Math.min(right, clip.getX() + clip.getWidth());
+        } else {
+            clippedLeft = left;
+            clippedRight = right;
+        }
+        
+        if (clippedRight <= clippedLeft) {
+            RenderDiagnostics.logRenderDrop(
+                "printAt-clipped-away:" + getName(),
+                "TerminalRenderable.printAt",
+                "clip-excluded-x",
+                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
+                    + "\n\tabsRange=[" + left + "," + right + ")"
+                    + "\n\tclippedRange=[" + clippedLeft + "," + clippedRight + ")"
+                    + "\n\tclip=" + RenderDiagnostics.summarizeRegion(clip)
+            );
+            return;
+        }
+        
+        int startIdx = clippedLeft - absX;
+        int endIdx = clippedRight - absX;
+
+        batch.printAt(clippedLeft, absY, text.substring(Math.max(0, startIdx), Math.min(text.length(), endIdx)), style);
+    }
+
+    @Override
+    public void requestLayoutUpdate() {
+        RenderDiagnostics.logSwapTrace(
+            "TerminalRenderable.requestLayoutUpdate",
+            this,
+            () -> "parent=" + RenderDiagnostics.summarizeRenderable(getParent())
+                + "\n\trenderPhase=" + getRenderPhase()
+        );
+        super.requestLayoutUpdate();
+    }
+
+    @Override
+    public void setVisible(boolean visible) {
+        RenderDiagnostics.logSwapTrace(
+            "TerminalRenderable.setVisible:before",
+            this,
+            () -> "requestedVisible=" + visible
+                + "\n\tparent=" + RenderDiagnostics.summarizeRenderable(getParent())
+                + "\n\trenderPhase=" + getRenderPhase()
+        );
+        super.setVisible(visible);
+        RenderDiagnostics.logSwapTrace(
+            "TerminalRenderable.setVisible:after",
+            this,
+            () -> "requestedVisible=" + visible
+                + "\n\tparent=" + RenderDiagnostics.summarizeRenderable(getParent())
+                + "\n\trenderPhase=" + getRenderPhase()
+        );
+    }
+
+    @Override
+    public void invalidate(TerminalRectangle damageRegion) {
+        RenderDiagnostics.logSwapTrace(
+            "TerminalRenderable.invalidate",
+            this,
+            () -> "damage=" + (damageRegion != null
+                ? RenderDiagnostics.summarizeRegion(damageRegion)
+                : "FULL")
+                + "\n\tparent=" + RenderDiagnostics.summarizeRenderable(getParent())
+                + "\n\trenderPhase=" + getRenderPhase()
+        );
+        super.invalidate(damageRegion);
+    }
+
+    @Override
+    public void toBatch(TerminalBatchBuilder batch, TerminalRectangle clipRegion) {
+        TerminalRectangle region = getRegion();
+        if (isVisible() && (region == null || region.getWidth() <= 0 || region.getHeight() <= 0)) {
+            RenderDiagnostics.logRenderDrop(
+                "to-batch-empty-region:" + getName(),
+                "TerminalRenderable.toBatch",
+                "empty-region",
+                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\tclipRegion=" + RenderDiagnostics.summarizeRegion(clipRegion)
+            );
+        }
+        if (isEffectivelyVisible()
+            && region != null
+            && clipRegion != null
+            && region.getWidth() > 0
+            && region.getHeight() > 0
+            && (clipRegion.getWidth() < region.getWidth() || clipRegion.getHeight() < region.getHeight())) {
+            RenderDiagnostics.logRenderBlocker(
+                "to-batch-tight-clip:" + getName(),
+                250_000_000L,
+                "TerminalRenderable.toBatch",
+                "clip-smaller-than-region",
+                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\tclipRegion=" + RenderDiagnostics.summarizeRegion(clipRegion)
+            );
+        }
+        super.toBatch(batch, clipRegion);
+    }
+
+    @Override
+    protected void renderChildrenByLayer(
+        TerminalBatchBuilder batch,
+        TerminalRectangle visibleClip,
+        TerminalRectangle forcedRegion
+    ) {
+        TerminalRectangle childClip = createChildRenderClip(visibleClip);
+        if (childClip == null || childClip.isEmpty()) {
+            if (childClip != null) {
+                regionPool.recycle(childClip);
+            }
+            return;
+        }
+
+        TerminalRectangle childForced = null;
+        if (forcedRegion != null) {
+            childForced = regionPool.obtain();
+            if (!forcedRegion.intersect(childClip, childForced)) {
+                regionPool.recycle(childForced);
+                childForced = null;
+            }
+        }
+
+        try {
+            super.renderChildrenByLayer(batch, childClip, childForced);
+        } finally {
+            if (childForced != null) {
+                regionPool.recycle(childForced);
+            }
+            regionPool.recycle(childClip);
+        }
+    }
+
+    protected TerminalInsets getChildRenderInsets() {
+        if (this instanceof TerminalSizeable sizeable) {
+            TerminalInsets insets = sizeable.getInsets();
+            if (insets != null && !insets.isZero()) {
+                return insets;
+            }
+        }
+        return null;
+    }
+
+    private TerminalRectangle createChildRenderClip(TerminalRectangle visibleClip) {
+        if (visibleClip == null || visibleClip.isEmpty()) {
+            return null;
+        }
+
+        TerminalInsets childInsets = getChildRenderInsets();
+        if (childInsets == null || childInsets.isZero()) {
+            TerminalRectangle clipCopy = regionPool.obtain();
+            clipCopy.copyFrom(visibleClip);
+            return clipCopy;
+        }
+
+        TerminalRectangle absoluteRegion = getAbsoluteRegion();
+        TerminalRectangle innerClip = absoluteRegion.deflateClamped(childInsets);
+        TerminalRectangle clipped = regionPool.obtain();
+
+        try {
+            if (!innerClip.intersect(visibleClip, clipped)) {
+                regionPool.recycle(clipped);
+                return null;
+            }
+            return clipped;
+        } finally {
+            regionPool.recycle(innerClip);
+            regionPool.recycle(absoluteRegion);
+        }
+    }
+
+    @Override
+    protected void onRegionChanged(TerminalRectangle oldRegion, TerminalRectangle newRegion) {
+        super.onRegionChanged(oldRegion, newRegion);
     }
     
     /**
@@ -790,9 +931,12 @@ public abstract class TerminalRenderable extends Renderable<
                 regionPool.recycle(renderRegion);
                 return;
             }
-            // renderRegion is the clipped 1-row region — emit as x/y/length
+            // renderRegion is the clipped 1-column region — emit as x/y/length
+            // NOTE: use getHeight(), not getWidth().  lineRegion is (1 × length),
+            // so after intersection the clipped length is renderRegion.getHeight().
+            // getWidth() is always 1 and would render only a single character.
             batch.drawVLine(renderRegion.getX(), renderRegion.getY(),
-                            renderRegion.getWidth(), style, lineStyle);
+                            renderRegion.getHeight(), style, lineStyle);
             regionPool.recycle(renderRegion);
         } else {
             batch.drawVLine(absX, absY, length, style, lineStyle);
@@ -1091,6 +1235,17 @@ public abstract class TerminalRenderable extends Renderable<
     protected void pushClipRegion(TerminalBatchBuilder batch, int x, int y, int width, int height) {
         TerminalRectangle region = regionPool.obtain();
         region.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
+        TerminalRectangle currentClip = batch.getCurrentClipRegion();
+        if (currentClip != null) {
+            TerminalRectangle clipped = regionPool.obtain();
+            if (region.intersect(currentClip, clipped)) {
+                regionPool.recycle(region);
+                region = clipped;
+            } else {
+                regionPool.recycle(clipped);
+                region.setToIdentity();
+            }
+        }
         batch.pushClipRegion(region);
     }
 
@@ -1487,7 +1642,7 @@ public abstract class TerminalRenderable extends Renderable<
 
     public class TerminalGroupStateEntry extends Renderable.GroupStateEntry<
         TerminalRenderable,
-        TerminalGroupCallbackEntry,
+        TerminalLayoutGroupCallback,
         TerminalGroupStateEntry
     >{}
 }

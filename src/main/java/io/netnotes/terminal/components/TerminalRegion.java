@@ -1,249 +1,245 @@
 package io.netnotes.terminal.components;
 
 import io.netnotes.engine.ui.SizePreference;
+
+import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalSizeable;
 
 public class TerminalRegion extends TerminalRenderable implements TerminalSizeable {
+    public static final int AXIS_X = 0;
+    public static final int AXIS_Y = 1;
+    public static final int AXIS_W = 2;
+    public static final int AXIS_H = 3;
+    
     protected final TerminalInsets insets;
-    private SizePreference widthPreference = SizePreference.STATIC;
+    private SizePreference widthPreference  = SizePreference.STATIC;
     private SizePreference heightPreference = SizePreference.STATIC;
-    private float percentWidth = 0f;
+    private float percentWidth  = 0f;
     private float percentHeight = 0f;
-    private int minWidth = 1;
-    private int minHeight = 1;
+    private int minWidth  = 0;
+    private int minHeight = 0;
     private boolean isHiddenManaged = true;
 
-    public TerminalRegion(String regionName){
+    public TerminalRegion(String regionName) {
         super(regionName);
         insets = new TerminalInsets();
         insets.setOnChanged(this::handleInsetsChanged);
     }
 
-    private void handleInsetsChanged(TerminalInsets insets){
+    private void handleInsetsChanged(TerminalInsets insets) {
         onInsetsChanged(insets);
         requestLayoutUpdate();
     }
 
-    protected void onInsetsChanged(TerminalInsets insets){}
+    protected void onInsetsChanged(TerminalInsets insets) {}
 
-    public void setMinWidth(int minWidth){
-        this.minWidth = Math.max(1, minWidth);
+    // ── Min size ──────────────────────────────────────────────────────────────
+    public void setMinSize(int minWidth, int minHeight) {
+        this.minWidth = Math.max(0, minWidth);
+        this.minHeight = Math.max(0, minHeight);
         requestLayoutUpdate();
     }
 
-    public void setMinHeight(int minHeight){
-        this.minHeight = Math.max(1, minHeight);
+    public void setMinWidth(int minWidth) {
+        this.minWidth = Math.max(0, minWidth);
         requestLayoutUpdate();
     }
 
-    public int getMinWidth(){
-        return minWidth + getInsets().getHorizontal();
+    public void setMinHeight(int minHeight) {
+        this.minHeight = Math.max(0, minHeight);
+        requestLayoutUpdate();
     }
 
-    public int getMinHeight(){
-        return minHeight + getInsets().getVertical();
-    }
-
-    
-
+    @Override public int getMinWidth()  { return minWidth; }
+    @Override public int getMinHeight() { return minHeight; }
 
     @Override
-    public SizePreference getWidthPreference() {
-        return this.widthPreference;
+    public int getMinSize(int axis) {
+        return switch (axis) {
+            case AXIS_W -> getMinWidth();
+            case AXIS_H -> getMinHeight();
+            default -> throw new IllegalArgumentException(
+                "getMinSize TerminalRegion does not have axis: " + axis);
+        };
     }
 
-    @Override
-    public SizePreference getHeightPreference() {
-        return this.heightPreference;
-    }
+    // ── SizePreference ────────────────────────────────────────────────────────
+
+    @Override public SizePreference getWidthPreference()  { return widthPreference; }
+    @Override public SizePreference getHeightPreference() { return heightPreference; }
 
     public void setWidthPreference(SizePreference widthPreference) {
-        this.widthPreference = widthPreference != null ? widthPreference : SizePreference.FIT_CONTENT;
+        this.widthPreference = widthPreference != null ? widthPreference : SizePreference.STATIC;
         requestLayoutUpdate();
     }
 
     public void setHeightPreference(SizePreference heightPreference) {
-        this.heightPreference = heightPreference != null ? heightPreference : SizePreference.FIT_CONTENT;
+        this.heightPreference = heightPreference != null ? heightPreference : SizePreference.STATIC;
         requestLayoutUpdate();
     }
- 
-    @Override
-    public int getPreferredWidth() {
-        SizePreference pref = getWidthPreference();
-        if (pref == SizePreference.STATIC) {
-            return region.getWidth();
-        }
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinWidth();
-        }
-
-        int maxPrefWidth = 0;
-        for (TerminalRenderable child : getChildren()) {
-            if (child.isHidden()) continue;
-            
-            if (child instanceof TerminalSizeable) {
-                maxPrefWidth = Math.max(maxPrefWidth, ((TerminalSizeable) child).getPreferredWidth());
-            } else if (child.getRequestedRegion() != null) {
-                maxPrefWidth = Math.max(maxPrefWidth, child.getRequestedRegion().getWidth());
-            } else {
-                maxPrefWidth = Math.max(maxPrefWidth, child.getRegion().getWidth());
-            }
-        }
-        return Math.max(getMinWidth(), maxPrefWidth + getInsets().getHorizontal());
-    
-    }
 
     @Override
-    public boolean isHiddenManaged(){
-        return isHiddenManaged;
+    public SizePreference getSizePreference(int axis) {
+        return switch (axis) {
+            case AXIS_W -> widthPreference;
+            case AXIS_H -> heightPreference;
+            default -> throw new IllegalArgumentException(
+                "getSizePreference TerminalRegion does not have axis: " + axis);
+        };
     }
 
-    public void setIsHiddenManaged(boolean isHiddenManaged){
-        if(this.isHiddenManaged != isHiddenManaged ){
+    // ── Hidden-managed ────────────────────────────────────────────────────────
+
+    @Override public boolean isHiddenManaged() { return isHiddenManaged; }
+
+    public void setIsHiddenManaged(boolean isHiddenManaged) {
+        if (this.isHiddenManaged != isHiddenManaged) {
             this.isHiddenManaged = isHiddenManaged;
             requestLayoutUpdate();
         }
     }
 
-    @Override
-    public int getPreferredHeight() {
-        SizePreference pref = getHeightPreference();
-        if (pref == SizePreference.STATIC) {
-            return region.getHeight();
-        }
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinHeight();
-        }
+    // ── Insets ────────────────────────────────────────────────────────────────
 
-        int maxPrefHeight = 0;
-        for (TerminalRenderable child : getChildren()) {
-            if (child.isHidden()) continue;
-            
-            if (child instanceof TerminalSizeable) {
-                maxPrefHeight = Math.max(maxPrefHeight, ((TerminalSizeable) child).getPreferredHeight());
-            } else if (child.getRequestedRegion() != null) {
-                maxPrefHeight = Math.max(maxPrefHeight, child.getRequestedRegion().getHeight());
-            } else {
-                maxPrefHeight = Math.max(maxPrefHeight, child.getRegion().getHeight());
-            }
-        }
-        return Math.max(getMinHeight(), maxPrefHeight + getInsets().getVertical());
-    }
+    @Override public TerminalInsets getInsets() { return insets; }
 
+    public void setInsets(int all) { insets.setAll(all); }
 
-    @Override
-    public TerminalInsets getInsets() {
-        return insets;
-    }
-
-    public void setInsets(int all) {
-        this.insets.setAll(all);
-    }
     public void setInsets(TerminalInsets padding) {
         if (padding == null) {
-            if (!this.insets.isZero()) {
-                this.insets.clear();
-            }
+            if (!insets.isZero()) insets.clear();
             return;
         }
-
-        if (!this.insets.equals(padding)) {
-            this.insets.copyFrom(padding);
-        }
+        if (!insets.equals(padding)) insets.copyFrom(padding);
     }
 
-    @Override
-    public float getPercentWidth() {
-        return percentWidth;
-    }
+    // ── Percent dimensions ────────────────────────────────────────────────────
+
+    @Override public double getPercentWidth()  { return percentWidth; }
+    @Override public double getPercentHeight() { return percentHeight; }
 
     @Override
-    public void setPercentWidth(float percent) {
-        this.percentWidth = percent;
+    public void setPercentWidth(double percent) {
+        this.percentWidth = (float) percent;
         requestLayoutUpdate();
     }
 
     @Override
-    public float getPercentHeight() {
-        return percentHeight;
-    }
-
-    @Override
-    public void setPercentHeight(float percent) {
-        this.percentHeight = percent;
+    public void setPercentHeight(double percent) {
+        this.percentHeight = (float) percent;
         requestLayoutUpdate();
     }
 
-    @Override
-    public int getMinSize(int axis) {
-        switch(axis){
-            case 0:
-                return getMinWidth();
-            case 1:
-                return getMinHeight();
-        }
-        throw new IllegalArgumentException("getMinSize TerminalRegion does not have: " + axis + " axis");
-    }
+    // ── Spatial-axis classification ───────────────────────────────────────────
+    //
+    // Do NOT override isSizedByContent() or isSizedByParent() here — the base
+    // class computes them from these four methods.
+
+    @Override public int     getNumSpatialAxes()      { return 4; }
+    @Override public boolean isPositionAxis(int axis) { return axis == AXIS_X || axis == AXIS_Y; }
 
     @Override
-    public int getPreferredSize(int axis) {
-        switch(axis){
-            case 0:
-                return getPreferredWidth();
-            case 1:
-                return getPreferredHeight();
-        }
-        throw new IllegalArgumentException("getPreferredSize TerminalRegion does not have: " + axis + " axis");
-    }
-
-    @Override
-    public SizePreference getSizePreference(int axis) {
-        switch(axis){
-            case 0:
-                return getWidthPreference();
-            case 1:
-                return getHeightPreference();
-        }
-        throw new IllegalArgumentException("getSizePreference TerminalRegion does not have: " + axis + " axis");
-    }
-
-    @Override
-    public boolean isSizedByContent() {
-        return widthPreference == SizePreference.FIT_CONTENT 
-            || heightPreference == SizePreference.FIT_CONTENT;
-    }
-
-    @Override
-    public boolean isSizedByParent() {
-        return widthPreference == SizePreference.FILL
-            || widthPreference == SizePreference.PERCENT
-            || heightPreference == SizePreference.FILL
-            || heightPreference == SizePreference.PERCENT;
-    }
-
-    public static int resolveContentDimension(
-        TerminalRenderable child,
-        int viewport,
-        float percent,
-        SizePreference pref,
-        boolean isWidth
-    ) {
-
-        return switch (pref) {
-            case FILL    -> viewport;
-            case PERCENT -> Math.round(viewport * (percent / 100f));
-            case STATIC  -> isWidth ? child.getRegion().getWidth() 
-                                    : child.getRegion().getHeight();
-            case FIT_CONTENT -> child instanceof TerminalSizeable s 
-                                    ? ( isWidth 
-                                            ? Math.max(s.getMinWidth(),  s.getPreferredWidth())
-                                            : Math.max(s.getMinHeight(), s.getPreferredHeight())) 
-                                    : viewport;
-            default -> viewport;
+    public boolean isAxisParentDependent(int axis) {
+        return switch (axis) {
+            case AXIS_W -> widthPreference.isParentDependent();
+            case AXIS_H -> heightPreference.isParentDependent();
+            default     -> false;
         };
     }
 
+    @Override
+    public boolean isAxisContentDependent(int axis) {
+        return switch (axis) {
+            case AXIS_W -> widthPreference.isContentDependent();
+            case AXIS_H -> heightPreference.isContentDependent();
+            default     -> false;
+        };
+    }
 
+    // ── Content measurement (layout-pass) ────────────────────────────────────
+    //
+    // Called by the layout manager during the bottom-up content pre-pass.
+    // childContexts[i] corresponds to getChildren().get(i). A null slot means
+    // the child is not content-sized or not dirty this pass — fall back to its
+    // committed geometry.
+
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int w = resolveOwnDimension(true,  childContexts);
+        int h = resolveOwnDimension(false, childContexts);
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, w, h);
+        return measured;
+    }
+
+    /**
+     * Resolve one dimension for this node during the content pre-pass.
+     *
+     * FILL/PERCENT: parent-allocated size is unknown at this phase — report
+     * the minimum floor so ancestors can at least reserve that much space.
+     *
+     * FIT_CONTENT: scan children, preferring in-flight measurements over
+     * committed geometry.
+     */
+    private int resolveOwnDimension(boolean isWidth, TerminalLayoutContext[] childContexts) {
+        SizePreference pref = isWidth ? widthPreference : heightPreference;
+
+        if (pref.isFixed()) {
+            return isWidth ? region.getWidth() : region.getHeight();
+        }
+        if (pref.isParentDependent()) {
+            return isWidth ? getMinWidth() : getMinHeight();
+        }
+
+        // FIT_CONTENT
+        int maxChildSize = 0;
+        java.util.List<TerminalRenderable> children = getChildren();
+
+        for (int i = 0; i < children.size(); i++) {
+            TerminalRenderable child = children.get(i);
+            if (child.isLayoutExcluded()) continue;
+
+            int childSize = resolveChildDimension(
+                child,
+                isWidth,
+                (childContexts != null && i < childContexts.length) ? childContexts[i] : null
+            );
+            maxChildSize = Math.max(maxChildSize, childSize);
+        }
+
+        int insetPad = isWidth ? insets.getHorizontal() : insets.getVertical();
+        return Math.max(isWidth ? getMinWidth() : getMinHeight(), maxChildSize + insetPad);
+    }
+
+    /**
+     * Resolve one dimension for a single child.
+     *
+     * Priority:
+     *   1. In-flight measuredContentBounds from this pass — freshest data.
+     *   2. Child's requested region — user-staged geometry.
+     *   3. Child's committed region — last known good value.
+     */
+    private int resolveChildDimension(
+        TerminalRenderable child,
+        boolean isWidth,
+        TerminalLayoutContext ctx
+    ) {
+        if (ctx != null) {
+            TerminalRectangle bounds = ctx.getMeasuredContentBounds();
+            if (bounds != null) {
+                return isWidth ? bounds.getWidth() : bounds.getHeight();
+            }
+        }
+
+        TerminalRectangle requested = child.getRequestedRegion();
+        if (requested != null) {
+            return isWidth ? requested.getWidth() : requested.getHeight();
+        }
+
+        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+    }
 }

@@ -1,213 +1,105 @@
 package io.netnotes.terminal.components.panels;
 
+import java.util.Arrays;
 import java.util.Map;
 
-import io.netnotes.terminal.layout.TerminalGroupCallbackEntry;
+import io.netnotes.debug.RenderDiagnostics;
+import io.netnotes.engine.ui.LayoutOverflowStrategy;
+import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.terminal.TerminalBatchBuilder;
+import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.layout.TerminalInsets;
-import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalSizeable;
-import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
-import io.netnotes.terminal.TerminalRenderable;
-import io.netnotes.terminal.TextStyle;
-import io.netnotes.terminal.TextStyle.LineStyle;
-import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalRectangle;
-import io.netnotes.terminal.components.TerminalRegion;
-import io.netnotes.terminal.components.panels.TerminalHStack.HAlignment;
 
 /**
- * TerminalVStack - Vertical stack layout container
- * 
- * Arranges children vertically with configurable spacing and sizing.
- * Does not render itself - purely a layout container.
- * 
- * SIZING:
- * - Width: Default is FILL (children take full width), can be set to FIT_CONTENT
- * - Height: Default is FIT_CONTENT (children use preferred height), can be set to FILL
- * - Children implementing TerminalLayoutable can override per-child
- * 
- * USAGE:
- * TerminalVStack stack = new TerminalVStack("messages");
- * stack.setSpacing(2);  // 2 rows between each child
- * stack.setPadding(1);  // 1 row padding around all children
- * stack.addChild(new TerminalLabel("msg1", "Line 1"));
- * stack.addChild(new TerminalLabel("msg2", "Line 2"));
+ * TerminalVStack — vertical stack layout container.
+ *
+ * Arranges children top-to-bottom with configurable spacing and sizing.
+ *
+ * SIZING (own axis = height, cross axis = width):
+ * - Height: default FIT_CONTENT — sums intrinsic heights of fixed children.
+ * - Width:  default FILL — expands to the full available width.
+ * - Children implementing TerminalSizeable can override per-child.
+ *
+     * BORDER / SEPARATORS:
+     * - setDrawBorder(true)     draws a box outline around all children.
+     * - setDrawSeparators(true) draws a 1-row horizontal separator between each
+     *   child. With drawBorder=true it also produces junction characters on the
+     *   left and right border edges. A TerminalDivider child placed explicitly
+     *   always produces junction characters when a border is present.
+ *
+ * OVERFLOW STRATEGIES (applied to the main / vertical axis):
+ * - CLIP (default)     : children that overflow are hidden.
+ * - OVERFLOW           : children render outside parent bounds without clipping.
+ * - SHRINK_FILL        : FILL children receive exactly the available share.
+ * - SHRINK_ALL         : all children scale proportionally if total exceeds height.
+ * - DISTRIBUTE_EQUAL   : every visible child receives an equal share of height.
  */
-public class TerminalVStack extends TerminalRegion {
+public class TerminalVStack extends TerminalAbstractStack {
 
-    public enum VAlignment {
-        TOP,
-        CENTER,
-        BOTTOM
-    }
-    
-    private int spacing = 1;  // Rows between children
-    private final TerminalInsets padding = new TerminalInsets();  // Padding around all children
-    private VAlignment vAlignment = VAlignment.TOP;
-    private HAlignment hAlignment = HAlignment.CENTER;
-    // Default sizing preferences for children that don't specify
-    private SizePreference defaultWidthPreference = SizePreference.FILL;
-    private SizePreference defaultHeightPreference = SizePreference.FIT_CONTENT;
-    private boolean drawBorder          = false;
-    private boolean drawSeparators      = false;   // requires drawBorder = true
-    private LineStyle borderStyle        = TextStyle.LineStyle.SINGLE;
-    private TextStyle borderTextStyle   = TextStyle.NORMAL;
+    // ── junction tracking ─────────────────────────────────────────────────────
 
-    private int[] separatorYs = new int[0];
-    
-    private final String layoutGroupId;
-    private final String layoutCallbackId;
-    private TerminalGroupCallbackEntry layoutCallbackEntry = null;
+    /**
+     * Y positions of gap-separator rows between children (drawSeparators=true).
+     * Written by the layout callback, read by renderSelf. Both run on the UI
+     * thread so no additional synchronisation is needed.
+     */
+    private int[] separatorYs    = new int[0];
+
+    /**
+     * Y positions where a TerminalDivider child was placed.
+     * Produces junction characters on the left/right border edges regardless
+     * of drawSeparators.
+     */
+    private int[] dividerChildYs = new int[0];
+
+    // =========================================================================
+    // CONSTRUCTION
+    // =========================================================================
 
     public TerminalVStack(String name) {
-        super(name);
-        this.layoutGroupId = "vstack-" + getName();
-        this.layoutCallbackId = "vstack-default";
-        this.setWidthPreference(SizePreference.FILL);
-        this.setHeightPreference(SizePreference.FIT_CONTENT);
-        init();
-    }
-
-    private void init() {
-        this.layoutCallbackEntry = new TerminalGroupCallbackEntry(
-            getLayoutCallbackId(),
-            this::layoutAllChildren
+        super(
+            name,
+            "vstack",
+            SizePreference.FILL,        // default child-width  → children fill width
+            SizePreference.FIT_CONTENT, // default child-height → children use intrinsic height
+            VAlignment.TOP,
+            HAlignment.CENTER
         );
-        registerGroupCallback(getLayoutGroupId(), layoutCallbackEntry);
+        // Own sizing defaults: the stack itself fills width, fits its content height.
+        setWidthPreference(SizePreference.FILL);
+        setHeightPreference(SizePreference.FIT_CONTENT);
+
+        // Must be last — all fields must be initialised before the layout group
+        // is registered with the rendering system.
+        initLayoutCallback();
     }
 
-    public TerminalGroupCallbackEntry getTerminalGroupCallbackEntry() { 
-        return layoutCallbackEntry; 
-    }
-
-    public String getLayoutCallbackId() {
-        return layoutCallbackId;
-    }
-    
-    public String getLayoutGroupId() {
-        return layoutGroupId;
-    }
-    
-    // ===== CONFIGURATION =====
-    
-    public void setSpacing(int spacing) {
-        if (this.spacing != spacing) {
-            this.spacing = Math.max(0, spacing);
-            requestLayoutUpdate();
-        }
-    }
-    
-    public void setPadding(int padding) {
-        int clamped = Math.max(0, padding);
-        if (this.padding.getTop() != clamped ||
-            this.padding.getRight() != clamped ||
-            this.padding.getBottom() != clamped ||
-            this.padding.getLeft() != clamped) {
-            this.padding.setAll(clamped);
-            requestLayoutUpdate();
-        }
-    }
-
-    public void setInsets(TerminalInsets padding) {
-        if (padding == null) {
-            if (!this.padding.isZero()) {
-                this.padding.clear();
-                requestLayoutUpdate();
-            }
-            return;
-        }
-
-        if (!this.padding.equals(padding)) {
-            this.padding.copyFrom(padding);
-            requestLayoutUpdate();
-        }
-    }
-    
-    public void setVAlignment(VAlignment vAlignment) {
-        if (this.vAlignment != vAlignment && vAlignment != null) {
-            this.vAlignment = vAlignment;
-            requestLayoutUpdate();
-        }
-    }
-    public VAlignment getVAlignment(){
-        return vAlignment;
-    }
-
-    public void setHAlignment(HAlignment hAlignment){
-        if(this.hAlignment != hAlignment && hAlignment != null){
-            this.hAlignment = hAlignment;
-            requestLayoutUpdate();
-        }
-    }
-
-    public HAlignment getHAlignment() {
-        return hAlignment;
-    }
-    
-    public void setDefaultWidthPreference(SizePreference pref) {
-        if (this.defaultWidthPreference != pref) {
-            this.defaultWidthPreference = pref;
-            requestLayoutUpdate();
-        }
-    }
-    
-    public void setDefaultHeightPreference(SizePreference pref) {
-        if (this.defaultHeightPreference != pref) {
-            this.defaultHeightPreference = pref;
-            requestLayoutUpdate();
-        }
-    }
-    
-    public int getSpacing() { return spacing; }
+    // =========================================================================
+    // ABSTRACT IMPLEMENTATION
+    // =========================================================================
 
     @Override
-    public void setPercentWidth(float percent) {
-        super.setPercentWidth(percent);
-        requestLayoutUpdate();
+    protected void initLayoutCallback() {
+        this.layoutCallback = this::layoutAllChildren;
+        registerChildGroupCallback(layoutGroupId, layoutCallback);
     }
 
-    @Override
-    public void setPercentHeight(float percent) {
-        super.setPercentHeight(percent);
-        requestLayoutUpdate();
-    }
+    // =========================================================================
+    // ACCESSORS — layout group identity
+    // =========================================================================
 
-    @Override
-    public TerminalInsets getInsets() {
-        if (drawBorder) {
-            return new TerminalInsets(
-                Math.max(1, padding.getTop()),
-                Math.max(1, padding.getRight()),
-                Math.max(1, padding.getBottom()),
-                Math.max(1, padding.getLeft())
-            );
-        }
-        return padding;
-    }
+    public String getLayoutGroupId()    { return layoutGroupId;    }
+    public String getLayoutCallbackId() { return layoutCallbackId; }
 
-    public VAlignment getvAlignment() { return vAlignment; }
+    // =========================================================================
+    // LAYOUT CALCULATION
+    // =========================================================================
 
-    public SizePreference getDefaultWidthPreference() { return defaultWidthPreference; }
-    public SizePreference getDefaultHeightPreference() { return defaultHeightPreference; }
-    
-    // ===== CHILD MANAGEMENT =====
-    
-    @Override
-    public void addChild(TerminalRenderable child) {
-        this.addChild(child, null); 
-    }
-
-    @Override 
-    public void addChild(TerminalRenderable child, TerminalLayoutCallback callback){
-        super.addChild(child, null);
-        addToLayoutGroup(child, layoutGroupId);
-    }
-
-    // ===== LAYOUT CALCULATION =====
-    
     private void layoutAllChildren(
         TerminalLayoutContext[] contexts,
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
@@ -217,9 +109,11 @@ public class TerminalVStack extends TerminalRegion {
         TerminalRectangle parentRegion = contexts[0].getParentRegion();
         if (parentRegion == null) return;
 
-        TerminalInsets insets = getInsets();   // respects border minimum
-        int availableWidth  = parentRegion.getWidth()  - insets.getHorizontal();
-        int availableHeight = parentRegion.getHeight() - insets.getVertical();
+        TerminalInsets ins  = getInsets();   // border-enforced when drawBorder=true
+        int effectiveW      = parentRegion.getWidth();
+        int effectiveH      = parentRegion.getHeight();
+        int availableWidth  = effectiveW - ins.getHorizontal();
+        int availableHeight = effectiveH - ins.getVertical();
 
         // ── collect visible indices ────────────────────────────────────────────
         int[] layoutIndices = new int[contexts.length];
@@ -230,19 +124,36 @@ public class TerminalVStack extends TerminalRegion {
             }
         }
         if (layoutCount == 0) {
-            separatorYs = new int[0];
+            separatorYs    = new int[0];
+            dividerChildYs = new int[0];
             return;
         }
 
-        // ── separator accounting ───────────────────────────────────────────────
-        // Each separator between children costs 1 row. When drawSeparators is
-        // false the existing spacing field is used as usual.
+        // ── gap accounting ─────────────────────────────────────────────────────
+        // drawSeparators=true: each gap is exactly 1 row (the separator row).
+        // drawSeparators=false: each gap is the spacing value.
         int gapSize           = drawSeparators ? 1 : spacing;
         int separatorRowCount = drawSeparators ? Math.max(0, layoutCount - 1) : 0;
         int totalGapHeight    = Math.max(0, layoutCount - 1) * gapSize;
-
-        // Available height after reserving all gap / separator rows
         int availableForChildren = availableHeight - totalGapHeight;
+
+        if (availableWidth <= 0 || availableHeight <= 0 || availableForChildren < 0) {
+            RenderDiagnostics.logRenderBlocker(
+                "vstack-no-space:" + getName(),
+                "TerminalVStack.layoutAllChildren",
+                "non-positive-child-space",
+                () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\tstackSizing=" + RenderDiagnostics.summarizeSizing(this)
+                    + "\n\tparentRegion=" + RenderDiagnostics.summarizeRegion(parentRegion)
+                    + "\n\tavailableWidth=" + availableWidth
+                    + "\n\tavailableHeight=" + availableHeight
+                    + "\n\tavailableForChildren=" + availableForChildren
+                    + "\n\tspacing=" + spacing
+                    + "\n\tgapSize=" + gapSize
+                    + "\n\tinsets=" + ins
+                    + "\n\tchildren=" + RenderDiagnostics.summarizeRenderables(getChildren(), 10)
+            );
+        }
 
         // ── pass 1: measure ────────────────────────────────────────────────────
         int[] widths      = new int[layoutCount];
@@ -250,304 +161,392 @@ public class TerminalVStack extends TerminalRegion {
         SizePreference[] widthPrefs  = new SizePreference[layoutCount];
         SizePreference[] heightPrefs = new SizePreference[layoutCount];
 
-        int totalFitHeight  = 0;
+        int totalResolvedHeight = 0;
         int fillHeightCount = 0;
 
         for (int i = 0; i < layoutCount; i++) {
-            TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
+            TerminalLayoutContext childContext = contexts[layoutIndices[i]];
+            TerminalRenderable child = childContext.getRenderable();
+            boolean manageHidden = shouldManageHidden(child);
+            TerminalSizeable s = (child instanceof TerminalSizeable) ? (TerminalSizeable) child : null;
 
-            widthPrefs[i]  = resolvePreference(child, true);
-            heightPrefs[i] = resolvePreference(child, false);
-            widths[i]      = calculateWidth(child, widthPrefs[i], availableWidth);
+            if (childContext.isHidden() && !manageHidden) {
+                widths[i] = 0;
+                heights[i] = 0;
+                continue;
+            }
 
-            if (heightPrefs[i] == SizePreference.FILL) {
-                heights[i] = -1;
-                fillHeightCount++;
-            } else if (heightPrefs[i] == SizePreference.PERCENT) {
-                heights[i] = (child instanceof TerminalSizeable s)
-                    ? Math.max(s.getMinHeight(), (int)(availableForChildren * s.getPercentHeight() / 100f))
-                    : calculateFitHeight(child, widths[i]);
-                totalFitHeight += heights[i];
+            if (s != null) {
+                widthPrefs[i] = s.getWidthPreference() == SizePreference.INHERIT
+                    ? getWidthPreference()
+                    : s.getWidthPreference();
+                heightPrefs[i] = s.getHeightPreference() == SizePreference.INHERIT
+                    ? getHeightPreference()
+                    : s.getHeightPreference();
             } else {
-                heights[i] = calculateFitHeight(child, widths[i]);
-                totalFitHeight += heights[i];
+                widthPrefs[i] = SizePreference.STATIC;
+                heightPrefs[i] = SizePreference.STATIC;
+            }
+
+            switch (widthPrefs[i]) {
+                case FILL:
+                    widths[i] = availableWidth;
+                    break;
+                case FIT_CONTENT:
+                    widths[i] = childContext.getMeasuredContentBounds() != null
+                        ? childContext.getMeasuredContentBounds().getWidth() : -1;
+                    if (widths[i] == -1) {
+                        throw new IllegalStateException(
+                            "FIT_CONTENT width preference requires measured content bounds. Missing for child: "
+                                + child.getName());
+                    }
+                    break;
+                case PERCENT:
+                    widths[i] = Math.max(s.getMinWidth(),
+                        (int) (availableWidth * s.getPercentWidth()));
+                    break;
+                case STATIC:
+                    widths[i] = childContext.getRequestedRegion() != null
+                        ? childContext.getRequestedRegion().getWidth()
+                        : childContext.getCurrentRegion().getWidth();
+                    break;
+                default:
+                    widths[i] = childContext.getCurrentRegion().getWidth();
+                    break;
+            }
+
+            switch (heightPrefs[i]) {
+                case FILL:
+                    heights[i] = -1;   // resolved after all fixed sizes are known
+                    fillHeightCount++;
+                    break;
+                case FIT_CONTENT:
+                    heights[i] = childContext.getMeasuredContentBounds() != null
+                        ? childContext.getMeasuredContentBounds().getHeight() : -1;
+                    if (heights[i] == -1) {
+                        throw new IllegalStateException(
+                            "FIT_CONTENT height preference requires measured content bounds. Missing for child: "
+                                + child.getName());
+                    }
+                    break;
+                case PERCENT:
+                    heights[i] = Math.max(s.getMinHeight(),
+                        (int) (availableForChildren * s.getPercentHeight()));
+                    break;
+                case STATIC:
+                    heights[i] = childContext.getRequestedRegion() != null
+                        ? childContext.getRequestedRegion().getHeight()
+                        : childContext.getCurrentRegion().getHeight();
+                    break;
+                default:
+                    heights[i] = childContext.getCurrentRegion().getHeight();
+                    break;
+            }
+
+            if (heights[i] >= 0) {
+                totalResolvedHeight += heights[i];
             }
         }
 
         // ── resolve FILL heights ───────────────────────────────────────────────
-        int remaining  = availableForChildren - totalFitHeight;
+        int remaining  = availableForChildren - totalResolvedHeight;
         int fillHeight = fillHeightCount > 0 ? Math.max(0, remaining / fillHeightCount) : 0;
 
         int totalHeight = totalGapHeight;
-        for (int i = 0; i < layoutCount; i++) {
-            if (heights[i] == -1) {
-                heights[i] = (contexts[layoutIndices[i]].getRenderable() instanceof TerminalSizeable s)
-                    ? Math.max(s.getMinHeight(), fillHeight)
-                    : fillHeight;
+
+        switch (overflowStrategy) {
+
+            case SHRINK_FILL -> {
+                // Give FILL children exactly the available share; do not inflate
+                // to minHeight, so a space-starved stack shrinks gracefully.
+                for (int i = 0; i < layoutCount; i++) {
+                    if (heights[i] == -1) heights[i] = Math.max(0, fillHeight);
+                    totalHeight += heights[i];
+                }
             }
-            totalHeight += heights[i];
+
+            case SHRINK_ALL -> {
+                // Use each child's hint height, then scale everyone down
+                // proportionally if the total exceeds the available space.
+                for (int i = 0; i < layoutCount; i++) {
+                    if (heights[i] == -1) heights[i] = getLayoutHeightHint(contexts[layoutIndices[i]]);
+                    totalHeight += heights[i];
+                }
+                int totalRequested = totalHeight - totalGapHeight;
+                if (totalRequested > availableForChildren && totalRequested > 0) {
+                    float scale = (float) availableForChildren / totalRequested;
+                    totalHeight = totalGapHeight;
+                    for (int i = 0; i < layoutCount; i++) {
+                        TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
+                        int min = (child instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
+                        heights[i] = Math.max(min, (int)(heights[i] * scale));
+                        totalHeight += heights[i];
+                    }
+                }
+            }
+
+            case DISTRIBUTE_EQUAL -> {
+                int equalShare = layoutCount > 0
+                    ? Math.max(0, availableForChildren / layoutCount) : 0;
+                for (int i = 0; i < layoutCount; i++) {
+                    TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
+                    int min = (child instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
+                    heights[i] = Math.max(min, equalShare);
+                    totalHeight += heights[i];
+                }
+            }
+
+            // SCROLL falls through to CLIP until scroll support is implemented.
+            default -> {
+                for (int i = 0; i < layoutCount; i++) {
+                    if (heights[i] == -1) {
+                        TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
+                        heights[i] = (child instanceof TerminalSizeable s)
+                            ? Math.max(s.getMinHeight(), fillHeight)
+                            : Math.max(0, fillHeight);
+                    }
+                    totalHeight += heights[i];
+                }
+            }
         }
 
         // ── starting Y (vertical alignment) ───────────────────────────────────
         int startY = switch (vAlignment) {
-            case TOP    -> insets.getTop();
-            case CENTER -> insets.getTop() + Math.max(0, (availableHeight - totalHeight) / 2);
-            case BOTTOM -> insets.getTop() + Math.max(0, availableHeight - totalHeight);
+            case TOP    -> ins.getTop();
+            case CENTER -> ins.getTop() + Math.max(0, (availableHeight - totalHeight) / 2);
+            case BOTTOM -> ins.getTop() + Math.max(0, availableHeight - totalHeight);
         };
 
-        // ── pass 2: place + record separator positions ─────────────────────────
-        separatorYs = new int[separatorRowCount];
-        int sepIdx  = 0;
+        // ── pass 2: place + record junction positions ──────────────────────────
+        separatorYs    = new int[separatorRowCount];
+        dividerChildYs = new int[0];
+        int sepIdx   = 0;
         int currentY = startY;
 
         for (int i = 0; i < layoutCount; i++) {
-            TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
-            int x;
+            final int childIndex = i;
+            TerminalRenderable r = contexts[layoutIndices[childIndex]].getRenderable();
 
-            if (widthPrefs[i] == SizePreference.FILL) {
-                x = insets.getLeft();
+            int x;
+            if (widthPrefs[childIndex] == SizePreference.FILL) {
+                x = ins.getLeft();
             } else {
-                int remaining2 = Math.max(0, availableWidth - widths[i]);
+                int remaining2 = Math.max(0, availableWidth - widths[childIndex]);
                 x = switch (hAlignment) {
-                    case LEFT   -> insets.getLeft();
-                    case RIGHT  -> insets.getLeft() + remaining2;
-                    default     -> insets.getLeft() + remaining2 / 2;
+                    case LEFT   -> ins.getLeft();
+                    case RIGHT  -> ins.getLeft() + remaining2;
+                    default     -> ins.getLeft() + remaining2 / 2;
                 };
             }
 
-            boolean inBounds = isWithinParentBounds(x, currentY, widths[i], heights[i], parentRegion);
+            int remainingWidth  = Math.max(0, effectiveW - ins.getRight() - x);
+            int remainingHeight = Math.max(0, effectiveH - ins.getBottom() - currentY);
+            int allocatedWidth  = Math.min(widths[childIndex],  remainingWidth);
+            int allocatedHeight = overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+                ? Math.max(0, heights[childIndex])
+                : Math.min(heights[childIndex], remainingHeight);
+            boolean hasSpace  = allocatedWidth > 0 && allocatedHeight > 0;
+            boolean inBounds  = overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+                ? hasSpace && x >= 0 && x + allocatedWidth <= parentRegion.getWidth()
+                : hasSpace && isWithinParentBounds(
+                    x, currentY, allocatedWidth, allocatedHeight, parentRegion);
+            boolean manageHidden = shouldManageHidden(r);
 
             TerminalLayoutData.TerminalLayoutDataBuilder b = TerminalLayoutData.getBuilder()
-                .setX(x).setY(currentY).setWidth(widths[i]).setHeight(heights[i]);
+                .setX(x)
+                .setY(currentY)
+                .setWidth(Math.max(0, allocatedWidth))
+                .setHeight(Math.max(0, allocatedHeight));
 
             if (!inBounds) {
-                b.hidden(true);
-            } else if (shouldManageHidden(r)) {
+                final int childX      = x;
+                final int childY      = currentY;
+                final int childWidth  = allocatedWidth;
+                final int childHeight = allocatedHeight;
+                if (overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
+                    if (manageHidden) b.hidden(false);
+                } else {
+                    RenderDiagnostics.logRenderBlocker(
+                        "vstack-child-oob:" + getName() + ":" + r.getName(),
+                        "TerminalVStack.layoutAllChildren",
+                        hasSpace ? "child-hidden-out-of-parent-bounds" : "child-hidden-no-space-remaining",
+                        () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
+                            + "\n\tstackSizing=" + RenderDiagnostics.summarizeSizing(this)
+                            + "\n\tchild=" + RenderDiagnostics.summarizeRenderable(r)
+                            + "\n\tchildSizing=" + RenderDiagnostics.summarizeSizing(r)
+                            + "\n\twidthPref=" + widthPrefs[childIndex]
+                            + "\n\theightPref=" + heightPrefs[childIndex]
+                            + "\n\tmeasuredSize=" + widths[childIndex] + "x" + heights[childIndex]
+                            + "\n\tallocatedSize=" + childWidth + "x" + childHeight
+                            + "\n\tcomputedBounds="
+                            + RenderDiagnostics.summarizeRegion(
+                                new TerminalRectangle(childX, childY, childWidth, childHeight))
+                            + "\n\tparentRegion=" + RenderDiagnostics.summarizeRegion(parentRegion)
+                    );
+                    b.hidden(true);
+                }
+            } else if (manageHidden) {
                 b.hidden(false);
             }
 
             dataInterfaces.get(r.getName()).setLayoutData(b.build());
 
-            currentY += heights[i];
+            int childStartY = currentY;
+            currentY += Math.max(0, allocatedHeight);
 
-            // Record separator position in the gap row immediately after this child
-            if (drawSeparators && i < layoutCount - 1) {
-                separatorYs[sepIdx++] = currentY;  // gap row Y
+            // Gap separator: record the row immediately below this child where the
+            // 1-row separator will be drawn (drawSeparators=true only).
+            if (drawSeparators && i < layoutCount - 1
+                    && currentY < effectiveH - ins.getBottom()) {
+                separatorYs[sepIdx++] = currentY;
+            }
+
+            // Divider child junction: a TerminalDivider placed as a child always
+            // produces left/right junction characters at its own row.
+            if (drawBorder && r instanceof TerminalDivider) {
+                dividerChildYs = appendInt(dividerChildYs, childStartY);
             }
 
             currentY += gapSize;
         }
-    }
-        
-    /**
-     * Resolve sizing preference for a child
-     * Checks if child implements TerminalLayoutable, otherwise uses stack default
-     */
-    private SizePreference resolvePreference(TerminalRenderable child, boolean isWidth) {
-        if (child instanceof TerminalSizeable sizeable) {
-    
-            SizePreference pref = isWidth 
-                ? sizeable.getWidthPreference()
-                : sizeable.getHeightPreference();
 
-            if (pref != null && pref != SizePreference.INHERIT) {
-                return pref;
-            }
+        if (sepIdx != separatorYs.length) {
+            separatorYs = Arrays.copyOf(separatorYs, sepIdx);
         }
-        
-        // Fall back to stack's default
-        return isWidth ? defaultWidthPreference : defaultHeightPreference;
     }
 
     /**
-     * Determine if a child should participate in layout
-     * 
-     * SEMANTICS:
-     * - Hidden children: Do NOT participate in layout (do not affect spacing)
-     * - Invisible children: DO participate in layout (take space but don't render)
-     * - Visible children: Normal participation
+     * Height hint for SHRINK_ALL: measured content height → minHeight → requestedRegion height.
+     * Returns 0 when no sizing information is available.
      */
-    private boolean shouldIncludeInLayout(TerminalRenderable child) {
-        // Hidden children do NOT participate in layout - they don't affect spacing
-        if (child.isHidden()) {
-            return false;
-        }
-        
-        return true;
+    private int getLayoutHeightHint(TerminalLayoutContext ctx) {
+        return Math.max(0, readDimension(ctx, false));
     }
 
-    private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalSizeable sizeable) {
-            return sizeable.isHiddenManaged();
-        }
-        return true;
-    }
 
-    private boolean isWithinParentBounds(
-        int x,
-        int y,
-        int width,
-        int height,
-        TerminalRectangle parentRegion
-    ) {
-        return x >= 0 &&
-            y >= 0 &&
-            x + width <= parentRegion.getWidth() &&
-            y + height <= parentRegion.getHeight();
-    }
-    
+
+    // =========================================================================
+    // RENDERING
+    // =========================================================================
+
     /**
-     * Calculate child width based on preference
+     * Renders the border box with horizontal junction characters at each separator
+     * row and each TerminalDivider child row.
+     *
+     * Junction arrays are populated by the layout callback so they always reflect
+     * positions committed in the most recent layout pass.
      */
-    private int calculateWidth(TerminalRenderable child, SizePreference pref, int available) {
-        if (pref == SizePreference.FILL) {
-            return available;
-        }
-
-        if (pref == SizePreference.PERCENT && child instanceof TerminalSizeable s) {
-            int percent = (int) (available * s.getPercentWidth() / 100.0f);
-            return Math.max(s.getMinWidth(), percent);
-        }
-
-        if (child instanceof TerminalSizeable s) {
-            return Math.min(s.getPreferredWidth(), available);
-        }
-
-        if (child.getRequestedRegion() != null) {
-            return Math.min(child.getRequestedRegion().getWidth(), available);
-        }
-
-        return available;
-    }
-    
-    /**
-     * Calculate child height for FIT_CONTENT preference
-     * Override this in subclasses for custom height calculation
-     */
-    protected int calculateFitHeight(TerminalRenderable child, int availableWidth) {
-        if (child instanceof TerminalSizeable s) {
-            return s.getPreferredHeight();
-        }
-
-        if (child.getRequestedRegion() != null) {
-            return child.getRequestedRegion().getHeight();
-        }
-
-        return 1;
-    }
-
-
-  
-    @Override
-    public int getPreferredWidth() {
-        SizePreference pref = getWidthPreference();
-
-        if (pref == SizePreference.STATIC) {
-            return region.getWidth();
-        }
-
-        if (pref == SizePreference.PERCENT) {
-            return getMinWidth();
-        }
-
-        int maxWidth = 0;
-
-        if (pref == SizePreference.FIT_CONTENT) {
-            for (TerminalRenderable child : getChildren()) {
-                if (!shouldIncludeInLayout(child)) continue;
-
-                if (child instanceof TerminalSizeable s) {
-                    SizePreference childPref = s.getWidthPreference();
-
-                    if (childPref == SizePreference.FIT_CONTENT ||
-                        childPref == SizePreference.STATIC) {
-
-                        maxWidth = Math.max(maxWidth, s.getPreferredWidth());
-                    }
-                } else if (child.getRequestedRegion() != null) {
-                    maxWidth = Math.max(maxWidth,
-                        child.getRequestedRegion().getWidth());
-                }
-            }
-        }
-
-        return Math.max(
-            getMinWidth(),
-            maxWidth + padding.getHorizontal()
-        );
-    }
-    
-   
-    @Override
-    public int getPreferredHeight() {
-        SizePreference pref = getHeightPreference();
-
-        if (pref == SizePreference.STATIC) {
-            return region.getHeight();
-        }
-
-        if (pref == SizePreference.PERCENT) {
-            return getMinHeight();
-        }
-
-        int totalHeight = 0;
-        int count = 0;
-
-        if (pref == SizePreference.FIT_CONTENT) {
-            for (TerminalRenderable child : getChildren()) {
-                if (!shouldIncludeInLayout(child)) continue;
-
-                int childHeight = 0;
-
-                if (child instanceof TerminalSizeable s) {
-                    SizePreference childPref = s.getHeightPreference();
-
-                    if (childPref == SizePreference.FIT_CONTENT ||
-                        childPref == SizePreference.STATIC) {
-
-                        childHeight = s.getPreferredHeight();
-                    }
-                } else if (child.getRequestedRegion() != null) {
-                    childHeight = child.getRequestedRegion().getHeight();
-                }
-
-                if (childHeight > 0) {
-                    totalHeight += childHeight;
-                    count++;
-                }
-            }
-        }
-
-        if (count > 0) {
-            totalHeight += (count - 1) * spacing;
-        }
-
-        return Math.max(
-            getMinHeight(),
-            totalHeight + padding.getVertical()
-        );
-    }
-
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
-        if (!drawBorder) return;
-        drawTableRowBorder(batch, 0, 0, getWidth(), getHeight(), borderStyle, borderTextStyle, separatorYs);
+        if (drawBorder) {
+            int totalJunctions = separatorYs.length + dividerChildYs.length;
+            int[] junctions;
+            if (totalJunctions == 0) {
+                junctions = new int[0];
+            } else {
+                junctions = new int[totalJunctions];
+                System.arraycopy(separatorYs,    0, junctions, 0,                  separatorYs.length);
+                System.arraycopy(dividerChildYs, 0, junctions, separatorYs.length, dividerChildYs.length);
+                Arrays.sort(junctions);
+            }
+
+            drawTableRowBorder(batch, 0, 0, getWidth(), getHeight(), borderStyle, borderTextStyle, junctions);
+        }
+
+        if (drawSeparators && !drawBorder) {
+            renderStandaloneSeparators(batch);
+        }
     }
 
+    private void renderStandaloneSeparators(TerminalBatchBuilder batch) {
+        if (separatorYs.length == 0) {
+            return;
+        }
 
-    public void setWidthPreference(SizePreference widthPreference) {
-        super.setWidthPreference(widthPreference);
-        requestLayoutUpdate();
-    }
+        TerminalInsets ins = getInsets();
+        int lineX = ins.getLeft();
+        int lineWidth = Math.max(0, getWidth() - ins.getHorizontal());
+        if (lineWidth <= 0) {
+            return;
+        }
 
-    public void setHeightPreference(SizePreference heightPreference) {
-        super.setHeightPreference(heightPreference);
-        requestLayoutUpdate();
+        for (int separatorY : separatorYs) {
+            drawHLine(batch, lineX, separatorY, lineWidth, borderStyle, borderTextStyle);
+        }
     }
 
     @Override
-    protected void onDestroying(){
-        destroyLayoutGroup(layoutGroupId);   
-    }
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        SizePreference ownWidthPref  = getWidthPreference();
+        SizePreference ownHeightPref = getHeightPreference();
  
+        int maxWidth     = 0;
+        int totalHeight  = 0;
+        int visibleCount = 0;
+ 
+        if (childContexts != null) {
+            for (TerminalLayoutContext ctx : childContexts) {
+                if (ctx == null) continue;
+                TerminalRenderable child = ctx.getRenderable();
+                if (!shouldIncludeInLayout(child)) continue;
+                visibleCount++;
+ 
+                TerminalSizeable s = (child instanceof TerminalSizeable) ? (TerminalSizeable) child : null;
+                SizePreference childWidthPref  = s != null
+                    ? (s.getWidthPreference() == SizePreference.INHERIT
+                        ? getWidthPreference()
+                        : s.getWidthPreference())
+                    : SizePreference.STATIC;
+                SizePreference childHeightPref = s != null
+                    ? (s.getHeightPreference() == SizePreference.INHERIT
+                        ? getHeightPreference()
+                        : s.getHeightPreference())
+                    : SizePreference.STATIC;
+ 
+                if (ownWidthPref == SizePreference.FIT_CONTENT
+                 && (childWidthPref == SizePreference.FIT_CONTENT
+                  || childWidthPref == SizePreference.STATIC)) {
+                    maxWidth = Math.max(maxWidth, readDimension(ctx, true));
+                }
+                if (ownHeightPref == SizePreference.FIT_CONTENT
+                 && (childHeightPref == SizePreference.FIT_CONTENT
+                  || childHeightPref == SizePreference.STATIC)) {
+                    int ch = readDimension(ctx, false);
+                    if (ch > 0) totalHeight += ch;
+                }
+            }
+        }
+ 
+        if (ownHeightPref == SizePreference.FIT_CONTENT && visibleCount > 1) {
+            totalHeight += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
+        }
+ 
+        int w = switch (ownWidthPref) {
+            case STATIC      -> region.getWidth();
+            case FIT_CONTENT -> Math.max(getMinWidth(), maxWidth + getInsets().getHorizontal());
+            default          -> getMinWidth();
+        };
+        int h = switch (ownHeightPref) {
+            case STATIC      -> region.getHeight();
+            case FIT_CONTENT -> Math.max(getMinHeight(), totalHeight + getInsets().getVertical());
+            default          -> getMinHeight();
+        };
+ 
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, w, h);
+        return measured;
+    }
+
+    private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
+        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
+        if (bounds != null) return isWidth ? bounds.getWidth() : bounds.getHeight();
+
+        TerminalRenderable child = ctx.getRenderable();
+        TerminalRectangle requested = child.getRequestedRegion();
+        if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
+
+        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+    }
+
+  
 }

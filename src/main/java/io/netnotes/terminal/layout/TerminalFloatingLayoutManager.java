@@ -3,9 +3,9 @@ package io.netnotes.terminal.layout;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
-import io.netnotes.engine.ui.FloatingLayerManager;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.SpatialRegionPool;
+import io.netnotes.engine.ui.renderer.FloatingLayerManager;
 
 public class TerminalFloatingLayoutManager extends FloatingLayerManager<
     TerminalBatchBuilder,

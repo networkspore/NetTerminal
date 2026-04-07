@@ -1,5 +1,8 @@
 package io.netnotes.terminal.layout;
 
+import java.util.Set;
+
+import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
@@ -35,17 +38,17 @@ public class TerminalLayoutManager extends RenderableLayoutManager<
     TerminalLayoutData,
     TerminalLayoutCallback,
     TerminalLayoutGroupCallback,
-    TerminalGroupCallbackEntry,
     TerminalGroupStateEntry,
     TerminalLayoutGroup,
     TerminalLayoutNode
->
- {
+> {
 
     public TerminalLayoutManager(String containerName, TerminalFloatingLayoutManager floatingManager) {
         super(containerName, floatingManager);
     }
-    
+
+    // ===== FACTORY METHODS =====
+
     @Override
     protected TerminalLayoutNode createRenderableNode(TerminalRenderable renderable) {
         return new TerminalLayoutNode(renderable);
@@ -59,35 +62,72 @@ public class TerminalLayoutManager extends RenderableLayoutManager<
     }
 
     @Override
+    protected TerminalLayoutContext[] createContextArray(int size) {
+        return new TerminalLayoutContext[size];
+    }
+
+    @Override
+    protected TerminalLayoutGroup createEmptyGroup(String groupId) {
+        return new TerminalLayoutGroup(groupId);
+    }
+
+    // ===== POOL RECYCLING =====
+
+    @Override
     protected void recycleLayoutData(TerminalLayoutData layoutData) {
         TerminalLayoutDataPool.getInstance().recycleData(layoutData);
     }
 
-     @Override
+    @Override
     protected void recycleLayoutContext(TerminalLayoutContext context) {
         TerminalLayoutContextPool.getInstance().recycle(context);
     }
 
-     @Override
-     protected TerminalLayoutContext[] createContextArray(int size) {
-        return new TerminalLayoutContext[size];
-     }
-
-     @Override
-     protected void recycleLayoutContexts(TerminalLayoutContext[] contexts) {
-        for(int i = 0; i < contexts.length ; i++){
+    @Override
+    protected void recycleLayoutContexts(TerminalLayoutContext[] contexts) {
+        for (int i = 0; i < contexts.length; i++) {
             TerminalLayoutContext ctx = contexts[i];
             contexts[i] = null;
-            if(ctx != null){
+            if (ctx != null) {
                 recycleLayoutContext(ctx);
             }
         }
-     }
+    }
 
-     @Override
-     protected TerminalLayoutGroup createEmptyGroup(String groupId) {
-        TerminalLayoutGroup group = new TerminalLayoutGroup(groupId);
-        return group;
-     }
+    // ===== POST-LAYOUT DIAGNOSTICS =====
 
- }
+    /**
+     * After each layout pass, log a render-blocker diagnostic for any visible
+     * renderable that ended up with a zero-size region. This catches layout
+     * misconfigurations (e.g. a FILL child inside a FIT_CONTENT parent) early,
+     * without interfering with the base-class drain boundary or debounce logic.
+     */
+    @Override
+    protected void onAfterLayoutPass(Set<TerminalLayoutNode> processedNodes) {
+        for (TerminalLayoutNode node : processedNodes) {
+            if (node == null) {
+                continue;
+            }
+            TerminalRenderable renderable = node.getRenderable();
+            TerminalRectangle region = renderable.getRegion();
+            TerminalRectangle requested = renderable.getRequestedRegion();
+            if (renderable.isEffectivelyVisible()
+                    && (region == null || region.getWidth() <= 0 || region.getHeight() <= 0)) {
+                RenderDiagnostics.logRenderBlocker(
+                    "layout-pass-empty-result:" + containerName + ":" + renderable.getName(),
+                    "TerminalLayoutManager.onAfterLayoutPass",
+                    "visible-renderable-empty-after-layout",
+                    () -> "container=" + containerName
+                        + "\n\tnode=" + RenderDiagnostics.summarizeNode(node)
+                        + "\n\trequested=" + RenderDiagnostics.summarizeRegion(requested)
+                );
+            }
+        }
+    }
+
+    @Override
+    protected void damageRenderingParentAtFloatingRegion(TerminalRenderable arg0) {
+        // TODO - REQUIRES IMPLEMENTATION
+        throw new UnsupportedOperationException("Unimplemented method 'damageRenderingParentAtFloatingRegion'");
+    }
+}

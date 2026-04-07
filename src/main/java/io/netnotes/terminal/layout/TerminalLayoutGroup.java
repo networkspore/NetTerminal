@@ -15,7 +15,6 @@ public class TerminalLayoutGroup extends LayoutGroup<
     TerminalLayoutContext,
     TerminalLayoutGroupCallback,
     TerminalLayoutNode,
-    TerminalGroupCallbackEntry,
     TerminalLayoutGroup
 > {
 

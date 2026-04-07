@@ -3,9 +3,11 @@ package io.netnotes.terminal.components.install;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Objects;
 
-import io.netnotes.terminal.TerminalBatchBuilder;
+import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalRectangle;
+import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
@@ -16,7 +18,8 @@ import io.netnotes.terminal.components.display.TerminalBitmapView;
 import io.netnotes.terminal.components.install.InstallStep.Status;
 import io.netnotes.terminal.components.panels.TerminalDivider;
 import io.netnotes.terminal.components.panels.TerminalVStack;
-import io.netnotes.terminal.components.panels.TerminalVStack.VAlignment;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
+import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
 
 /**
@@ -68,7 +71,9 @@ import io.netnotes.engine.ui.SizePreference;
  * to call from non-render threads.  Do <em>not</em> call them from inside a
  * render callback.
  */
-public class TerminalInstallWizard extends TerminalRegion {
+public class TerminalInstallWizard extends TerminalVStack {
+    private static final long LAYOUT_LOG_SUPPRESS_NS = 150_000_000L;
+
 
     // ===== INNER TYPES =====
 
@@ -86,29 +91,7 @@ public class TerminalInstallWizard extends TerminalRegion {
 
     // ===== DEFAULT STYLES =====
 
-    private TextStyle styleBorder       = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
-    private TextStyle styleTitle        = TextStyle.BOLD;
-    private TextStyle styleOverallFill  = TextStyle.BOLD.withForeground(TextStyle.Color.CYAN);
-    private TextStyle styleOverallEmpty = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
-    private TextStyle styleFooter       = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
-    private TextStyle styleSuccess      = TextStyle.BOLD.withForeground(TextStyle.Color.GREEN);
-    private TextStyle styleError        = TextStyle.BOLD.withForeground(TextStyle.Color.RED);
-    private LineStyle borderStyle       = LineStyle.DOUBLE;
-    private char      overallFillChar   = '█';
-    private char      overallEmptyChar  = '░';
 
-    // ===== LAYOUT CONSTANTS =====
-
-    private static final int OVERALL_BAR_WIDTH = 20;
-    private static final int TITLE_PADDING     = 2;
-
-    // ===== STATE =====
-
-    private String  title       = "Installation Wizard";
-    private String  subtitle    = null;
-    private boolean showBorder  = true;
-    private boolean showFooter  = true;
-    private boolean showElapsed = true;
 
     // Step registry (ordered)
     private final List<InstallStep>            steps    = new ArrayList<>();
@@ -129,66 +112,114 @@ public class TerminalInstallWizard extends TerminalRegion {
     private CompletionListener completionListener = null;
     private boolean wizardComplete = false;
 
-    // ── Child components ──────────────────────────────────────────────────────
-    private final TerminalVStack rootStack;
-    private TerminalDivider      brandDivider;    // shown only when brand is present
-    private TerminalBitmapView   brandView;       // null when no brand configured
-    private TerminalDivider      headerDivider;
-    private TerminalDivider      footerDivider;
-    private TerminalVStack       stepListStack;
+    private final TerminalWizardHeader headerComponent;
+    private final TerminalWizardFooter footerComponent;
+
+    // ── Child components
+    private final TerminalDivider      brandDivider;    // shown only when brand is present
+    private final TerminalBitmapView   brandView;       // null when no brand configured
+    private final TerminalDivider      headerDivider;
+    private final TerminalDivider      footerDivider;
+    private final TerminalVStack       stepListStack;
+    private final TerminalRegion       contentSpacer;
+
 
     // ===== CONSTRUCTION =====
 
-    public TerminalInstallWizard(String name) {
-        super(name);
+    private TerminalInstallWizard(Builder builder) {
+        super(builder.name);
+        
+        headerComponent = new TerminalWizardHeader(name + "-termWizardHeader");
+        footerComponent = new TerminalWizardFooter(name + "-termWizardFooter");
+        brandView = new TerminalBitmapView(name + "-term-install-wizard-brand");
+        brandDivider = new TerminalDivider(name + "-term-install-wizard-bdiv", Orientation.HORIZONTAL);
+        headerDivider = new TerminalDivider(name + "-term-install-wizard-hdiv", Orientation.HORIZONTAL);
+        footerDivider = new TerminalDivider(name + "-fdiv", Orientation.HORIZONTAL);
+        contentSpacer = new TerminalRegion(name + "-term-install-wizard-spacer");
+        stepListStack = new TerminalVStack(name + "-term-install-wizard-steps");
+
+        this.autoOverallProgress = builder.autoOverallProgress;
+        this.completionListener = builder.completionListener;
+
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FILL);
+        setDrawBorder(builder.showBorder);
+        setBorderStyle(builder.borderLineStyle);
+        setBorderTextStyle(builder.borderTextStyle);
+        setDrawSeparators(builder.borderSeparators);
 
-        rootStack = new TerminalVStack(name + "-root");
-        rootStack.setSpacing(0);
-        rootStack.setVAlignment(VAlignment.TOP);
 
-        buildLayout();
-        addChild(rootStack);
+
+        buildLayout(builder);
     }
+
 
     // ===== LAYOUT CONSTRUCTION =====
 
-    private void buildLayout() {
-        // Brand components — hidden until a bitmap is assigned
-        brandView = new TerminalBitmapView(getName() + "-brand");
+    private void buildLayout(Builder builder) {
+
+        // ── brand panel ───────────────────────────────────────────────────────────
+        
         brandView.setWidthPreference(SizePreference.FILL);
         brandView.setHeightPreference(SizePreference.FIT_CONTENT);
         brandView.setRenderMode(RenderMode.SEXTANT);
         brandView.setScaleMode(ScaleMode.FIT);
         brandView.setBilinear(true);
-        brandView.hide();   // invisible until setBrandBitmap is called
+        brandView.hide();
 
-        brandDivider = new TerminalDivider(getName() + "-bdiv", TerminalDivider.Orientation.HORIZONTAL);
-        brandDivider.setLineStyle(borderStyle);
-        brandDivider.setLineTextStyle(styleBorder);
+        
+        brandDivider.setLineStyle(builder.borderLineStyle);
+        brandDivider.setLineTextStyle(builder.borderTextStyle);
         brandDivider.hide();
 
-        headerDivider = new TerminalDivider(getName() + "-hdiv", TerminalDivider.Orientation.HORIZONTAL);
-        headerDivider.setLineStyle(borderStyle);
-        headerDivider.setLineTextStyle(styleBorder);
+        // ── header row
+        headerComponent.setTitle(builder.title);
+        headerComponent.setSubtitle(builder.subtitle);
+        headerComponent.setStyleTitle(builder.styleTitle);
+        headerComponent.setStyleBarFill(builder.styleOverallFill);
+        headerComponent.setStyleBarEmpty(builder.styleOverallEmpty);
+        headerComponent.setStyleBarLabel(builder.styleFooter);
+        headerComponent.setFillChar(builder.overallFillChar);
+        headerComponent.setEmptyChar(builder.overallEmptyChar);
+        headerComponent.setOverallBarWidth(builder.overallBarWidth);
 
-        stepListStack = new TerminalVStack(getName() + "-steps");
+        headerDivider.setLineStyle(builder.borderLineStyle);
+        headerDivider.setLineTextStyle(builder.borderTextStyle);
+
+        // ── step list
+        
         stepListStack.setSpacing(0);
         stepListStack.setVAlignment(VAlignment.TOP);
         stepListStack.setWidthPreference(SizePreference.FILL);
         stepListStack.setHeightPreference(SizePreference.FIT_CONTENT);
 
-        footerDivider = new TerminalDivider(getName() + "-fdiv", TerminalDivider.Orientation.HORIZONTAL);
-        footerDivider.setLineStyle(borderStyle);
-        footerDivider.setLineTextStyle(styleBorder);
+        // ── content spacer pushes footer to bottom
+        contentSpacer.setWidthPreference(SizePreference.FILL);
+        contentSpacer.setHeightPreference(SizePreference.FILL);
 
-        // Order: [brand] [brandDivider] headerDivider stepList footerDivider
-        rootStack.addChild(brandView);
-        rootStack.addChild(brandDivider);
-        rootStack.addChild(headerDivider);
-        rootStack.addChild(stepListStack);
-        rootStack.addChild(footerDivider);
+        // ── footer ────────────────────────────────────────────────────────────────
+        footerDivider.setLineStyle(builder.borderLineStyle);
+        footerDivider.setLineTextStyle(builder.borderTextStyle);
+
+        footerComponent.setShowElapsed(builder.showElapsed);
+        footerComponent.setStyleNormal(builder.styleFooter);
+        footerComponent.setStyleSuccess(builder.styleSuccess);
+        footerComponent.setStyleError(builder.styleError);
+        if(!builder.showFooter){
+            footerDivider.hide();
+            footerComponent.hide();
+        }
+
+        // ── wire up (directly to self — no rootStack) ─────────────────────────────
+        addChild(brandView);
+        addChild(brandDivider);
+        addChild(headerComponent);
+        addChild(headerDivider);
+        addChild(stepListStack);
+        addChild(contentSpacer);
+        addChild(footerDivider);
+        addChild(footerComponent);
+        logWizardLayoutSnapshot("buildLayout");
     }
 
     // ===== BRAND PANEL =====
@@ -287,6 +318,9 @@ public class TerminalInstallWizard extends TerminalRegion {
         step.setStepNumber(steps.size() + 1);
         steps.add(step);
         appendStepRow(step);
+        updateOverallProgress();
+        syncFooter();
+        requestLayoutUpdate();
         invalidate();
     }
 
@@ -297,7 +331,10 @@ public class TerminalInstallWizard extends TerminalRegion {
             s.setStepNumber(steps.size() + 1);
             steps.add(s);
         }
-        rebuildStepRows();
+        rebuildStepRowsInternal();
+        updateOverallProgress();
+        syncFooter();
+        requestLayoutUpdate();
         invalidate();
     }
 
@@ -310,17 +347,26 @@ public class TerminalInstallWizard extends TerminalRegion {
         wizardComplete  = false;
         overallProgress = 0f;
         startTimeMs     = -1L;
+        elapsedMs       = 0L;
+        headerComponent.setOverallProgress(overallProgress);
+        syncFooter();
+        requestLayoutUpdate();
         invalidate();
     }
 
     /** Rebuild step-row components from the current step list. */
     public void rebuildStepRows() {
+        rebuildStepRowsInternal();
+        requestLayoutUpdate();
+        invalidate();
+    }
+
+    private void rebuildStepRowsInternal() {
         stepRows.clear();
         stepListStack.clearChildren();
         for (InstallStep s : steps) {
             appendStepRow(s);
         }
-        requestLayoutUpdate();
     }
 
     private void appendStepRow(InstallStep step) {
@@ -355,16 +401,18 @@ public class TerminalInstallWizard extends TerminalRegion {
         activeStep = step;
         refreshRow(step);
         updateOverallProgress();
+        syncFooter();
         invalidate();
     }
 
-    /** Update progress (0–1) and optional detail text for the given step. */
+    /** Update progress (0.0–1.0) and optional detail text for the given step. */
     public void updateProgress(String stepId, float progress, String detail) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
+        boolean detailChanged = detail != null && !Objects.equals(step.getDetail(), detail);
         step.setProgress(progress);
         if (detail != null) step.setDetail(detail);
-        refreshRow(step);
+        refreshRow(step, detailChanged);
         updateOverallProgress();
         invalidate();
     }
@@ -391,6 +439,7 @@ public class TerminalInstallWizard extends TerminalRegion {
         refreshRow(step);
         updateOverallProgress();
         checkWizardCompletion();
+        syncFooter();
         invalidate();
     }
 
@@ -398,13 +447,15 @@ public class TerminalInstallWizard extends TerminalRegion {
     public void failStep(String stepId, String errorMessage) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
+        boolean detailChanged = errorMessage != null && !java.util.Objects.equals(step.getDetail(), errorMessage);
         step.setStatus(Status.ERROR);
         step.setErrorMessage(errorMessage);
         if (errorMessage != null) step.setDetail(errorMessage);
         if (activeStep == step) activeStep = null;
-        refreshRow(step);
+        refreshRow(step, detailChanged);
         updateOverallProgress();
         checkWizardCompletion();
+        syncFooter();
         invalidate();
     }
 
@@ -417,6 +468,7 @@ public class TerminalInstallWizard extends TerminalRegion {
         refreshRow(step);
         updateOverallProgress();
         checkWizardCompletion();
+        syncFooter();
         invalidate();
     }
 
@@ -428,10 +480,13 @@ public class TerminalInstallWizard extends TerminalRegion {
         overallProgress = 0f;
         startTimeMs     = -1L;
         elapsedMs       = 0L;
+        headerComponent.setOverallProgress(overallProgress);
         for (TerminalInstallStepRow row : stepRows) {
             row.setExpanded(false);
-            row.invalidate();
+            row.refresh();   // pushes reset state (PENDING icon/text) into child labels
         }
+        syncFooter();
+        requestLayoutUpdate();
         invalidate();
     }
 
@@ -446,11 +501,25 @@ public class TerminalInstallWizard extends TerminalRegion {
             elapsedMs = System.currentTimeMillis() - startTimeMs;
         }
         for (TerminalInstallStepRow row : stepRows) {
-            if (row.getStep().getStatus() == Status.RUNNING) {
-                row.advanceSpinner();
-            }
+            if (row.getStep().getStatus() == Status.RUNNING) row.advanceSpinner();
         }
+        syncFooter();
         invalidate();
+    }
+
+    private void syncFooter() {
+        if (footerComponent == null) return;
+        String detail = activeStep != null ? activeStep.getDetail() : null;
+        int done = 0;
+        boolean hasErr = false;
+
+        for (InstallStep step : steps) {
+            Status status = step.getStatus();
+            if (status.isTerminal()) done++;
+            if (status == Status.ERROR) hasErr = true;
+        }
+
+        footerComponent.update(done, steps.size(), elapsedMs, detail, wizardComplete, hasErr);
     }
 
     // ===== EXPAND/COLLAPSE =====
@@ -474,218 +543,105 @@ public class TerminalInstallWizard extends TerminalRegion {
 
     // ===== CONFIGURATION =====
 
-    public TerminalInstallWizard setTitle(String title) {
-        this.title = title != null ? title : "";
+    public TerminalInstallWizard withTitle(String title) {
+        title = title != null ? title : "";
+        if (headerComponent != null) headerComponent.setTitle(title);
+        requestLayoutUpdate();
         invalidate();
         return this;
     }
 
-    public TerminalInstallWizard setSubtitle(String subtitle) {
-        this.subtitle = subtitle;
-        invalidate();
+    public String getTitle(){
+        return headerComponent.getTitle();
+    }
+
+    public TerminalWizardHeader getTerminalWizardHeader(){
+        return headerComponent;
+    }
+
+    public TerminalInstallWizard withSubtitle(String subtitle) {
+        headerComponent.setSubtitle(subtitle);
         return this;
     }
 
-    public TerminalInstallWizard setShowBorder(boolean show) {
-        this.showBorder = show;
-        invalidate();
+    public TerminalInstallWizard withBorder(boolean show) {
+        this.setDrawBorder(show);
         return this;
     }
 
-    public TerminalInstallWizard setShowFooter(boolean show) {
-        this.showFooter = show;
-        invalidate();
+    public TerminalInstallWizard withShowFooter(boolean show) {
+        if (footerDivider  != null) { if (show) footerDivider.show();  else footerDivider.hide(); }
+        if (footerComponent!= null) { if (show) footerComponent.show(); else footerComponent.hide(); }
+        requestLayoutUpdate();
+        logWizardLayoutSnapshot("withShowFooter(" + show + ")");
         return this;
     }
 
-    public TerminalInstallWizard setShowElapsed(boolean show) {
-        this.showElapsed = show;
-        invalidate();
+    public boolean isShowFooter(){
+        return !footerDivider.isHidden();
+    }
+
+    public TerminalInstallWizard withShowElapsed(boolean show) {
+        if (footerComponent != null) footerComponent.setShowElapsed(show);
         return this;
     }
 
-    public TerminalInstallWizard setBorderStyle(LineStyle style) {
+    public TerminalInstallWizard withBorderStyle(LineStyle style) {
         if (style != null) {
-            this.borderStyle = style;
-            brandDivider.setLineStyle(style);
-            headerDivider.setLineStyle(style);
-            footerDivider.setLineStyle(style);
-            invalidate();
+            setBorderStyle(style);
         }
         return this;
     }
 
-    public TerminalInstallWizard setOverallProgress(float progress) {
+    public TerminalInstallWizard withOverallProgress(float progress) {
         this.autoOverallProgress = false;
         this.overallProgress = Math.max(0f, Math.min(1f, progress));
         invalidate();
         return this;
     }
 
-    public TerminalInstallWizard setAutoOverallProgress(boolean auto) {
+    public TerminalInstallWizard withAutoOverallProgress(boolean auto) {
         this.autoOverallProgress = auto;
         if (auto) updateOverallProgress();
+        invalidate();
         return this;
     }
 
-    public TerminalInstallWizard setCompletionListener(CompletionListener listener) {
+    public TerminalInstallWizard withCompletionListener(CompletionListener listener) {
         this.completionListener = listener;
         return this;
     }
 
     // ===== STYLE SETTERS =====
 
-    public void setStyleBorder(TextStyle s) {
-        this.styleBorder = s;
+    @Override
+    public void setBorderStyle(LineStyle style) {
+        if (style != null) {
+            brandDivider.setLineStyle(style);
+            headerDivider.setLineStyle(style);
+            footerDivider.setLineStyle(style);
+            super.setBorderStyle(style);   
+        }
+    }
+
+    @Override
+    public void setBorderTextStyle(TextStyle s) {
         brandDivider.setLineTextStyle(s);
         headerDivider.setLineTextStyle(s);
         footerDivider.setLineTextStyle(s);
-    }
-    public void setStyleTitle(TextStyle s)       { this.styleTitle       = s; }
-    public void setStyleOverallFill(TextStyle s) { this.styleOverallFill = s; }
-    public void setStyleOverallEmpty(TextStyle s){ this.styleOverallEmpty = s; }
-    public void setStyleFooter(TextStyle s)      { this.styleFooter      = s; }
-    public void setStyleSuccess(TextStyle s)     { this.styleSuccess     = s; }
-    public void setStyleError(TextStyle s)       { this.styleError       = s; }
-    public void setOverallFillChar(char c)       { this.overallFillChar  = c; }
-    public void setOverallEmptyChar(char c)      { this.overallEmptyChar = c; }
-
-    // ===== RENDERING =====
-
-    @Override
-    protected void renderSelf(TerminalBatchBuilder batch) {
-        TerminalRectangle r = getRegion();
-        if (r == null) return;
-        int w = r.getWidth();
-        int h = r.getHeight();
-        if (w <= 0 || h <= 0) return;
-
-        int row = 0;
-
-        // ── Outer top border ──────────────────────────────────────────────────
-        if (showBorder) {
-            renderTopBorder(batch, w, row++);
-        }
-
-        // ── Header row: title + overall progress bar ──────────────────────────
-        // (brand + brandDivider are child components rendered by the child pass)
-        if (row < h) {
-            renderHeader(batch, w, row++);
-        }
-
-        // ── Footer status line ────────────────────────────────────────────────
-        if (showFooter && h > row + 1) {
-            int footerRow = h - (showBorder ? 2 : 1);
-            if (footerRow > row) {
-                renderFooterContent(batch, w, footerRow);
-            }
-        }
-
-        // ── Outer bottom border ───────────────────────────────────────────────
-        if (showBorder && h > 1) {
-            renderBottomBorder(batch, w, h - 1);
-        }
-
-        // ── Side border verticals ─────────────────────────────────────────────
-        if (showBorder) {
-            renderSideBorders(batch, w, h);
-        }
+        super.setBorderTextStyle(s);
     }
 
-    // ----- border helpers -----
+    public void setStyleTitle(TextStyle s)        { headerComponent.setStyleTitle(s);}
+    public void setStyleOverallFill(TextStyle s)  { headerComponent.setStyleBarFill(s); }
+    public void setStyleOverallEmpty(TextStyle s) { headerComponent.setStyleBarEmpty(s); }
+    public void setStyleFooter(TextStyle s)       { footerComponent.setStyleNormal(s); }
+    public void setStyleSuccess(TextStyle s)      { footerComponent.setStyleSuccess(s); }
+    public void setStyleError(TextStyle s)        { footerComponent.setStyleError(s); }
+    public void setOverallFillChar(char c)        { headerComponent.setFillChar(c); }
+    public void setOverallEmptyChar(char c)       { headerComponent.setEmptyChar(c); }
 
-    private void renderTopBorder(TerminalBatchBuilder batch, int w, int row) {
-        printAt(batch, 0,     row, String.valueOf(borderStyle.topLeft()),  styleBorder);
-        drawHLine(batch, 1,   row, w - 2, borderStyle, styleBorder);
-        printAt(batch, w - 1, row, String.valueOf(borderStyle.topRight()), styleBorder);
-    }
 
-    private void renderBottomBorder(TerminalBatchBuilder batch, int w, int row) {
-        printAt(batch, 0,     row, String.valueOf(borderStyle.bottomLeft()),  styleBorder);
-        drawHLine(batch, 1,   row, w - 2, borderStyle, styleBorder);
-        printAt(batch, w - 1, row, String.valueOf(borderStyle.bottomRight()), styleBorder);
-    }
-
-    private void renderSideBorders(TerminalBatchBuilder batch, int w, int h) {
-        String vert = String.valueOf(borderStyle.vertical());
-        for (int y = 1; y < h - 1; y++) {
-            printAt(batch, 0,     y, vert, styleBorder);
-            printAt(batch, w - 1, y, vert, styleBorder);
-        }
-    }
-
-    // ----- header -----
-
-    private void renderHeader(TerminalBatchBuilder batch, int w, int row) {
-        int innerX = showBorder ? 1 : 0;
-        int innerW = showBorder ? w - 2 : w;
-
-        String titleText = " ".repeat(TITLE_PADDING) + title;
-        if (subtitle != null && !subtitle.isBlank()) {
-            titleText += "  " + subtitle;
-        }
-
-        String pctStr    = String.format("%3d%%", (int)(overallProgress * 100f));
-        int    filled    = Math.max(0, Math.min(Math.round(overallProgress * OVERALL_BAR_WIDTH), OVERALL_BAR_WIDTH));
-        String barLabel  = "Overall: " + pctStr + " [";
-        String fillPart  = repeat(overallFillChar, filled);
-        String emptyPart = repeat(overallEmptyChar, OVERALL_BAR_WIDTH - filled) + "]";
-        String rightBlock = barLabel + fillPart + emptyPart;
-
-        int maxTitleW = innerW - rightBlock.length() - 2;
-        String displayedTitle = maxTitleW > 0 ? truncate(titleText, maxTitleW) : "";
-        printAt(batch, innerX, row, displayedTitle, styleTitle);
-
-        int barX = innerX + innerW - rightBlock.length();
-        if (barX > innerX + displayedTitle.length()) {
-            printAt(batch, barX, row, barLabel, styleFooter);
-            int bx = barX + barLabel.length();
-            if (!fillPart.isEmpty()) {
-                printAt(batch, bx, row, fillPart, styleOverallFill);
-                bx += fillPart.length();
-            }
-            printAt(batch, bx, row, emptyPart, styleOverallEmpty);
-        }
-    }
-
-    // ----- footer -----
-
-    private void renderFooterContent(TerminalBatchBuilder batch, int w, int row) {
-        int innerX = showBorder ? 1 : 0;
-        int innerW = showBorder ? w - 2 : w;
-
-        StringBuilder sb = new StringBuilder("  ");
-
-        long done = steps.stream().filter(s -> s.getStatus().isTerminal()).count();
-        sb.append("Step ").append(done).append(" of ").append(steps.size());
-
-        if (showElapsed && startTimeMs > 0) {
-            long secs = elapsedMs / 1000L;
-            sb.append("  ·  Elapsed: ")
-              .append(String.format("%02d:%02d", secs / 60, secs % 60));
-        }
-
-        if (activeStep != null) {
-            String detail = activeStep.getDetail();
-            if (detail != null && !detail.isBlank()) {
-                sb.append("  ·  ").append(detail);
-            }
-        }
-
-        if (wizardComplete) {
-            boolean hasError = steps.stream().anyMatch(s -> s.getStatus() == Status.ERROR);
-            sb.append("  ·  ").append(hasError ? "FAILED" : "COMPLETE");
-        } else {
-            sb.append("  ·  Press Ctrl+C to cancel");
-        }
-
-        TextStyle footerStyle = wizardComplete
-                ? (steps.stream().anyMatch(s -> s.getStatus() == Status.ERROR)
-                   ? styleError : styleSuccess)
-                : styleFooter;
-
-        printAt(batch, innerX, row, truncate(sb.toString(), innerW), footerStyle);
-    }
 
     // ===== INTERNAL HELPERS =====
 
@@ -694,13 +650,13 @@ public class TerminalInstallWizard extends TerminalRegion {
         float sum = 0f;
         for (InstallStep s : steps) {
             switch (s.getStatus()) {
-                case COMPLETE:
-                case SKIPPED:  sum += 1f; break;
+                case COMPLETE: case SKIPPED: sum += 1f; break;
                 case RUNNING:  sum += s.getProgress(); break;
-                default:       break;
+                default: break;
             }
         }
         overallProgress = Math.min(1f, sum / steps.size());
+        if (headerComponent != null) headerComponent.setOverallProgress(overallProgress);
     }
 
     private void checkWizardCompletion() {
@@ -718,8 +674,21 @@ public class TerminalInstallWizard extends TerminalRegion {
     }
 
     private void refreshRow(InstallStep step) {
+        refreshRow(step, false);
+    }
+
+    private void refreshRow(InstallStep step, boolean layoutMayHaveChanged) {
         TerminalInstallStepRow row = findRow(step);
-        if (row != null) row.invalidate();
+        if (row != null) {
+            // Always push the latest step state into the row's child labels first,
+            // then decide whether the outer (wizard) layout also needs recomputing.
+            row.syncFromStep();
+            if (layoutMayHaveChanged && row.isExpanded()) {
+                row.requestLayoutUpdate();   // row height may have changed (detail/log lines)
+                requestLayoutUpdate();       // wizard layout may have changed too
+            }
+            row.invalidate();
+        }
     }
 
     private InstallStep findStep(String id) {
@@ -737,15 +706,460 @@ public class TerminalInstallWizard extends TerminalRegion {
         return null;
     }
 
-    private static String truncate(String s, int max) {
-        if (s == null || max <= 0) return "";
-        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+    @Override
+    public void requestLayoutUpdate() {
+        if (headerComponent != null && stepListStack != null && footerComponent != null) {
+            logWizardLayoutSnapshot("requestLayoutUpdate");
+        }
+        super.requestLayoutUpdate();
     }
 
-    private static String repeat(char c, int count) {
-        if (count <= 0) return "";
-        char[] buf = new char[count];
-        java.util.Arrays.fill(buf, c);
-        return new String(buf);
+    private void logWizardLayoutSnapshot(String stage) {
+        RenderDiagnostics.logImportant(
+            "wizard-layout:" + getName() + ":" + stage,
+            LAYOUT_LOG_SUPPRESS_NS,
+            () -> "[WizardLayout] " + stage
+                + "\n\twizard=" + summarizeWizardComponent(this)
+                + "\n\tsteps=" + steps.size()
+                + "\n\trows=" + stepRows.size()
+                + "\n\texpandedRows=" + countExpandedRows()
+                + "\n\tbrandView=" + summarizeWizardComponent(brandView)
+                + "\n\tbrandDivider=" + summarizeWizardComponent(brandDivider)
+                + "\n\theader=" + summarizeWizardComponent(headerComponent)
+                + "\n\theaderDivider=" + summarizeWizardComponent(headerDivider)
+                + "\n\tstepListStack=" + summarizeWizardComponent(stepListStack)
+                + "\n\tcontentSpacer=" + summarizeWizardComponent(contentSpacer)
+                + "\n\tfooterDivider=" + summarizeWizardComponent(footerDivider)
+                + "\n\tfooter=" + summarizeWizardComponent(footerComponent)
+                + "\n\tstepRows=" + RenderDiagnostics.summarizeRenderables(stepRows, 6)
+        );
+    }
+
+    private int countExpandedRows() {
+        int expandedCount = 0;
+        for (TerminalInstallStepRow row : stepRows) {
+            if (row.isExpanded()) {
+                expandedCount++;
+            }
+        }
+        return expandedCount;
+    }
+
+    private String summarizeWizardComponent(TerminalRenderable renderable) {
+        return RenderDiagnostics.summarizeRenderable(renderable)
+            + ", "
+            + RenderDiagnostics.summarizeSizing(renderable);
+    }
+
+    public int getPreferredWidth() {
+        return resolveMeasuredWidth(null);
+    }
+
+    public int getPreferredHeight() {
+        int measuredWidth = resolveMeasuredWidth(null);
+        int innerWidth = Math.max(1, measuredWidth - getInsets().getHorizontal());
+        return resolveMeasuredHeight(null, innerWidth);
+    }
+
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        TerminalRectangle measured = getRegionPool().obtain();
+        int measuredWidth = resolveMeasuredWidth(childContexts);
+        int innerWidth = Math.max(1, measuredWidth - getInsets().getHorizontal());
+        int measuredHeight = resolveMeasuredHeight(childContexts, innerWidth);
+
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
+    }
+
+    private int resolveMeasuredWidth(TerminalLayoutContext[] childContexts) {
+        return switch (getWidthPreference()) {
+            case STATIC -> getRegion().getWidth();
+            case FIT_CONTENT -> Math.max(
+                getMinWidth(),
+                calculateFitContentWidth(childContexts) + getInsets().getHorizontal()
+            );
+            default -> getMinWidth();
+        };
+    }
+
+    private int resolveMeasuredHeight(TerminalLayoutContext[] childContexts, int innerWidth) {
+        return switch (getHeightPreference()) {
+            case STATIC -> getRegion().getHeight();
+            case FIT_CONTENT -> calculateFitContentHeight(innerWidth, childContexts);
+            default -> getMinHeight();
+        };
+    }
+
+    // Retained for optional FIT_CONTENT wizard sizing. The default constructor
+    // config sets the wizard to FILL x FILL, so this path is dormant unless a
+    // caller explicitly switches the width preference to FIT_CONTENT.
+    private int calculateFitContentWidth(TerminalLayoutContext[] childContexts) {
+        int innerWidth = 0;
+
+        if (isMeasuredVisible(brandView)) {
+            SizePreference brandWidthPreference = brandView.getWidthPreference();
+            if (brandWidthPreference == SizePreference.FIT_CONTENT
+                || brandWidthPreference == SizePreference.STATIC) {
+                innerWidth = Math.max(
+                    innerWidth,
+                    measureRenderableWidth(brandView, findChildContext(brandView, childContexts))
+                );
+            }
+        }
+
+        innerWidth = Math.max(
+            innerWidth,
+            headerComponent.getIntrinsicContentWidth() + headerComponent.getInsets().getHorizontal()
+        );
+
+        if (isMeasuredVisible(footerComponent)) {
+            innerWidth = Math.max(
+                innerWidth,
+                footerComponent.getIntrinsicContentWidth() + footerComponent.getInsets().getHorizontal()
+            );
+        }
+
+        for (TerminalInstallStepRow row : stepRows) {
+            if (!isMeasuredVisible(row)) {
+                continue;
+            }
+            innerWidth = Math.max(
+                innerWidth,
+                row.getIntrinsicContentWidth() + row.getInsets().getHorizontal()
+            );
+        }
+
+        return innerWidth;
+    }
+
+    // Retained for optional FIT_CONTENT wizard sizing. The default constructor
+    // config sets the wizard to FILL x FILL, so this path is dormant unless a
+    // caller explicitly switches the height preference to FIT_CONTENT.
+    private int calculateFitContentHeight(int innerWidth, TerminalLayoutContext[] childContexts) {
+        int totalHeight = 0;
+        int sectionCount = 0;
+
+        int[] sectionHeights = {
+            isMeasuredVisible(brandView) ? brandView.getPreferredHeightForWidth(innerWidth) : 0,
+            addMeasuredHeight(brandDivider, childContexts),
+            addMeasuredHeight(headerComponent, childContexts),
+            addMeasuredHeight(headerDivider, childContexts),
+            measureStepListHeight(childContexts),
+            // Spacer is only for distributing extra height in FILL mode; omit it
+            // from FIT_CONTENT measurement so it cannot create a phantom gap.
+            addMeasuredHeight(footerDivider, childContexts),
+            addMeasuredHeight(footerComponent, childContexts)
+        };
+
+        for (int sectionHeight : sectionHeights) {
+            if (sectionHeight <= 0) {
+                continue;
+            }
+            totalHeight += sectionHeight;
+            sectionCount++;
+        }
+
+        if (sectionCount > 1) {
+            totalHeight += (sectionCount - 1) * getSpacing();
+        }
+
+        return Math.max(getMinHeight(), totalHeight + getInsets().getVertical());
+    }
+
+    private boolean isMeasuredVisible(TerminalRenderable renderable) {
+        return renderable != null
+            && renderable != contentSpacer
+            && !renderable.isLayoutExcluded();
+    }
+
+    private int addMeasuredHeight(
+        TerminalRenderable renderable,
+        TerminalLayoutContext[] childContexts
+    ) {
+        if (!isMeasuredVisible(renderable)) {
+            return 0;
+        }
+        return measureRenderableHeight(renderable, findChildContext(renderable, childContexts));
+    }
+
+    private int measureStepListHeight(TerminalLayoutContext[] childContexts) {
+        if (!isMeasuredVisible(stepListStack)) {
+            return 0;
+        }
+
+        TerminalLayoutContext stepListContext = findChildContext(stepListStack, childContexts);
+        if (stepListContext != null) {
+            return measureRenderableHeight(stepListStack, stepListContext);
+        }
+
+        int totalHeight = 0;
+        int visibleCount = 0;
+        for (TerminalInstallStepRow row : stepRows) {
+            if (!isMeasuredVisible(row)) {
+                continue;
+            }
+            visibleCount++;
+            totalHeight += row.measureCurrentContentHeight();
+        }
+
+        if (visibleCount > 1) {
+            totalHeight += (visibleCount - 1) * stepListStack.getSpacing();
+        }
+
+        return Math.max(
+            stepListStack.getMinHeight(),
+            totalHeight + stepListStack.getInsets().getVertical()
+        );
+    }
+
+    private int measureRenderableWidth(
+        TerminalRenderable renderable,
+        TerminalLayoutContext ctx
+    ) {
+        if (renderable == null || renderable.isLayoutExcluded()) {
+            return 0;
+        }
+        if (ctx != null) {
+            return readDimension(ctx, true);
+        }
+
+        TerminalRectangle requested = renderable.getRequestedRegion();
+        if (requested != null) {
+            return requested.getWidth();
+        }
+
+        if (renderable instanceof TerminalRegion terminalRegion) {
+            TerminalRectangle measured = terminalRegion.measureContent(null);
+            int measuredWidth = measured.getWidth();
+            terminalRegion.getRegionPool().recycle(measured);
+            if (measuredWidth > 0) {
+                return measuredWidth;
+            }
+        }
+
+        return renderable.getRegion().getWidth();
+    }
+
+    private int measureRenderableHeight(
+        TerminalRenderable renderable,
+        TerminalLayoutContext ctx
+    ) {
+        if (renderable == null || renderable.isLayoutExcluded()) {
+            return 0;
+        }
+        if (ctx != null) {
+            return readDimension(ctx, false);
+        }
+
+        TerminalRectangle requested = renderable.getRequestedRegion();
+        if (requested != null) {
+            return requested.getHeight();
+        }
+
+        if (renderable instanceof TerminalRegion terminalRegion) {
+            TerminalRectangle measured = terminalRegion.measureContent(null);
+            int measuredHeight = measured.getHeight();
+            terminalRegion.getRegionPool().recycle(measured);
+            if (measuredHeight > 0) {
+                return measuredHeight;
+            }
+        }
+
+        return renderable.getRegion().getHeight();
+    }
+
+    private TerminalLayoutContext findChildContext(
+        TerminalRenderable child,
+        TerminalLayoutContext[] childContexts
+    ) {
+        if (child == null || childContexts == null) {
+            return null;
+        }
+        for (TerminalLayoutContext ctx : childContexts) {
+            if (ctx != null && ctx.getRenderable() == child) {
+                return ctx;
+            }
+        }
+        return null;
+    }
+
+    private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
+        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
+        if (bounds != null) {
+            return isWidth ? bounds.getWidth() : bounds.getHeight();
+        }
+
+        TerminalRenderable child = ctx.getRenderable();
+        TerminalRectangle requested = child.getRequestedRegion();
+        if (requested != null) {
+            return isWidth ? requested.getWidth() : requested.getHeight();
+        }
+
+        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+    }
+
+    // ===== BUILDER =====
+
+    public static Builder builder(String name) {
+        return new Builder(name);
+    }
+
+    public static final class Builder {
+
+        // required
+        private final String name;
+
+        // content (mutable post-construction, but sensible defaults here)
+        private String  title    = "Installation Wizard";
+        private String  subtitle = null;
+
+        // structural — effectively final after construction
+        private boolean   showBorder         = true;
+        private boolean   showFooter         = true;
+        private boolean   showElapsed        = true;
+        // The wizard already inserts explicit divider children; defaulting
+        // automatic separators on top of them wastes vertical space.
+        private boolean   borderSeparators   = false;
+        private boolean   autoOverallProgress = true;
+        private int       overallBarWidth    = 20;
+        private char      overallFillChar    = '█';
+        private char      overallEmptyChar   = '░';
+        private LineStyle borderLineStyle        = LineStyle.DOUBLE;
+
+        // styles — effectively final after construction
+        private TextStyle borderTextStyle   = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
+        private TextStyle styleTitle        = TextStyle.BOLD;
+        private TextStyle styleOverallFill  = TextStyle.BOLD.withForeground(TextStyle.Color.CYAN);
+        private TextStyle styleOverallEmpty = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
+        private TextStyle styleFooter       = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
+        private TextStyle styleSuccess      = TextStyle.BOLD.withForeground(TextStyle.Color.GREEN);
+        private TextStyle styleError        = TextStyle.BOLD.withForeground(TextStyle.Color.RED);
+
+        // callbacks
+        private CompletionListener completionListener = null;
+
+        private Builder(String name) {
+            this.name = Objects.requireNonNull(name, "name must not be null");
+        }
+
+        // ── structural ────────────────────────────────────────────────────────────
+
+        public Builder title(String title) {
+            this.title = title != null ? title : "";
+            return this;
+        }
+
+        public Builder subtitle(String subtitle) {
+            this.subtitle = subtitle;
+            return this;
+        }
+
+        public Builder showBorder(boolean show) {
+            this.showBorder = show;
+            return this;
+        }
+
+        public Builder borderSeparators(boolean show) {
+            this.borderSeparators = show;
+            return this;
+        }
+
+        public Builder showFooter(boolean show) {
+            this.showFooter = show;
+            return this;
+        }
+
+        public Builder showElapsed(boolean show) {
+            this.showElapsed = show;
+            return this;
+        }
+
+        public Builder autoOverallProgress(boolean auto) {
+            this.autoOverallProgress = auto;
+            return this;
+        }
+
+        public Builder overallBarWidth(int width) {
+            this.overallBarWidth = Math.max(4, width);
+            return this;
+        }
+
+        public Builder overallFillChar(char c) {
+            this.overallFillChar = c;
+            return this;
+        }
+
+        public Builder overallEmptyChar(char c) {
+            this.overallEmptyChar = c;
+            return this;
+        }
+
+        public Builder borderStyle(LineStyle style) {
+            this.borderLineStyle = Objects.requireNonNull(style, "borderStyle must not be null");
+            return this;
+        }
+
+        // ── styles ────────────────────────────────────────────────────────────────
+
+        public Builder styleBorder(TextStyle s) {
+            this.borderTextStyle = Objects.requireNonNull(s);
+            return this;
+        }
+
+        public Builder styleTitle(TextStyle s) {
+            this.styleTitle = Objects.requireNonNull(s);
+            return this;
+        }
+
+        public Builder styleOverallFill(TextStyle s) {
+            this.styleOverallFill = Objects.requireNonNull(s);
+            return this;
+        }
+
+        public Builder styleOverallEmpty(TextStyle s) {
+            this.styleOverallEmpty = Objects.requireNonNull(s);
+            return this;
+        }
+
+        public Builder styleFooter(TextStyle s) {
+            this.styleFooter = Objects.requireNonNull(s);
+            return this;
+        }
+
+        public Builder styleSuccess(TextStyle s) {
+            this.styleSuccess = Objects.requireNonNull(s);
+            return this;
+        }
+
+        public Builder styleError(TextStyle s) {
+            this.styleError = Objects.requireNonNull(s);
+            return this;
+        }
+
+        /** Convenience: apply one style to all TextStyle fields simultaneously. */
+        public Builder uniformStyle(TextStyle base, TextStyle accent) {
+            this.borderTextStyle       = base;
+            this.styleTitle        = accent;
+            this.styleOverallFill  = accent;
+            this.styleOverallEmpty = base;
+            this.styleFooter       = base;
+            this.styleSuccess      = accent;
+            this.styleError        = accent;
+            return this;
+        }
+
+        // ── callback ─────────────────────────────────────────────────────────────
+
+        public Builder onComplete(CompletionListener listener) {
+            this.completionListener = listener;
+            return this;
+        }
+
+        // ── terminal ─────────────────────────────────────────────────────────────
+
+        public TerminalInstallWizard build() {
+            return new TerminalInstallWizard(this);
+        }
     }
 }

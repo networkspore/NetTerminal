@@ -6,6 +6,7 @@ import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.components.display.TerminalBitmap.RenderMode;
 import io.netnotes.terminal.components.display.TerminalBitmap.ScaleMode;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.engine.ui.SizePreference;
 
 /**
@@ -60,6 +61,9 @@ import io.netnotes.engine.ui.SizePreference;
  *   <li>Default: width = FILL, height = FIT_CONTENT (auto-height from aspect ratio)
  *   <li>Override with {@link #setWidthPreference} / {@link #setHeightPreference}
  *       and {@link #setFixedAspectRatio} as needed.
+ *   <li>Layout sizing is driven by {@link #measureContent(TerminalLayoutContext[])}.
+ *       The preferred-size methods remain only as compatibility helpers for
+ *       older callers.
  * </ul>
  */
 public class TerminalBitmapView extends TerminalRegion {
@@ -73,8 +77,8 @@ public class TerminalBitmapView extends TerminalRegion {
     private boolean        bilinear    = false;
 
     /**
-     * When > 0, {@link #getPreferredHeight()} returns a value that preserves
-     * this width:height ratio given the current width.
+     * When > 0, FIT_CONTENT height preserves this width:height ratio using the
+     * currently known content width.
      */
     private float fixedAspectRatio = 0f;
 
@@ -114,7 +118,7 @@ public class TerminalBitmapView extends TerminalRegion {
 
     /**
      * Set the sub-character rendering mode.
-     * Triggers a layout update because the sub-pixel factor affects preferred height.
+     * Triggers a layout update because the sub-pixel factor affects measured size.
      */
     public TerminalBitmapView setRenderMode(RenderMode mode) {
         if (mode != null && this.renderMode != mode) {
@@ -192,21 +196,71 @@ public class TerminalBitmapView extends TerminalRegion {
 
     // ===== SIZING =====
 
-    @Override
-    public int getPreferredHeight() {
-        int w = getWidth();
-        if (w <= 0) w = getMinWidth();
+    /**
+     * Compatibility helper for callers that still need width-constrained
+     * bitmap height outside the layout pre-pass.
+     */
+    public int getPreferredHeightForWidth(int width) {
+        return resolveMeasuredHeightForWidth(width);
+    }
 
-        if (fixedAspectRatio > 0f) {
-            return Math.max(getMinHeight(), Math.round(w * fixedAspectRatio));
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        TerminalRectangle measured = getRegionPool().obtain();
+        int measuredWidth = resolveMeasuredWidth();
+        int measuredHeight = resolveMeasuredHeight(measuredWidth);
+
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
+    }
+
+    private int resolveMeasuredWidth() {
+        return switch (getWidthPreference()) {
+            case STATIC -> getRegion().getWidth();
+            case FIT_CONTENT -> Math.max(
+                getMinWidth(),
+                measureBitmapContentWidth() + getInsets().getHorizontal()
+            );
+            default -> getMinWidth();
+        };
+    }
+
+    private int resolveMeasuredHeight(int measuredOuterWidth) {
+        return switch (getHeightPreference()) {
+            case STATIC -> getRegion().getHeight();
+            case FIT_CONTENT -> resolveMeasuredHeightForWidth(measuredOuterWidth);
+            default -> getMinHeight();
+        };
+    }
+
+    private int resolveMeasuredHeightForWidth(int outerWidth) {
+        int contentWidth = Math.max(1, outerWidth - getInsets().getHorizontal());
+        int contentHeight = measureBitmapContentHeight(contentWidth);
+        return Math.max(getMinHeight(), contentHeight + getInsets().getVertical());
+    }
+
+    private int measureBitmapContentWidth() {
+        if (bitmap == null) {
+            return 1;
         }
 
-        if (bitmap == null) return getMinHeight();
+        RenderMode mode = renderMode.resolve();
+        return Math.max(1, (bitmap.getLogicalWidth() + mode.subCols - 1) / mode.subCols);
+    }
 
-        // Default: enough rows to show the bitmap at 1:1 character density
-        RenderMode m = renderMode.resolve();
-        int charH = (bitmap.getLogicalHeight() + m.subRows - 1) / m.subRows;
-        return Math.max(getMinHeight(), charH);
+    private int measureBitmapContentHeight(int contentWidth) {
+        int resolvedWidth = Math.max(1, contentWidth);
+
+        if (fixedAspectRatio > 0f) {
+            return Math.max(1, Math.round(resolvedWidth * fixedAspectRatio));
+        }
+
+        if (bitmap == null) {
+            return 1;
+        }
+
+        RenderMode mode = renderMode.resolve();
+        return Math.max(1, (bitmap.getLogicalHeight() + mode.subRows - 1) / mode.subRows);
     }
 
     // ===== RENDERING =====

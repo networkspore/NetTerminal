@@ -1277,24 +1277,25 @@ public class TextStyle {
     @Override
     public boolean equals(Object obj) {
         if (this == obj) return true;
-        if (!(obj instanceof TextStyle)) return false;
-        TextStyle other = (TextStyle) obj;
-        return fgMode == other.fgMode &&
-            bgMode == other.bgMode &&
-            foreground == other.foreground &&
-            background == other.background &&
-            fgIndexed == other.fgIndexed &&
-            bgIndexed == other.bgIndexed &&
-            fgRgb == other.fgRgb &&
-            bgRgb == other.bgRgb &&
-            bold == other.bold &&
-            faint == other.faint &&
-            italic == other.italic &&
-            underline == other.underline &&
-            blink == other.blink &&
-            inverse == other.inverse &&
-            hidden == other.hidden &&
-            strikethrough == other.strikethrough;
+        if (obj instanceof TextStyle other){ 
+            return fgMode == other.fgMode &&
+                bgMode == other.bgMode &&
+                foreground == other.foreground &&
+                background == other.background &&
+                fgIndexed == other.fgIndexed &&
+                bgIndexed == other.bgIndexed &&
+                fgRgb == other.fgRgb &&
+                bgRgb == other.bgRgb &&
+                bold == other.bold &&
+                faint == other.faint &&
+                italic == other.italic &&
+                underline == other.underline &&
+                blink == other.blink &&
+                inverse == other.inverse &&
+                hidden == other.hidden &&
+                strikethrough == other.strikethrough;
+        }
+        return false;
     }
 
     @Override

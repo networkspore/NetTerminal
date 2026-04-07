@@ -2,6 +2,7 @@ package io.netnotes.terminal.components.panels;
 
 import java.util.Map;
 
+import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.components.HScrollIndicator;
@@ -20,6 +21,7 @@ import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.noteBytes.collections.NoteBytesRunnablePair;
 import io.netnotes.engine.ui.BorderPanel;
 import io.netnotes.engine.ui.ScrollIndicator;
+import io.netnotes.engine.ui.SizePreference;
 
 /**
  * A scrollable panel that extends TerminalBorderPanel.
@@ -81,8 +83,11 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     
     public TerminalScrollPanel(String name) {
         super(name);
+        this.contentPadding.setOnChanged(insets -> applyContentPadding());
         this.vScrollIndicator = new VScrollIndicator(name + "-vscroll");
         this.hScrollIndicator = new HScrollIndicator(name + "-hscroll");
+        syncCenterStackSizing();
+        applyContentPadding();
         updateScrollIndicatorPositions();
     }
     
@@ -121,55 +126,41 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         if (event instanceof KeyDownEvent kd) {
             keyRunTable.run(kd.getKeyCodeBytes());
         } else if (event instanceof EphemeralKeyDownEvent ekd) {
-            keyRunTable.run(ekd.getKeyCodeBytes());
-            ekd.close();
+            try (ekd) {
+                keyRunTable.run(ekd.getKeyCodeBytes());
+            }
         }
     }
     
     public void setContentPadding(int padding) {
         int clamped = Math.max(0, padding);
-        if (this.contentPadding.getTop() != clamped ||
-            this.contentPadding.getRight() != clamped ||
+        if (this.contentPadding.getTop()    != clamped ||
+            this.contentPadding.getRight()  != clamped ||
             this.contentPadding.getBottom() != clamped ||
-            this.contentPadding.getLeft() != clamped) {
+            this.contentPadding.getLeft()   != clamped) {
             this.contentPadding.setAll(clamped);
-            
-            // Update the CENTER stack panel's padding
-            TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
-            if (centerStack != null) {
-                centerStack.setPadding(contentPadding);
-            }
-            
-            requestLayoutUpdate();
         }
     }
+
+    private void applyContentPadding() {
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
+        if (centerStack != null) {
+            centerStack.setPadding(contentPadding);
+        }
+        requestLayoutUpdate();
+    }
+
+
     
     public void setContentInsets(TerminalInsets padding) {
         if (padding == null) {
             if (!this.contentPadding.isZero()) {
                 this.contentPadding.clear();
-                
-                // Update the CENTER stack panel's padding
-                TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
-                if (centerStack != null) {
-                    centerStack.setPadding(this.contentPadding);
-                }
-                
-                requestLayoutUpdate();
             }
             return;
         }
-        
         if (!this.contentPadding.equals(padding)) {
             this.contentPadding.copyFrom(padding);
-            
-            // Update the CENTER stack panel's padding
-            TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
-            if (centerStack != null) {
-                centerStack.setPadding(this.contentPadding);
-            }
-            
-            requestLayoutUpdate();
         }
     }
     
@@ -178,11 +169,10 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     }
     
     public void setScrollMode(ScrollMode mode) {
-        if (mode == null) {
-            throw new IllegalArgumentException("ScrollMode cannot be null");
-        }
+        mode = mode != null ? mode : ScrollMode.FIT_TO_VIEWPORT;
         if (this.scrollMode != mode) {
             this.scrollMode = mode;
+            syncCenterStackSizing();
             requestLayoutUpdate();
         }
     }
@@ -280,14 +270,50 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     }
     
     private void updateScrollIndicatorPositions() {
-        if (vScrollIndicator != null && verticalScrollEnabled) {
-            BorderPanel position = vScrollPosition == VScrollPosition.LEFT ? BorderPanel.LEFT : BorderPanel.RIGHT;
-            setPanel(position, vScrollIndicator.getRenderable());
+        syncIndicatorPlacement(
+            vScrollIndicator,
+            verticalScrollEnabled,
+            vScrollPosition == VScrollPosition.LEFT ? BorderPanel.LEFT : BorderPanel.RIGHT,
+            vScrollPosition == VScrollPosition.LEFT ? BorderPanel.RIGHT : BorderPanel.LEFT
+        );
+
+        syncIndicatorPlacement(
+            hScrollIndicator,
+            horizontalScrollEnabled,
+            hScrollPosition == HScrollPosition.TOP ? BorderPanel.TOP : BorderPanel.BOTTOM,
+            hScrollPosition == HScrollPosition.TOP ? BorderPanel.BOTTOM : BorderPanel.TOP
+        );
+    }
+
+    private void syncIndicatorPlacement(
+        ScrollIndicator<TerminalRenderable> indicator,
+        boolean enabled,
+        BorderPanel targetRegion,
+        BorderPanel alternateRegion
+    ) {
+        if (indicator == null) {
+            return;
         }
-        
-        if (hScrollIndicator != null && horizontalScrollEnabled) {
-            BorderPanel position = hScrollPosition == HScrollPosition.TOP ? BorderPanel.TOP : BorderPanel.BOTTOM;
-            setPanel(position, hScrollIndicator.getRenderable());
+
+        TerminalRenderable indicatorRenderable = indicator.getRenderable();
+        removeIndicatorIfPresent(alternateRegion, indicatorRenderable);
+
+        if (!enabled) {
+            removeIndicatorIfPresent(targetRegion, indicatorRenderable);
+            return;
+        }
+
+        if (getPanel(targetRegion) != indicatorRenderable) {
+            setPanel(targetRegion, indicatorRenderable);
+        }
+    }
+
+    private void removeIndicatorIfPresent(BorderPanel region, TerminalRenderable indicatorRenderable) {
+        if (region == null || indicatorRenderable == null) {
+            return;
+        }
+        if (getPanel(region) == indicatorRenderable) {
+            clearPanel(region);
         }
     }
     
@@ -312,6 +338,16 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         if (newContent == null) {
             return;
         }
+        String traceOwner = getSwapTraceOwner(BorderPanel.CENTER);
+        TerminalRenderable previousContent = getContent();
+        RenderDiagnostics.logSwapTraceEvent(
+            traceOwner,
+            "TerminalScrollPanel.swapContent:start",
+            () -> "scrollPanel=" + RenderDiagnostics.summarizeRenderable(this)
+                + "\n\tpreviousContent=" + RenderDiagnostics.summarizeRenderable(previousContent)
+                + "\n\tnewContent=" + RenderDiagnostics.summarizeRenderable(newContent)
+                + "\n\tscroll=(" + scrollX + "," + scrollY + ")"
+        );
         swapPanel(BorderPanel.CENTER, newContent);
         
         // Reset scroll position when swapping content
@@ -319,6 +355,12 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         scrollY = 0;
         
         requestLayoutUpdate();
+        RenderDiagnostics.logSwapTraceEvent(
+            traceOwner,
+            "TerminalScrollPanel.swapContent:end",
+            () -> "visibleContent=" + RenderDiagnostics.summarizeRenderable(getContent())
+                + "\n\tscroll=(" + scrollX + "," + scrollY + ")"
+        );
     }
     
     /**
@@ -327,6 +369,25 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     public void swapContent(String contentName) {
         TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (centerStack != null) {
+            String traceOwner = getSwapTraceOwner(BorderPanel.CENTER);
+            TerminalRenderable previousContent = centerStack.getVisibleContent();
+            TerminalRenderable targetContent = centerStack.getContent(contentName);
+            RenderDiagnostics.armSwapTrace(
+                traceOwner,
+                "TerminalScrollPanel.swapContent(String)",
+                this,
+                centerStack,
+                previousContent,
+                targetContent
+            );
+            RenderDiagnostics.logSwapTraceEvent(
+                traceOwner,
+                "TerminalScrollPanel.swapContent(String):start",
+                () -> "contentName=" + contentName
+                    + "\n\tpreviousContent=" + RenderDiagnostics.summarizeRenderable(previousContent)
+                    + "\n\ttargetContent=" + RenderDiagnostics.summarizeRenderable(targetContent)
+                    + "\n\tscroll=(" + scrollX + "," + scrollY + ")"
+            );
             centerStack.setVisibleContent(contentName);
             
             // Reset scroll position when swapping content
@@ -334,6 +395,12 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
             scrollY = 0;
             
             requestLayoutUpdate();
+            RenderDiagnostics.logSwapTraceEvent(
+                traceOwner,
+                "TerminalScrollPanel.swapContent(String):end",
+                () -> "visibleContent=" + RenderDiagnostics.summarizeRenderable(centerStack.getVisibleContent())
+                    + "\n\tscroll=(" + scrollX + "," + scrollY + ")"
+            );
         }
     }
     
@@ -423,19 +490,15 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     
     public void scrollToBottom() {
         TerminalRenderable visibleContent = getContent();
-        if (visibleContent != null) {
-            TerminalRectangle centerRegion = getCenterRegion();
-            if (centerRegion == null) return;
-    
-            int viewportWidth = centerRegion.getWidth() - contentPadding.getHorizontal();
-            int viewportHeight = centerRegion.getHeight() - contentPadding.getVertical();
-
-            TerminalRectangle contentSize = getContentSize(visibleContent, viewportWidth, viewportHeight);
-
-            scrollTo(scrollX, Math.max(0, contentSize.getHeight() - viewportHeight));
-        }
+        if (visibleContent == null) return;
+        TerminalRectangle centerRegion = getCenterRegion();
+        if (centerRegion == null) return;
+        TerminalRectangle contentRegion = visibleContent.getRegion();
+        if (contentRegion == null) return;
+        int viewportHeight = centerRegion.getHeight() - contentPadding.getVertical();
+        scrollTo(scrollX, Math.max(0, contentRegion.getHeight() - viewportHeight));
     }
-    
+        
     private void scrollLineUp() {
         scrollBy(0, -lineScrollAmount);
     }
@@ -490,84 +553,274 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     }
     
     private TerminalRectangle getCenterRegion() {
-        // Get the stack panel for the center region
         TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
-        if(centerStack == null){
-            throw new IllegalStateException("TerminalScrollPanel centerStack is null (getCenterRegion)");
-        }
-        return centerStack.getRegion();
+        return centerStack != null ? centerStack.getRegion() : null;
     }
-    
-    /**
-     * Calculate the content size based on the scroll mode and content's TerminalSizeable implementation.
-     */
-    private TerminalRectangle getContentSize(TerminalRenderable content, int viewportWidth, int viewportHeight) {
+
+    private void syncCenterStackSizing() {
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
+        if (centerStack == null) {
+            return;
+        }
+
+        SizePreference pref = scrollMode == ScrollMode.FIXED_SIZE
+            ? SizePreference.FIT_CONTENT
+            : SizePreference.FILL;
+
+        if (centerStack.getWidthPreference() != pref) {
+            centerStack.setWidthPreference(pref);
+        }
+        if (centerStack.getHeightPreference() != pref) {
+            centerStack.setHeightPreference(pref);
+        }
+    }
+        
+
+    private TerminalRectangle getContentSize(
+        TerminalRenderable content,
+        TerminalLayoutContext centerContext,
+        int viewportWidth,
+        int viewportHeight
+    ) {
+        TerminalRectangle measuredStack = centerContext != null
+            ? centerContext.getMeasuredContentBounds()
+            : null;
+        if (measuredStack != null) {
+            return new TerminalRectangle(
+                0,
+                0,
+                Math.max(0, measuredStack.getWidth() - contentPadding.getHorizontal()),
+                Math.max(0, measuredStack.getHeight() - contentPadding.getVertical())
+            );
+        }
+
+        TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
         if (content instanceof TerminalSizeable s) {
-            int w = resolveContentDimension(content, viewportWidth,  s.getPercentWidth(),  s.getWidthPreference(),  true);
-            int h = resolveContentDimension(content, viewportHeight, s.getPercentHeight(), s.getHeightPreference(), false);
+            int w = resolveContentDimension(
+                content,
+                centerStack,
+                viewportWidth,
+                s.getPercentWidth(),
+                s.getWidthPreference(),
+                true
+            );
+            int h = resolveContentDimension(
+                content,
+                centerStack,
+                viewportHeight,
+                s.getPercentHeight(),
+                s.getHeightPreference(),
+                false
+            );
             return new TerminalRectangle(0, 0, w, h);
         }
-        return new TerminalRectangle(0, 0, viewportWidth, viewportHeight);
+        return new TerminalRectangle(0, 0, Math.max(0, viewportWidth), Math.max(0, viewportHeight));
+    }
+
+    private int resolveContentDimension(
+        TerminalRenderable content,
+        TerminalStackPanel centerStack,
+        int viewportSize,
+        double percent,
+        SizePreference preference,
+        boolean isWidth
+    ) {
+        int available = Math.max(0, viewportSize);
+        SizePreference resolvedPreference = resolveContentPreference(centerStack, preference, isWidth);
+        int min = 0;
+
+        if (content instanceof TerminalSizeable sizeable) {
+            min = isWidth ? sizeable.getMinWidth() : sizeable.getMinHeight();
+        }
+
+        return switch (resolvedPreference) {
+            case FIT_CONTENT, STATIC -> Math.max(min, readRequestedOrCurrentDimension(content, isWidth));
+            case PERCENT -> Math.max(min, (int) (available * percent));
+            case FILL -> scrollMode == ScrollMode.FIXED_SIZE
+                ? Math.max(min, readRequestedOrCurrentDimension(content, isWidth))
+                : Math.max(min, available);
+            default -> Math.max(min, available);
+        };
+    }
+
+    private SizePreference resolveContentPreference(
+        TerminalStackPanel centerStack,
+        SizePreference preference,
+        boolean isWidth
+    ) {
+        if (preference != SizePreference.INHERIT) {
+            return preference;
+        }
+        if (centerStack != null) {
+            return isWidth ? centerStack.getWidthPreference() : centerStack.getHeightPreference();
+        }
+        return scrollMode == ScrollMode.FIXED_SIZE
+            ? SizePreference.FIT_CONTENT
+            : SizePreference.FILL;
+    }
+
+    private int readRequestedOrCurrentDimension(TerminalRenderable content, boolean isWidth) {
+        TerminalRectangle requested = content.getRequestedRegion();
+        if (requested != null) {
+            return isWidth ? requested.getWidth() : requested.getHeight();
+        }
+        TerminalRectangle current = content.getRegion();
+        return isWidth ? current.getWidth() : current.getHeight();
     }
 
 
-    /**
-     * ScrollPanel's layout is simple - it just coordinates the CENTER stack panel's
-     * scroll offset and content size. The parent BorderPanel handles the actual
-     * layout of all 5 regions, and each StackPanel handles its own content layout.
-     */
     @Override
     protected void layoutAllPanels(
         TerminalLayoutContext[] contexts,
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
     ) {
-        // Clamp and apply scroll offset BEFORE super runs the group callbacks
         TerminalStackPanel centerStack = getRegionStack(BorderPanel.CENTER);
-        if (centerStack != null) {
-            TerminalRenderable content = centerStack.getVisibleContent();
-            if (content != null) {
-                TerminalRectangle centerRegion = getCenterRegion();
-                if (centerRegion != null) {
-                    int viewportWidth  = centerRegion.getWidth()  - contentPadding.getHorizontal();
-                    int viewportHeight = centerRegion.getHeight() - contentPadding.getVertical();
-                    TerminalRectangle contentSize = getContentSize(content, viewportWidth, viewportHeight);
+        TerminalRenderable content = centerStack != null ? centerStack.getVisibleContent() : null;
 
-                    int maxScrollX = horizontalScrollEnabled ? Math.max(0, contentSize.getWidth()  - viewportWidth)  : 0;
-                    int maxScrollY = verticalScrollEnabled   ? Math.max(0, contentSize.getHeight() - viewportHeight) : 0;
-
-                    scrollX = Math.max(0, Math.min(scrollX, maxScrollX));
-                    scrollY = Math.max(0, Math.min(scrollY, maxScrollY));
-
-                    centerStack.setScrollOffset(scrollX, scrollY);
-                }
-            }
-        }
-
-    
         super.layoutAllPanels(contexts, dataInterfaces);
 
-        // Scroll indicator update (read-only, no layout impact)
-        centerStack = getRegionStack(BorderPanel.CENTER);
-        if (centerStack == null) return;
-        TerminalRenderable content = centerStack.getVisibleContent();
-        if (content == null) return;
-        TerminalRectangle centerRegion = getCenterRegion();
-        if (centerRegion == null) return;
+        if (centerStack == null) {
+            updateScrollIndicators(0, 0, 0, 0, false, false);
+            return;
+        }
 
-        int viewportWidth  = centerRegion.getWidth()  - contentPadding.getHorizontal();
-        int viewportHeight = centerRegion.getHeight()  - contentPadding.getVertical();
-        TerminalRectangle contentSize = getContentSize(content, viewportWidth, viewportHeight);
+        TerminalRectangle allocatedRegion = resolveAllocatedRegion(dataInterfaces, centerStack);
+        if (allocatedRegion == null) {
+            updateScrollIndicators(0, 0, 0, 0, false, false);
+            return;
+        }
+
+        if (content == null || content.isLayoutExcluded()) {
+            scrollX = 0;
+            scrollY = 0;
+            centerStack.setScrollOffsetDuringLayout(0, 0);
+            updateScrollIndicators(
+                Math.max(0, allocatedRegion.getWidth() - contentPadding.getHorizontal()),
+                Math.max(0, allocatedRegion.getHeight() - contentPadding.getVertical()),
+                0,
+                0,
+                false,
+                false
+            );
+            return;
+        }
+
+        TerminalLayoutContext centerContext = findContext(contexts, centerStack);
+        int viewportWidth  = Math.max(0, allocatedRegion.getWidth()  - contentPadding.getHorizontal());
+        int viewportHeight = Math.max(0, allocatedRegion.getHeight() - contentPadding.getVertical());
+        TerminalRectangle contentSize = getContentSize(content, centerContext, viewportWidth, viewportHeight);
         int contentWidth  = contentSize.getWidth();
         int contentHeight = contentSize.getHeight();
+
+        int maxScrollX = horizontalScrollEnabled ? Math.max(0, contentWidth  - viewportWidth)  : 0;
+        int maxScrollY = verticalScrollEnabled   ? Math.max(0, contentHeight - viewportHeight) : 0;
+        scrollX = Math.max(0, Math.min(scrollX, maxScrollX));
+        scrollY = Math.max(0, Math.min(scrollY, maxScrollY));
+        centerStack.setScrollOffsetDuringLayout(scrollX, scrollY);
+
+        if (viewportWidth <= 0 || viewportHeight <= 0) {
+            RenderDiagnostics.logRenderBlocker(
+                "scrollpanel-viewport-collapse:" + getName(),
+                "TerminalScrollPanel.layoutAllPanels",
+                "non-positive-viewport",
+                () -> "scrollPanel=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\tpanelSizing=" + RenderDiagnostics.summarizeSizing(this)
+                    + "\n\tcenterStack=" + RenderDiagnostics.summarizeRenderable(centerStack)
+                    + "\n\tcenterSizing=" + RenderDiagnostics.summarizeSizing(centerStack)
+                    + "\n\tcenterRegion=" + RenderDiagnostics.summarizeRegion(allocatedRegion)
+                    + "\n\tcontent=" + RenderDiagnostics.summarizeRenderable(content)
+                    + "\n\tcontentSizing=" + RenderDiagnostics.summarizeSizing(content)
+                    + "\n\tcontentPadding=" + contentPadding
+                    + "\n\tviewport=" + viewportWidth + "x" + viewportHeight
+                    + "\n\tresolvedContent=" + contentWidth + "x" + contentHeight
+                    + "\n\tscroll=(" + scrollX + "," + scrollY + ")"
+                    + "\n\tscrollMode=" + scrollMode
+            );
+        }
+
+        if (contentWidth <= 0 || contentHeight <= 0) {
+            RenderDiagnostics.logRenderBlocker(
+                "scrollpanel-content-collapse:" + getName() + ":" + content.getName(),
+                "TerminalScrollPanel.layoutAllPanels",
+                "resolved-content-size-non-positive",
+                () -> "scrollPanel=" + RenderDiagnostics.summarizeRenderable(this)
+                    + "\n\tpanelSizing=" + RenderDiagnostics.summarizeSizing(this)
+                    + "\n\tcenterRegion=" + RenderDiagnostics.summarizeRegion(allocatedRegion)
+                    + "\n\tcontent=" + RenderDiagnostics.summarizeRenderable(content)
+                    + "\n\tcontentSizing=" + RenderDiagnostics.summarizeSizing(content)
+                    + "\n\tcontentPadding=" + contentPadding
+                    + "\n\tviewport=" + viewportWidth + "x" + viewportHeight
+                    + "\n\tresolvedContent=" + contentWidth + "x" + contentHeight
+                    + "\n\tscroll=(" + scrollX + "," + scrollY + ")"
+                    + "\n\tscrollMode=" + scrollMode
+            );
+        }
 
         boolean needsVScroll = verticalScrollEnabled   && contentHeight > viewportHeight;
         boolean needsHScroll = horizontalScrollEnabled && contentWidth  > viewportWidth;
 
+        updateScrollIndicators(
+            viewportWidth,
+            viewportHeight,
+            contentWidth,
+            contentHeight,
+            needsVScroll,
+            needsHScroll
+        );
+    }
+
+    private TerminalLayoutContext findContext(
+        TerminalLayoutContext[] contexts,
+        TerminalRenderable target
+    ) {
+        if (contexts == null || target == null) {
+            return null;
+        }
+        for (TerminalLayoutContext context : contexts) {
+            if (context != null && context.getRenderable() == target) {
+                return context;
+            }
+        }
+        return null;
+    }
+
+    private TerminalRectangle resolveAllocatedRegion(
+        Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces,
+        TerminalRenderable renderable
+    ) {
+        if (renderable == null) {
+            return null;
+        }
+
+        LayoutDataInterface<TerminalLayoutData> dataInterface = dataInterfaces.get(renderable.getName());
+        if (dataInterface != null && dataInterface.hasLayoutData()) {
+            TerminalLayoutData layoutData = dataInterface.getLayoutData();
+            if (layoutData != null && layoutData.hasRegion()) {
+                return layoutData.getSpatialRegion();
+            }
+        }
+
+        TerminalRectangle requested = renderable.getRequestedRegion();
+        return requested != null ? requested : renderable.getRegion();
+    }
+
+    private void updateScrollIndicators(
+        int viewportWidth,
+        int viewportHeight,
+        int contentWidth,
+        int contentHeight,
+        boolean needsVScroll,
+        boolean needsHScroll
+    ) {
         if (autoShowScrollIndicators) {
             if (vScrollIndicator != null) {
                 if (needsVScroll) {
                     vScrollIndicator.getRenderable().show();
-                    vScrollIndicator.updatePosition(scrollY, contentHeight - viewportHeight, viewportHeight);
+                    vScrollIndicator.updatePosition(
+                        scrollY,
+                        Math.max(0, contentHeight - viewportHeight),
+                        Math.max(0, viewportHeight)
+                    );
                 } else {
                     vScrollIndicator.getRenderable().hide();
                 }
@@ -575,20 +828,32 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
             if (hScrollIndicator != null) {
                 if (needsHScroll) {
                     hScrollIndicator.getRenderable().show();
-                    hScrollIndicator.updatePosition(scrollX, contentWidth - viewportWidth, viewportWidth);
+                    hScrollIndicator.updatePosition(
+                        scrollX,
+                        Math.max(0, contentWidth - viewportWidth),
+                        Math.max(0, viewportWidth)
+                    );
                 } else {
                     hScrollIndicator.getRenderable().hide();
                 }
             }
-        } else {
-            if (vScrollIndicator != null) {
-                vScrollIndicator.updatePosition(scrollY, contentHeight - viewportHeight, viewportHeight);
-            }
-            if (hScrollIndicator != null) {
-                hScrollIndicator.updatePosition(scrollX, contentWidth - viewportWidth, viewportWidth);
-            }
+            return;
+        }
+
+        if (vScrollIndicator != null) {
+            vScrollIndicator.updatePosition(
+                scrollY,
+                Math.max(0, contentHeight - viewportHeight),
+                Math.max(0, viewportHeight)
+            );
+        }
+        if (hScrollIndicator != null) {
+            hScrollIndicator.updatePosition(
+                scrollX,
+                Math.max(0, contentWidth - viewportWidth),
+                Math.max(0, viewportWidth)
+            );
         }
     }
-    
-    // TerminalSizeable implementation is inherited from TerminalBorderPanel.
+
 }

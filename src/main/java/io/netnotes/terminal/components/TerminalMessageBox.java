@@ -4,8 +4,10 @@ import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.terminal.TerminalBatchBuilder;
+import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
+import io.netnotes.terminal.layout.TerminalLayoutContext;
 
 /**
  * TerminalMessageBox - Self-contained message display with border
@@ -126,16 +128,18 @@ public class TerminalMessageBox extends TerminalRegion {
     }
     
     public void setMessageSpacing(int spacing) {
-        if (this.messageSpacing != spacing) {
-            this.messageSpacing = Math.max(1, spacing);
-            invalidate();
+        int clamped = Math.max(1, spacing);
+        if (this.messageSpacing != clamped) {
+            this.messageSpacing = clamped;
+            notifyContentChanged();
         }
     }
     
     public void setPadding(int padding) {
-        if (this.padding != padding) {
-            this.padding = Math.max(0, padding);
-            invalidate();
+        int clamped = Math.max(0, padding);
+        if (this.padding != clamped) {
+            this.padding = clamped;
+            notifyContentChanged();
         }
     }
     
@@ -173,9 +177,11 @@ public class TerminalMessageBox extends TerminalRegion {
         TextStyle titleStyle = getTitleStyle();
         TextStyle msgStyle = getMessageStyle();
         TextStyle footStyle = getFooterStyle();
+
+        fillRegion(batch, 1, 1, Math.max(0, width - 2), Math.max(0, height - 2), ' ', TextStyle.NORMAL);
         
         // Draw border with title
-        String titleText = (title != null && !title.isEmpty()) ? getIconForType() + " " + title : null;
+        String titleText = getRenderedTitleText();
         drawBox(batch, 0, 0, width, height, titleText, Position.TOP_CENTER, boxStyle, titleStyle);
         
         // Calculate content area
@@ -269,9 +275,13 @@ public class TerminalMessageBox extends TerminalRegion {
             default -> "";
         };
     }
+
+    private String getRenderedTitleText() {
+        return (title != null && !title.isEmpty()) ? getIconForType() + " " + title : null;
+    }
     
     private LineStyle getBoxStyle() {
-        return boxStyle;
+        return boxStyle != null ? boxStyle : borderStyle;
     }
     
     private TextStyle getTitleStyle() {
@@ -317,60 +327,7 @@ public class TerminalMessageBox extends TerminalRegion {
     
     // ===== SIZEABLE IMPLEMENTATION (FIXED) =====
     
-    @Override
-    public int getPreferredWidth() {
-        SizePreference pref = getWidthPreference();
-        
-        // Handle STATIC - delegate to parent which uses region.getWidth()
-        if (pref == SizePreference.STATIC) {
-            return super.getPreferredWidth();
-        }
-        
-        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinWidth();
-        }
-        
-        // FIT_CONTENT: Calculate based on content
-        int maxLength = 0;
-        
-        if (title != null) {
-            maxLength = Math.max(maxLength, title.length() + 4 + (showIcon ? 2 : 0));
-        }
-        
-        for (String msg : messages) {
-            if (msg != null) {
-                maxLength = Math.max(maxLength, msg.length());
-            }
-        }
-        
-        if (footer != null) {
-            maxLength = Math.max(maxLength, footer.length());
-        }
-        
-        // Add padding (internal spacing) + border (2) + insets (external spacing)
-        int preferred = maxLength + (2 * padding) + 2 + getInsets().getHorizontal();
-        return Math.max(getMinWidth(), preferred);
-    }
-
-    @Override
-    public int getPreferredHeight() {
-        SizePreference pref = getHeightPreference();
-        
-        // Handle STATIC - delegate to parent which uses region.getHeight()
-        if (pref == SizePreference.STATIC) {
-            return super.getPreferredHeight();
-        }
-        
-        // Handle PERCENT and FILL - return minimum, layout will calculate actual size
-        if (pref == SizePreference.PERCENT || pref == SizePreference.FILL) {
-            return getMinHeight();
-        }
-        
-        // FIT_CONTENT: Calculate based on content
-        int contentHeight = getMinimumHeight();
-        return Math.max(getMinHeight(), contentHeight + getInsets().getVertical());
-    }
+   
 
     @Override
     public int getMinWidth() {
@@ -429,5 +386,44 @@ public class TerminalMessageBox extends TerminalRegion {
         public TerminalMessageBox build() {
             return new TerminalMessageBox(this);
         }
+    }
+
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        int measuredWidth = getWidthPreference() == SizePreference.FIT_CONTENT
+            ? measureContentWidth()
+            : getMinWidth();
+
+        int measuredHeight = getHeightPreference() == SizePreference.FIT_CONTENT
+            ? Math.max(getMinHeight(), getMinimumHeight() + getInsets().getVertical())
+            : getMinHeight();
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, measuredWidth, measuredHeight);
+        return measured;
+    }
+
+    private int measureContentWidth() {
+        int maxContentWidth = 0;
+
+        if (messages != null) {
+            for (String message : messages) {
+                if (message != null && !message.isEmpty()) {
+                    maxContentWidth = Math.max(maxContentWidth, message.length());
+                }
+            }
+        }
+
+        if (footer != null && !footer.isEmpty()) {
+            maxContentWidth = Math.max(maxContentWidth, footer.length());
+        }
+
+        int measuredWidth = maxContentWidth + (2 * padding) + 2 + getInsets().getHorizontal();
+
+        String titleText = getRenderedTitleText();
+        if (titleText != null && !titleText.isEmpty()) {
+            measuredWidth = Math.max(measuredWidth, titleText.length() + 4 + getInsets().getHorizontal());
+        }
+
+        return Math.max(getMinWidth(), measuredWidth);
     }
 }

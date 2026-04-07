@@ -8,15 +8,13 @@ public interface TerminalSizeable {
     SizePreference getHeightPreference();
     default int getMinWidth(){ return 1; };
     default int getMinHeight() { return 1; };
-    int getPreferredWidth();
-    int getPreferredHeight();
     TerminalInsets getInsets();
 
     // Percentage-based sizing support
-    default float getPercentWidth() { return 0f; }
-    default void setPercentWidth(float percent) { }
-    default float getPercentHeight() { return 0f; }
-    default void setPercentHeight(float percent) { }
+    default double getPercentWidth() { return 0; }
+    default void setPercentWidth(double percent) { }
+    default double getPercentHeight() { return 0; }
+    default void setPercentHeight(double percent) { }
 
     default boolean isHiddenManaged() { return true;  }
 }
