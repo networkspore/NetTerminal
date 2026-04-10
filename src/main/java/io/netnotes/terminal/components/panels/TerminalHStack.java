@@ -161,7 +161,9 @@ public class TerminalHStack extends TerminalAbstractStack {
         int[] heights     = new int[layoutCount];
         SizePreference[] widthPrefs  = new SizePreference[layoutCount];
         SizePreference[] heightPrefs = new SizePreference[layoutCount];
-
+        Arrays.fill(widthPrefs,  SizePreference.STATIC);
+        Arrays.fill(heightPrefs, SizePreference.STATIC);
+        
         int totalFitWidth  = 0;
         int fillWidthCount = 0;
 

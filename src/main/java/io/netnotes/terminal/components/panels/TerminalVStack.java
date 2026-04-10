@@ -160,7 +160,8 @@ public class TerminalVStack extends TerminalAbstractStack {
         int[] heights     = new int[layoutCount];
         SizePreference[] widthPrefs  = new SizePreference[layoutCount];
         SizePreference[] heightPrefs = new SizePreference[layoutCount];
-
+        Arrays.fill(widthPrefs,  SizePreference.STATIC);
+        Arrays.fill(heightPrefs, SizePreference.STATIC);
         int totalResolvedHeight = 0;
         int fillHeightCount = 0;
 

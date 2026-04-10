@@ -5,7 +5,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
@@ -21,23 +20,40 @@ import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
- * TerminalStackPanel — single-visible Z-axis stacking container.
+ * TerminalOverlayPanel — multi-visible Z-axis stacking container.
  *
- * Holds multiple renderables occupying the same space; exactly one is visible
- * at a time. Visibility is not negotiated: being the current child means being
- * visible; not being the current child means being hidden. There is no
- * isHiddenManaged concept here — the panel owns the hidden state completely.
+ * Holds multiple renderables occupying the same space; up to maxVisibleNodes
+ * may be visible simultaneously. There is no concept of a preferred or primary
+ * child — all visible children are peers.
  *
- * PRIMARY API:
- * - setVisibleContent(renderable/name) — swap the visible child.
- * - getVisibleContent()                — returns the current child.
+ * VISIBILITY MODEL:
+ * - isHiddenManaged() (via TerminalSizeable) governs whether this panel may
+ *   call hide()/show() on a child and whether it sets the hidden flag in layout
+ *   data. A child with isHiddenManaged()=false controls its own visibility; the
+ *   panel assigns it coordinates when it is in the visible set but never forces
+ *   a hide/show transition on it.
+ * - Hidden children receive hidden(true) in their layout data and no coordinates.
+ *   Stale coordinates cannot leak through to hidden nodes.
+ *
+ * MAX VISIBLE NODES:
+ * - N > 0 : up to N children visible simultaneously. The visible set is
+ *           maintained in insertion order; adding a new visible child when the
+ *           set is full evicts the least-recently-shown entry.
+ * - -1    : unlimited — every child added is shown by default.
+ * - 0     : none — all children are hidden regardless of show() calls.
+ *
+ * MEASURE:
+ * - The panel's content footprint is the intersection of all visible children's
+ *   bounds (i.e. min width and min height across the visible set). This
+ *   represents the guaranteed region in which all visible content overlaps.
+ *   If no children are visible the footprint is zero.
  *
  * SCROLL / OVERFLOW:
- * - CLIP (default) : content scrolled out of viewport is hidden.
+ * - CLIP (default) : visible content scrolled out of viewport is hidden.
  * - OVERFLOW       : content is positioned with scroll offset applied but not
  *                    clipped; an outer container handles clipping.
  */
-public class TerminalStackPanel extends TerminalRegion {
+public class TerminalOverlayPanel extends TerminalRegion {
 
     // ── stack state ───────────────────────────────────────────────────────────
 
@@ -45,13 +61,21 @@ public class TerminalStackPanel extends TerminalRegion {
     private final Map<String, TerminalRenderable> nameToRenderable = new HashMap<>();
 
     /**
-     * The single currently visible child. All layout sizing and coordinate
-     * assignment is derived from this child. Null if the stack is empty or
-     * no content has been set.
+     * Ordered visible set — children in this list receive coordinates and
+     * hidden(false) during layout. Maintained in least-recently-shown order so
+     * the head is always the eviction candidate when maxVisibleNodes is exceeded.
      */
-    private TerminalRenderable currentContent = null;
+    private final List<TerminalRenderable> visibleSet = new ArrayList<>();
 
     // ── configuration ─────────────────────────────────────────────────────────
+
+    /**
+     * Maximum number of simultaneously visible children.
+     *  -1 = unlimited (default)
+     *   0 = none
+     *  N  = up to N
+     */
+    private int maxVisibleNodes = -1;
 
     private int scrollOffsetX = 0;
     private int scrollOffsetY = 0;
@@ -68,10 +92,10 @@ public class TerminalStackPanel extends TerminalRegion {
     // CONSTRUCTION
     // =========================================================================
 
-    public TerminalStackPanel(String name) {
+    public TerminalOverlayPanel(String name) {
         super(name);
-        this.layoutGroupId    = "stackpanel-" + getName();
-        this.layoutCallbackId = "stackpanel-default";
+        this.layoutGroupId    = "overlaypanel-" + getName();
+        this.layoutCallbackId = "overlaypanel-default";
         padding.setOnChanged(insets -> requestLayoutUpdate());
         init();
     }
@@ -148,6 +172,26 @@ public class TerminalStackPanel extends TerminalRegion {
     }
 
     // =========================================================================
+    // MAX VISIBLE NODES
+    // =========================================================================
+
+    /**
+     * Set the maximum number of simultaneously visible children.
+     * -1 = unlimited, 0 = none, N = up to N.
+     *
+     * Changing this value trims or expands the visible set immediately and
+     * schedules a layout update.
+     */
+    public void setMaxVisibleNodes(int max) {
+        if (this.maxVisibleNodes == max) return;
+        this.maxVisibleNodes = max;
+        trimVisibleSet();
+        requestLayoutUpdate();
+    }
+
+    public int getMaxVisibleNodes() { return maxVisibleNodes; }
+
+    // =========================================================================
     // PERCENT SIZE OVERRIDES
     // =========================================================================
 
@@ -168,21 +212,20 @@ public class TerminalStackPanel extends TerminalRegion {
     // =========================================================================
 
     /**
-     * Visibility policy injected into each child. Only the current child may
-     * be visible; all others are unconditionally hidden by this panel.
-     * Hiding is always allowed so the panel can always push a child to hidden.
+     * Visibility policy injected into each child. A child may only self-show
+     * if it is in the visible set and maxVisibleNodes permits it. Hiding is
+     * always allowed so the panel can always push a child to hidden.
      */
     private boolean visibilityPolicy(TerminalRenderable renderable, boolean isVisible) {
-        if (!isVisible) return true;             // always allow hiding
-        return renderable == currentContent;     // only the current child may show
+        if (!isVisible) return true;
+        if (maxVisibleNodes == 0) return false;
+        return visibleSet.contains(renderable);
     }
 
     /**
-     * Add a renderable to the stack.
-     *
-     * The first child added is automatically promoted to current content.
-     * Subsequent children are hidden immediately — the panel owns their
-     * hidden state from the moment they are added.
+     * Add a renderable to the stack. In unlimited mode (-1) the child is shown
+     * immediately. In capped modes (N > 0) the child is hidden until explicitly
+     * shown via showContent(). In mode 0 the child is always hidden.
      *
      * @throws IllegalArgumentException on null, nameless, or duplicate-name input.
      */
@@ -209,13 +252,12 @@ public class TerminalStackPanel extends TerminalRegion {
         addToLayoutGroup(renderable, layoutGroupId);
         renderable.setVisibilityPolicy(this::visibilityPolicy);
 
-        if (currentContent == null) {
-            // First child: auto-promote.
-            currentContent = renderable;
-            renderable.show();
+        if (maxVisibleNodes == -1) {
+            // Unlimited: show every child by default.
+            addToVisibleSet(renderable);
         } else {
-            // All subsequent children start hidden — no negotiation.
-            renderable.hide();
+            // Capped or zero: new children wait until explicitly shown.
+            if (shouldManageHidden(renderable)) renderable.hide();
         }
 
         requestLayoutUpdate();
@@ -230,15 +272,9 @@ public class TerminalStackPanel extends TerminalRegion {
         if (!stack.contains(renderable)) return;
         stack.remove(renderable);
         nameToRenderable.remove(renderable.getName());
+        visibleSet.remove(renderable);
         super.removeChild(renderable);
         renderable.setVisibilityPolicy(null);
-
-        if (renderable == currentContent) {
-            // Promote the last remaining child, if any.
-            currentContent = stack.isEmpty() ? null : stack.get(stack.size() - 1);
-            if (currentContent != null) currentContent.show();
-        }
-
         requestLayoutUpdate();
     }
 
@@ -258,70 +294,57 @@ public class TerminalStackPanel extends TerminalRegion {
     // =========================================================================
 
     /**
-     * Swap the visible child. The previous current child is unconditionally
-     * hidden; the new one is unconditionally shown. There is no isHiddenManaged
-     * check — the panel owns this transition completely.
-     *
-     * Passing null clears the current content (all children hidden).
+     * Add a child to the visible set without hiding others. Respects
+     * maxVisibleNodes by evicting the least-recently-shown entry when the set
+     * is full. Does nothing if maxVisibleNodes == 0.
      *
      * @throws IllegalArgumentException if the renderable is not in the stack.
      */
-    public void setVisibleContent(TerminalRenderable renderable) {
-        if (renderable != null && !stack.contains(renderable)) {
+    public void showContent(TerminalRenderable renderable) {
+        if (maxVisibleNodes == 0) return;
+        if (!stack.contains(renderable)) {
             throw new IllegalArgumentException(
-                "Renderable must be in stack before setting as visible");
+                "Renderable must be in stack before showing");
         }
-
-        TerminalRenderable previous = currentContent;
-        RenderDiagnostics.logSwapTrace(
-            "TerminalStackPanel.setVisibleContent:start", this,
-            () -> "previous=" + RenderDiagnostics.summarizeRenderable(previous)
-                + "\n\ttarget=" + RenderDiagnostics.summarizeRenderable(renderable)
-                + "\n\tstackSize=" + stack.size()
-        );
-
-        if (previous != null && previous != renderable) {
-            RenderDiagnostics.logSwapTrace(
-                "TerminalStackPanel.setVisibleContent:hide", previous,
-                () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\ttarget=" + RenderDiagnostics.summarizeRenderable(renderable)
-            );
-            previous.hide();
-        }
-
-        currentContent = renderable;
-
-        if (renderable != null && renderable.isHidden()) {
-            RenderDiagnostics.logSwapTrace(
-                "TerminalStackPanel.setVisibleContent:show", renderable,
-                () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\tprevious=" + RenderDiagnostics.summarizeRenderable(previous)
-            );
+        addToVisibleSet(renderable);
+        if (shouldManageHidden(renderable) && renderable.isHidden()) {
             renderable.show();
         }
-
-        RenderDiagnostics.logSwapTrace(
-            "TerminalStackPanel.setVisibleContent:end", this,
-            () -> "current=" + RenderDiagnostics.summarizeRenderable(currentContent)
-                + "\n\tprevious=" + RenderDiagnostics.summarizeRenderable(previous)
-        );
-
         requestLayoutUpdate();
     }
 
-    public void setVisibleContent(String name) {
+    public void showContent(String name) {
         TerminalRenderable r = nameToRenderable.get(name);
         if (r == null) {
             throw new IllegalArgumentException(
                 "No renderable with name '" + name + "' exists in stack");
         }
-        setVisibleContent(r);
+        showContent(r);
+    }
+
+    /**
+     * Remove a child from the visible set and hide it (if managed).
+     */
+    public void hideContent(TerminalRenderable renderable) {
+        if (!visibleSet.remove(renderable)) return;
+        if (shouldManageHidden(renderable)) renderable.hide();
+        requestLayoutUpdate();
+    }
+
+    public void hideContent(String name) {
+        TerminalRenderable r = nameToRenderable.get(name);
+        if (r != null) hideContent(r);
+    }
+
+    /** Hide all managed visible children and clear the visible set. */
+    public void hideAll() {
+        hideAllManaged();
+        requestLayoutUpdate();
     }
 
     // ── accessors ─────────────────────────────────────────────────────────────
 
-    /** Returns the single currently visible child, or null if none. */
-    public TerminalRenderable getVisibleContent()          { return currentContent; }
+    public List<TerminalRenderable> getVisibleSet()        { return new ArrayList<>(visibleSet); }
     public List<TerminalRenderable> getStackContents()     { return new ArrayList<>(stack); }
     public boolean contains(TerminalRenderable renderable) { return stack.contains(renderable); }
     public boolean contains(String name)                   { return nameToRenderable.containsKey(name); }
@@ -336,6 +359,11 @@ public class TerminalStackPanel extends TerminalRegion {
     public TerminalRenderable getContentAt(int index) {
         return (index >= 0 && index < stack.size()) ? stack.get(index) : null;
     }
+    public boolean isVisible(TerminalRenderable renderable) { return visibleSet.contains(renderable); }
+    public boolean isVisible(String name) {
+        TerminalRenderable r = nameToRenderable.get(name);
+        return r != null && visibleSet.contains(r);
+    }
 
     // =========================================================================
     // LAYOUT
@@ -349,7 +377,7 @@ public class TerminalStackPanel extends TerminalRegion {
 
         TerminalRectangle parentPanel = contexts[0].getParentRegion();
         if (parentPanel == null) {
-            Log.logError("[TerminalStackPanel] layoutStack: parent region is null"
+            Log.logError("[TerminalOverlayPanel] layoutStack: parent region is null"
                 + " this.region=" + (region != null ? region.toString() : "null"));
             return;
         }
@@ -358,16 +386,15 @@ public class TerminalStackPanel extends TerminalRegion {
         int viewportWidth  = parentPanel.getWidth()  - ins.getHorizontal();
         int viewportHeight = parentPanel.getHeight() - ins.getVertical();
 
-        TerminalLayoutContext currentContext = currentContent != null
-            ? findContext(contexts, currentContent) : null;
-        int contentWidth  = resolveContentDimension(currentContent, currentContext, viewportWidth,  true);
-        int contentHeight = resolveContentDimension(currentContent, currentContext, viewportHeight, false);
+        // All visible children share the same origin; each is sized independently.
+        int x = ins.getLeft() - scrollOffsetX;
+        int y = ins.getTop()  - scrollOffsetY;
 
         for (TerminalLayoutContext context : contexts) {
             TerminalRenderable child = context.getRenderable();
 
             if (!stack.contains(child)) {
-                Log.logError("[TerminalStackPanel] layoutStack: skipping unknown child: "
+                Log.logError("[TerminalOverlayPanel] layoutStack: skipping unknown child: "
                     + child.getName());
                 continue;
             }
@@ -378,30 +405,36 @@ public class TerminalStackPanel extends TerminalRegion {
                 continue;
             }
 
-            if (child != currentContent) {
-                // Not current — unconditionally hidden, no coordinates.
-                dataInterfaces.get(child.getName())
-                    .setLayoutData(TerminalLayoutData.getBuilder().hidden(true).build());
+            boolean managed   = shouldManageHidden(child);
+            boolean inVisible = maxVisibleNodes != 0 && visibleSet.contains(child);
+
+            if (!inVisible) {
+                if (managed) {
+                    dataInterfaces.get(child.getName())
+                        .setLayoutData(TerminalLayoutData.getBuilder().hidden(true).build());
+                }
                 continue;
             }
 
-            // Current child — assign coordinates.
-            int x = ins.getLeft() - scrollOffsetX;
-            int y = ins.getTop()  - scrollOffsetY;
+            // Visible child — resolve its own dimensions independently.
+            int childWidth  = resolveChildDimension(child, context, viewportWidth,  true);
+            int childHeight = resolveChildDimension(child, context, viewportHeight, false);
 
             boolean outOfBounds = overflowStrategy != LayoutOverflowStrategy.OVERFLOW
-                && ((x + contentWidth  <= 0) || (x >= parentPanel.getWidth())
-                 || (y + contentHeight <= 0) || (y >= parentPanel.getHeight()));
+                && ((x + childWidth  <= 0) || (x >= parentPanel.getWidth())
+                 || (y + childHeight <= 0) || (y >= parentPanel.getHeight()));
 
-            dataInterfaces.get(child.getName()).setLayoutData(
-                TerminalLayoutData.getBuilder()
-                    .setX(x)
-                    .setY(y)
-                    .setWidth(Math.max(0, contentWidth))
-                    .setHeight(Math.max(0, contentHeight))
-                    .hidden(outOfBounds)
-                    .build()
-            );
+            TerminalLayoutData.TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder()
+                .setX(x)
+                .setY(y)
+                .setWidth(Math.max(0, childWidth))
+                .setHeight(Math.max(0, childHeight));
+
+            if (managed) {
+                builder.hidden(outOfBounds);
+            }
+
+            dataInterfaces.get(child.getName()).setLayoutData(builder.build());
         }
     }
 
@@ -410,8 +443,12 @@ public class TerminalStackPanel extends TerminalRegion {
     // =========================================================================
 
     /**
-     * Pre-pass sizing: only the current visible child contributes to this
-     * panel's footprint.
+     * Pre-pass sizing: the panel's content footprint is the intersection of all
+     * visible children's bounds — i.e. the minimum width and minimum height
+     * across the visible set. This is the guaranteed area in which all visible
+     * layers overlap.
+     *
+     * If no children are visible the footprint is zero.
      */
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
@@ -419,16 +456,26 @@ public class TerminalStackPanel extends TerminalRegion {
         SizePreference ownHP = getHeightPreference();
         TerminalInsets ins   = getInsets();
 
-        int contentW = 0;
-        int contentH = 0;
+        int intersectW = Integer.MAX_VALUE;
+        int intersectH = Integer.MAX_VALUE;
+        boolean anyVisible = false;
 
-        if (currentContent != null && childContexts != null) {
-            TerminalLayoutContext ctx = findContext(childContexts, currentContent);
-            if (ctx != null) {
-                if (ownWP == SizePreference.FIT_CONTENT) contentW = readDimension(ctx, true);
-                if (ownHP == SizePreference.FIT_CONTENT) contentH = readDimension(ctx, false);
+        if (childContexts != null) {
+            for (TerminalRenderable visible : visibleSet) {
+                TerminalLayoutContext ctx = findContext(childContexts, visible);
+                if (ctx == null) continue;
+                anyVisible = true;
+                if (ownWP == SizePreference.FIT_CONTENT) {
+                    intersectW = Math.min(intersectW, readDimension(ctx, true));
+                }
+                if (ownHP == SizePreference.FIT_CONTENT) {
+                    intersectH = Math.min(intersectH, readDimension(ctx, false));
+                }
             }
         }
+
+        int contentW = anyVisible && intersectW != Integer.MAX_VALUE ? intersectW : 0;
+        int contentH = anyVisible && intersectH != Integer.MAX_VALUE ? intersectH : 0;
 
         int w = switch (ownWP) {
             case STATIC      -> region.getWidth();
@@ -484,7 +531,7 @@ public class TerminalStackPanel extends TerminalRegion {
 
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
-        // StackPanel does not render anything itself.
+        // OverlayPanel does not render anything itself.
     }
 
     @Override
@@ -497,16 +544,60 @@ public class TerminalStackPanel extends TerminalRegion {
     // PRIVATE HELPERS
     // =========================================================================
 
-    private int resolveContentDimension(
-        TerminalRenderable content,
+    /**
+     * Add a child to the visible set, refreshing its MRU position. If the set
+     * is at capacity, the least-recently-shown entry is evicted and hidden.
+     */
+    private void addToVisibleSet(TerminalRenderable renderable) {
+        visibleSet.remove(renderable);
+        if (maxVisibleNodes > 0 && visibleSet.size() >= maxVisibleNodes) {
+            TerminalRenderable evicted = visibleSet.remove(0);
+            if (shouldManageHidden(evicted)) evicted.hide();
+        }
+        visibleSet.add(renderable);
+    }
+
+    /**
+     * Trim the visible set to the current maxVisibleNodes limit, evicting from
+     * the least-recently-shown end.
+     */
+    private void trimVisibleSet() {
+        if (maxVisibleNodes < 0) return;
+        while (maxVisibleNodes == 0 || visibleSet.size() > maxVisibleNodes) {
+            if (visibleSet.isEmpty()) break;
+            TerminalRenderable evicted = visibleSet.remove(0);
+            if (shouldManageHidden(evicted)) evicted.hide();
+        }
+    }
+
+    private void hideAllManaged() {
+        for (TerminalRenderable r : new ArrayList<>(visibleSet)) {
+            if (shouldManageHidden(r)) r.hide();
+        }
+        visibleSet.clear();
+    }
+
+    /**
+     * Returns true if the panel is allowed to manage this child's hidden state.
+     * A child with isHiddenManaged()=false controls its own visibility; the
+     * panel assigns coordinates but never forces hide/show on it.
+     */
+    private boolean shouldManageHidden(TerminalRenderable child) {
+        if (child instanceof TerminalSizeable s) return s.isHiddenManaged();
+        return true;
+    }
+
+    private int resolveChildDimension(
+        TerminalRenderable child,
         TerminalLayoutContext ctx,
         int viewportSize,
         boolean isWidth
     ) {
-        if (content == null) return 0;
-
-        if (content instanceof TerminalSizeable s) {
-            SizePreference pref = resolveVisiblePreference(s, isWidth);
+        if (child instanceof TerminalSizeable s) {
+            SizePreference pref = isWidth ? s.getWidthPreference() : s.getHeightPreference();
+            if (pref == SizePreference.INHERIT) {
+                pref = isWidth ? getWidthPreference() : getHeightPreference();
+            }
             int min = isWidth ? s.getMinWidth() : s.getMinHeight();
             return switch (pref) {
                 case FILL        -> viewportSize;
@@ -514,7 +605,7 @@ public class TerminalStackPanel extends TerminalRegion {
                     if (ctx == null || ctx.getMeasuredContentBounds() == null) {
                         throw new IllegalStateException(
                             "FIT_CONTENT requires measured content bounds for: "
-                                + content.getName());
+                                + child.getName());
                     }
                     yield isWidth
                         ? ctx.getMeasuredContentBounds().getWidth()
@@ -528,25 +619,15 @@ public class TerminalStackPanel extends TerminalRegion {
                             ? ctx.getRequestedRegion().getWidth()
                             : ctx.getRequestedRegion().getHeight();
                     }
-                    yield isWidth
-                        ? content.getRegion().getWidth()
-                        : content.getRegion().getHeight();
+                    yield isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
                 }
                 default -> viewportSize;
             };
         }
 
-        TerminalRectangle requested = content.getRequestedRegion();
+        TerminalRectangle requested = child.getRequestedRegion();
         if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
-        return isWidth ? content.getRegion().getWidth() : content.getRegion().getHeight();
-    }
-
-    private SizePreference resolveVisiblePreference(TerminalSizeable s, boolean isWidth) {
-        SizePreference pref = isWidth ? s.getWidthPreference() : s.getHeightPreference();
-        if (pref == SizePreference.INHERIT) {
-            return isWidth ? getWidthPreference() : getHeightPreference();
-        }
-        return pref;
+        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
     }
 
     private TerminalLayoutContext findContext(
@@ -555,7 +636,7 @@ public class TerminalStackPanel extends TerminalRegion {
     ) {
         for (TerminalLayoutContext ctx : contexts) {
             if (ctx == null) {
-                Log.logError("[TerminalStackPanel] findContext: null context in array");
+                Log.logError("[TerminalOverlayPanel] findContext: null context in array");
                 continue;
             }
             if (ctx.getRenderable() == target) return ctx;

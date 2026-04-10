@@ -305,6 +305,15 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
         addToLayoutGroup(child, layoutGroupId);
     }
 
+    @Override protected void onLayoutManagerSet(boolean hasLayoutManager) {
+        // If the layout manager is being removed, de-register the callback to avoid orphaned references.
+        if (!hasLayoutManager && layoutCallback != null) {
+            destroyLayoutGroup(layoutGroupId);
+            layoutCallback = null;
+        }
+        
+    }
+
     // =========================================================================
     // SHARED LAYOUT HELPERS
     // =========================================================================
