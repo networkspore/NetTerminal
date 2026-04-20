@@ -7,13 +7,14 @@ import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
+import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 
 /**
@@ -75,9 +76,6 @@ public class TerminalHStack extends TerminalAbstractStack {
         setWidthPreference(SizePreference.FIT_CONTENT);
         setHeightPreference(SizePreference.FILL);
 
-        // Must be last — all fields must be initialised before the layout group
-        // is registered with the rendering system.
-        initLayoutCallback();
     }
 
     // =========================================================================
@@ -85,17 +83,10 @@ public class TerminalHStack extends TerminalAbstractStack {
     // =========================================================================
 
     @Override
-    protected void initLayoutCallback() {
-        this.layoutCallback = this::layoutAllChildren;
-        registerChildGroupCallback(layoutGroupId, layoutCallback);
+    protected TerminalLayoutGroupCallback createLayoutCallback() {
+        return this::layoutAllChildren;
     }
 
-    // =========================================================================
-    // ACCESSORS — layout group identity
-    // =========================================================================
-
-    public String getLayoutGroupId()    { return layoutGroupId;    }
-    public String getLayoutCallbackId() { return layoutCallbackId; }
 
     // =========================================================================
     // LAYOUT CALCULATION
@@ -120,7 +111,7 @@ public class TerminalHStack extends TerminalAbstractStack {
         int[] layoutIndices = new int[contexts.length];
         int layoutCount = 0;
         for (int i = 0; i < contexts.length; i++) {
-            if (shouldIncludeInLayout(contexts[i].getRenderable())) {
+            if (!renderableIsExcluded(contexts[i].getRenderable())) {
                 layoutIndices[layoutCount++] = i;
             }
         }
@@ -163,31 +154,25 @@ public class TerminalHStack extends TerminalAbstractStack {
         SizePreference[] heightPrefs = new SizePreference[layoutCount];
         Arrays.fill(widthPrefs,  SizePreference.STATIC);
         Arrays.fill(heightPrefs, SizePreference.STATIC);
-        
+
         int totalFitWidth  = 0;
         int fillWidthCount = 0;
 
         for (int i = 0; i < layoutCount; i++) {
             TerminalLayoutContext childContext = contexts[layoutIndices[i]];
             TerminalRenderable child = childContext.getRenderable();
-            boolean manageHidden = shouldManageHidden(child);
-            
+
             TerminalSizeable s = (child instanceof TerminalSizeable) ? (TerminalSizeable) child : null;
             if (s != null) {
-                widthPrefs[i] = s.getWidthPreference() == SizePreference.INHERIT 
-                    ? getWidthPreference() 
+                widthPrefs[i] = s.getWidthPreference() == SizePreference.INHERIT
+                    ? getWidthPreference()
                     : s.getWidthPreference();
-                heightPrefs[i] = s.getHeightPreference() == SizePreference.INHERIT 
-                    ? getHeightPreference() 
+                heightPrefs[i] = s.getHeightPreference() == SizePreference.INHERIT
+                    ? getHeightPreference()
                     : s.getHeightPreference();
             }else{
                 widthPrefs[i] = SizePreference.STATIC;
                 heightPrefs[i] = SizePreference.STATIC;
-            }
-            if (childContext.isHidden() && !manageHidden) {
-                widths[i] = 0;
-                heights[i] = 0;
-                continue;
             }
 
             switch(heightPrefs[i]){
@@ -213,7 +198,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                     heights[i] = childContext.getCurrentRegion().getHeight();
                     break;
             }
-            
+
             switch(widthPrefs[i]){
                 case FILL:
                     widths[i] = -1;   // resolved after all FIT sizes are known
@@ -238,9 +223,9 @@ public class TerminalHStack extends TerminalAbstractStack {
                 default:
                     widths[i] = childContext.getCurrentRegion().getWidth();
                     break;
-                
+
             }
-          
+
         }
 
         // ── resolve FILL widths ────────────────────────────────────────────────
@@ -418,7 +403,7 @@ public class TerminalHStack extends TerminalAbstractStack {
         return Math.max(0, readDimension(ctx, true));
     }
 
-   
+
     // =========================================================================
     // RENDERING
     // =========================================================================
@@ -452,38 +437,38 @@ public class TerminalHStack extends TerminalAbstractStack {
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
         SizePreference ownWidthPref  = getWidthPreference();
         SizePreference ownHeightPref = getHeightPreference();
- 
+
         int totalWidth   = 0;
         int maxHeight    = 0;
         int visibleCount = 0;
- 
+
         if (childContexts != null) {
             for (TerminalLayoutContext ctx : childContexts) {
                 if (ctx == null) continue;
                 TerminalRenderable child = ctx.getRenderable();
-                if (!shouldIncludeInLayout(child)) continue;
- 
+                if (renderableIsExcluded(child)) continue;
+
                 visibleCount++;
- 
+
                 TerminalSizeable s = (child instanceof TerminalSizeable) ? (TerminalSizeable) child : null;
-                SizePreference childWidthPref  = s != null 
-                    ? ( s.getWidthPreference() == SizePreference.INHERIT 
-                        ? getWidthPreference() 
+                SizePreference childWidthPref  = s != null
+                    ? ( s.getWidthPreference() == SizePreference.INHERIT
+                        ? getWidthPreference()
                         : s.getWidthPreference())
                     : SizePreference.STATIC;
-                SizePreference childHeightPref = s != null 
-                    ? ( s.getHeightPreference() == SizePreference.INHERIT 
-                        ? getHeightPreference() 
+                SizePreference childHeightPref = s != null
+                    ? ( s.getHeightPreference() == SizePreference.INHERIT
+                        ? getHeightPreference()
                         : s.getHeightPreference())
                     : SizePreference.STATIC;
-                
+
                 if (ownWidthPref == SizePreference.FIT_CONTENT
                  && (childWidthPref == SizePreference.FIT_CONTENT
                   || childWidthPref == SizePreference.STATIC)) {
                     int cw = readDimension(ctx, true);
                     if (cw > 0) totalWidth += cw;
                 }
- 
+
                 if (ownHeightPref == SizePreference.FIT_CONTENT
                  && (childHeightPref == SizePreference.FIT_CONTENT
                   || childHeightPref == SizePreference.STATIC)) {
@@ -491,12 +476,12 @@ public class TerminalHStack extends TerminalAbstractStack {
                 }
             }
         }
- 
+
         // Gap columns between all visible children — same rule as the layout pass.
         if (ownWidthPref == SizePreference.FIT_CONTENT && visibleCount > 1) {
             totalWidth += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
         }
- 
+
         int w = switch (ownWidthPref) {
             case STATIC      -> region.getWidth();
             case FIT_CONTENT -> Math.max(getMinWidth(), totalWidth + getInsets().getHorizontal());
@@ -507,7 +492,7 @@ public class TerminalHStack extends TerminalAbstractStack {
             case FIT_CONTENT -> Math.max(getMinHeight(), maxHeight + getInsets().getVertical());
             default          -> getMinHeight();
         };
- 
+
         TerminalRectangle measured = getRegionPool().obtain();
         measured.set(0, 0, w, h);
         return measured;
@@ -516,11 +501,11 @@ public class TerminalHStack extends TerminalAbstractStack {
     private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
         TerminalRectangle bounds = ctx.getMeasuredContentBounds();
         if (bounds != null) return isWidth ? bounds.getWidth() : bounds.getHeight();
- 
+
         TerminalRenderable child = ctx.getRenderable();
         TerminalRectangle requested = child.getRequestedRegion();
         if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
- 
+
         return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
     }
 }

@@ -111,7 +111,7 @@ public class TerminalLayoutManager extends RenderableLayoutManager<
             TerminalRenderable renderable = node.getRenderable();
             TerminalRectangle region = renderable.getRegion();
             TerminalRectangle requested = renderable.getRequestedRegion();
-            if (renderable.isEffectivelyVisible()
+            if (!renderable.isEffectivelyHidden()
                     && (region == null || region.getWidth() <= 0 || region.getHeight() <= 0)) {
                 RenderDiagnostics.logRenderBlocker(
                     "layout-pass-empty-result:" + containerName + ":" + renderable.getName(),

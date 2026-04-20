@@ -8,10 +8,7 @@ import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
-import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
-import io.netnotes.terminal.layout.TerminalLayoutCallback;
-import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 
 /**
@@ -32,7 +29,7 @@ import io.netnotes.terminal.layout.TerminalSizeable;
  *   - getPreferredWidth() / getPreferredHeight() — axis-aware sizing.
  *   - renderSelf() — axis-appropriate border drawing.
  */
-public abstract class TerminalAbstractStack extends TerminalRegion {
+public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
     // ── alignment enums ───────────────────────────────────────────────────────
 
@@ -72,14 +69,6 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
 
     // ── layout group identity ─────────────────────────────────────────────────
 
-    protected final String layoutGroupId;
-    protected final String layoutCallbackId;
-
-    /**
-     * Held so subclasses can expose it via a getter if callers need to
-     * de-register or inspect the callback reference.
-     */
-    protected TerminalLayoutGroupCallback layoutCallback = null;
 
     // =========================================================================
     // CONSTRUCTION
@@ -101,9 +90,8 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
         VAlignment defaultVAlign,
         HAlignment defaultHAlign
     ) {
-        super(name);
-        this.layoutGroupId          = groupPrefix + "-" + getName();
-        this.layoutCallbackId       = groupPrefix + "-default";
+        super(name, groupPrefix);
+
         this.setWidthPreference(defaultWidth);
         this.setHeightPreference(defaultHeight);
         this.vAlignment              = defaultVAlign;
@@ -112,26 +100,6 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
         // Wire the padding callback so any mutation triggers inset recalc + layout.
         this.padding.setOnChanged(this::onPaddingChanged);
     }
-
-    // =========================================================================
-    // ABSTRACT CONTRACT — subclasses must implement
-    // =========================================================================
-
-    /**
-     * Register the layout group callback with the rendering system.
-     * Must be called at the very end of the concrete subclass constructor,
-     * after all fields are initialised and the super() chain has completed.
-     *
-     * Example:
-     * <pre>
-     *   {@literal @}Override
-     *   protected void initLayoutCallback() {
-     *       this.layoutCallback = this::layoutAllChildren;
-     *       registerChildGroupCallback(layoutGroupId, layoutCallback);
-     *   }
-     * </pre>
-     */
-    protected abstract void initLayoutCallback();
 
     // =========================================================================
     // INSETS — padding change hook and border enforcement
@@ -291,40 +259,8 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
 
 
     // =========================================================================
-    // CHILD MANAGEMENT
-    // =========================================================================
-
-    @Override
-    public void addChild(TerminalRenderable child) {
-        addChild(child, null);
-    }
-
-    @Override
-    public void addChild(TerminalRenderable child, TerminalLayoutCallback cb) {
-        super.addChild(child, null);
-        addToLayoutGroup(child, layoutGroupId);
-    }
-
-    @Override protected void onLayoutManagerSet(boolean hasLayoutManager) {
-        // If the layout manager is being removed, de-register the callback to avoid orphaned references.
-        if (!hasLayoutManager && layoutCallback != null) {
-            destroyLayoutGroup(layoutGroupId);
-            layoutCallback = null;
-        }
-        
-    }
-
-    // =========================================================================
     // SHARED LAYOUT HELPERS
     // =========================================================================
-
-    /**
-     * Returns true if {@code child} should participate in the layout pass.
-     * Layout-excluded children are skipped entirely (no position assigned).
-     */
-    protected boolean shouldIncludeInLayout(TerminalRenderable child) {
-        return !child.isLayoutExcluded();
-    }
 
     /**
      * Returns true if the stack should manage the hidden flag of {@code child}.
@@ -334,7 +270,6 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
     protected boolean shouldManageHidden(TerminalRenderable child) {
         return !(child instanceof TerminalSizeable s) || s.isHiddenManaged();
     }
-
 
     /**
      * Returns true when the child's position and size fit entirely within the
@@ -355,14 +290,5 @@ public abstract class TerminalAbstractStack extends TerminalRegion {
         int[] next = Arrays.copyOf(arr, arr.length + 1);
         next[arr.length] = value;
         return next;
-    }
-
-    // =========================================================================
-    // LIFECYCLE
-    // =========================================================================
-
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(layoutGroupId);
     }
 }

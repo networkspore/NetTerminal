@@ -18,7 +18,7 @@ import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.noteBytes.NoteBytesEphemeral;
 import io.netnotes.noteBytes.NoteBytesReadOnly;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
-import io.netnotes.engine.utils.virtualExecutors.VirtualExecutors;
+import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 
 public class PasswordPrompt extends TerminalRegion {
     

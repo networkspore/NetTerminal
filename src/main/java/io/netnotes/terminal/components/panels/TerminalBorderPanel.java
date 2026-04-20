@@ -11,42 +11,40 @@ import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.BorderPanel;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.noteBytes.processing.IntCounter;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
-import io.netnotes.terminal.components.TerminalRegion;
 
 /**
  * A border layout panel with 5 regions: TOP, BOTTOM, LEFT, RIGHT, CENTER.
  * Each region uses a TerminalStackPanel internally to support multiple
  * renderables with only one visible at a time.
  */
-public class TerminalBorderPanel extends TerminalRegion {
+public class TerminalBorderPanel extends TerminalGroupRegion {
 
     private static final LogLevel LOG_LEVEL = LogLevel.GENERAL;
-    
-    
+
+
     private final EnumMap<BorderPanel, TerminalStackPanel> regionStacks = new EnumMap<>(BorderPanel.class);
-    
+
     // Default sizes for regions when children don't exist (use -1 for "not set")
     private int reservedTopHeight = -1;
     private int reservedBottomHeight = -1;
     private int reservedLeftWidth = -1;
     private int reservedRightWidth = -1;
 
-    private final String layoutGroupId;
-    private final String layoutCallbackId;
-    private TerminalLayoutGroupCallback layoutCallback = null;
-    
-    public TerminalBorderPanel(String name) {
-        super(name);
+    public TerminalBorderPanel(String name){
+        this(name, "borderpanel");
+    }
+
+    protected TerminalBorderPanel(String name, String prefix) {
+        super(name, prefix);
         String className = this.getClass().getName();
         className = className.substring(className.lastIndexOf(".") + 1);
-        this.layoutGroupId = className + "-" + getName();
-        this.layoutCallbackId = layoutGroupId + "-callback";
+
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FILL);
 
@@ -72,37 +70,21 @@ public class TerminalBorderPanel extends TerminalRegion {
             regionStacks.put(panel, stack);
             addChild(stack);
         }
-        
-        init();
+
     }
 
-    private void init() {
-        this.layoutCallback = this::layoutAllPanels;
-        registerChildGroupCallback(getLayoutGroupId(), layoutCallback);
-        
-        // Add all stack panels to the layout group
-        for (TerminalStackPanel stack : regionStacks.values()) {
-            addToLayoutGroup(stack, layoutGroupId);
-        }
+    @Override
+    protected TerminalLayoutGroupCallback createLayoutCallback() {
+        return this::layoutAllPanels;
     }
 
-    public TerminalLayoutGroupCallback getTerminalGroupCallbackEntry() {
-        return layoutCallback;
-    }
 
-    public String getLayoutCallbackId() {
-        return layoutCallbackId;
-    }
-    
-    public String getLayoutGroupId() {
-        return layoutGroupId;
-    }
 
     protected String getSwapTraceOwner(BorderPanel region) {
         return getName() + ":" + (region != null ? region.name().toLowerCase() : "unknown");
     }
-    
-  
+
+
 
     @Override
     public void setPercentWidth(double percent) {
@@ -115,7 +97,7 @@ public class TerminalBorderPanel extends TerminalRegion {
         super.setPercentHeight(percent);
         requestLayoutUpdate();
     }
-    
+
     /**
      * Set default height for TOP region when child doesn't specify size.
      * Use -1 to disable (will calculate from child).
@@ -126,7 +108,7 @@ public class TerminalBorderPanel extends TerminalRegion {
             requestLayoutUpdate();
         }
     }
-    
+
     /**
      * Set default height for BOTTOM region when child doesn't specify size.
      * Use -1 to disable (will calculate from child).
@@ -137,7 +119,7 @@ public class TerminalBorderPanel extends TerminalRegion {
             requestLayoutUpdate();
         }
     }
-    
+
     /**
      * Set default width for LEFT region when child doesn't specify size.
      * Use -1 to disable (will calculate from child).
@@ -148,7 +130,7 @@ public class TerminalBorderPanel extends TerminalRegion {
             requestLayoutUpdate();
         }
     }
-    
+
     /**
      * Set default width for RIGHT region when child doesn't specify size.
      * Use -1 to disable (will calculate from child).
@@ -159,12 +141,12 @@ public class TerminalBorderPanel extends TerminalRegion {
             requestLayoutUpdate();
         }
     }
-    
+
     public int getReservedTopHeight() { return reservedTopHeight; }
     public int getReservedBottomHeight() { return reservedBottomHeight; }
     public int getReservedLeftWidth() { return reservedLeftWidth; }
     public int getReservedRightWidth() { return reservedRightWidth; }
-    
+
     /**
      * Set a single child for a region, replacing any existing content.
      * The stack for that region will be cleared and only this child will be added.
@@ -173,18 +155,18 @@ public class TerminalBorderPanel extends TerminalRegion {
         if (region == null) {
             throw new IllegalArgumentException("Panel cannot be null");
         }
-        
+
         TerminalStackPanel stack = regionStacks.get(region);
         stack.clearStack();
-        
+
         if (child != null) {
             stack.addToStack(child);
             stack.setVisibleContent(child);
         }
-        
+
         requestLayoutUpdate();
     }
-    
+
     /**
      * Swap to a different child in a region. If the child is not already in the
      * region's stack, it will be added. The child will become visible and all
@@ -194,13 +176,13 @@ public class TerminalBorderPanel extends TerminalRegion {
         if (region == null) {
             throw new IllegalArgumentException("Panel cannot be null");
         }
-        
+
         if (newChild == null) {
             return;
         }
-        
+
         TerminalStackPanel stack = regionStacks.get(region);
-        TerminalRenderable previousVisible = stack != null ? stack.getVisibleContent() : null;
+        TerminalRenderable previousVisible = stack != null ? stack.getContent() : null;
         String traceOwner = getSwapTraceOwner(region);
 
         RenderDiagnostics.armSwapTrace(
@@ -220,14 +202,14 @@ public class TerminalBorderPanel extends TerminalRegion {
                 + "\n\tpreviousVisible=" + RenderDiagnostics.summarizeRenderable(previousVisible)
                 + "\n\tnewChild=" + RenderDiagnostics.summarizeRenderable(newChild)
         );
-        
+
         // Add to stack if not already present
         if (!stack.contains(newChild)) {
             stack.addToStack(newChild);
         }
-        
+
         // Make it the visible content
-        if (stack.getVisibleContent() != newChild) {
+        if (stack.getContent() != newChild) {
             stack.setVisibleContent(newChild);
         }
         requestLayoutUpdate();
@@ -237,30 +219,31 @@ public class TerminalBorderPanel extends TerminalRegion {
             "TerminalBorderPanel.swapPanel:end",
             () -> "region=" + region
                 + "\n\tstack=" + RenderDiagnostics.summarizeRenderable(stack)
-                + "\n\tcurrentVisible=" + RenderDiagnostics.summarizeRenderable(stack.getVisibleContent())
+                + "\n\tcurrentVisible=" + RenderDiagnostics.summarizeRenderable(stack.getContent())
         );
     }
-    
+
     /**
-     * Add a child to a region's stack without making it visible.
-     * Useful for pre-loading content that will be swapped to later.
+     * Add a child to a region's stack.
+     * If the region is currently empty, the new child becomes visible because
+     * the underlying stack auto-promotes its first entry.
      */
     public void addToPanel(BorderPanel region, TerminalRenderable child) {
         if (region == null) {
             throw new IllegalArgumentException("Panel cannot be null");
         }
-        
+
         if (child == null) {
             return;
         }
-        
+
         TerminalStackPanel stack = regionStacks.get(region);
-        
+
         if (!stack.contains(child)) {
             stack.addToStack(child);
         }
     }
-    
+
     /**
      * Remove a child from a region's stack.
      */
@@ -268,17 +251,17 @@ public class TerminalBorderPanel extends TerminalRegion {
         if (region == null) {
             throw new IllegalArgumentException("Panel cannot be null");
         }
-        
+
         if (child == null) {
             return;
         }
-        
+
         TerminalStackPanel stack = regionStacks.get(region);
         stack.removeFromStack(child);
-        
+
         requestLayoutUpdate();
     }
-    
+
     /**
      * Get the currently visible child in a region.
      */
@@ -286,18 +269,18 @@ public class TerminalBorderPanel extends TerminalRegion {
         if (region == null) {
             return null;
         }
-        
+
         TerminalStackPanel stack = regionStacks.get(region);
-        return stack.getVisibleContent();
+        return stack.getContent();
     }
-    
+
     /**
      * Get the stack panel for a region (allows direct access to all stack operations).
      */
     public TerminalStackPanel getRegionStack(BorderPanel region) {
         return regionStacks.get(region);
     }
-    
+
     /**
      * Clear all content from a region.
      */
@@ -305,13 +288,13 @@ public class TerminalBorderPanel extends TerminalRegion {
         if (region == null) {
             return;
         }
-        
+
         TerminalStackPanel stack = regionStacks.get(region);
         stack.clearStack();
-        
+
         requestLayoutUpdate();
     }
-    
+
     /**
      * Clear all regions.
      */
@@ -320,7 +303,7 @@ public class TerminalBorderPanel extends TerminalRegion {
             clearPanel(region);
         }
     }
-    
+
     /**
      * Layout callback: positions the 5 region stack panels in border layout.
      */
@@ -328,21 +311,21 @@ public class TerminalBorderPanel extends TerminalRegion {
         TerminalLayoutContext[] contexts,
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
     ) {
-        
-        if (contexts.length == 0){ 
+
+        if (contexts.length == 0){
             Log.logError("[TerminalBorderPanel] contexts: 0");
             return;
         }
-  
+
         TerminalRectangle parentPanel = contexts[0].getParentRegion();
- 
+
         if (parentPanel == null){
             Log.logError("[TerminalBorderPanel] parent region is null" +
                 "this.Region:" + (this.region != null ? this.region.toString() : "null")
             );
-            return; 
+            return;
         }
-   
+
         int horizontalPadding = insets.getHorizontal();
         int verticalPadding = insets.getVertical();
 
@@ -362,7 +345,7 @@ public class TerminalBorderPanel extends TerminalRegion {
                     + "\n\tavailableHeight=" + availableHeight
             );
         }
-        
+
         // Calculate dimensions for each region.
         // Priority: content measurement > default reservation > 0 (region collapses).
         // Defaults only apply when the slot is empty — they reserve space, not override content.
@@ -373,8 +356,8 @@ public class TerminalBorderPanel extends TerminalRegion {
 
         TerminalStackPanel topStack = regionStacks.get(BorderPanel.TOP);
         TerminalLayoutContext topContext = findContext(contexts, topStack);
-        TerminalRenderable topChild = topStack.getVisibleContent();
-        if (topChild != null && shouldIncludeInLayout(topStack)) {
+        TerminalRenderable topChild = topStack.getContent();
+        if (topChild != null && !topChild.isEffectivelyHidden()) {
             topHeight.set(resolveChildHeight(topContext, topStack));
         } else if (topChild == null && reservedTopHeight > 0) {
             topHeight.set(reservedTopHeight);
@@ -385,8 +368,8 @@ public class TerminalBorderPanel extends TerminalRegion {
 
         TerminalStackPanel bottomStack = regionStacks.get(BorderPanel.BOTTOM);
         TerminalLayoutContext bottomContext = findContext(contexts, bottomStack);
-        TerminalRenderable bottomChild = bottomStack.getVisibleContent();
-        if (bottomChild != null && shouldIncludeInLayout(bottomStack)) {
+        TerminalRenderable bottomChild = bottomStack.getContent();
+        if (bottomChild != null && !bottomChild.isEffectivelyHidden()) {
             bottomHeight.set(resolveChildHeight(bottomContext, bottomStack));
         } else if (bottomChild == null && reservedBottomHeight > 0) {
             bottomHeight.set(reservedBottomHeight);
@@ -401,8 +384,8 @@ public class TerminalBorderPanel extends TerminalRegion {
 
         TerminalStackPanel leftStack = regionStacks.get(BorderPanel.LEFT);
         TerminalLayoutContext leftContext = findContext(contexts, leftStack);
-        TerminalRenderable leftChild = leftStack.getVisibleContent();
-        if (leftChild != null && shouldIncludeInLayout(leftStack)) {
+        TerminalRenderable leftChild = leftStack.getContent();
+        if (leftChild != null && !leftChild.isEffectivelyHidden()) {
             leftWidth.set(resolveChildWidth(leftContext, leftStack));
         } else if (leftChild == null && reservedLeftWidth > 0) {
             leftWidth.set(reservedLeftWidth);
@@ -413,8 +396,8 @@ public class TerminalBorderPanel extends TerminalRegion {
 
         TerminalStackPanel rightStack = regionStacks.get(BorderPanel.RIGHT);
         TerminalLayoutContext rightContext = findContext(contexts, rightStack);
-        TerminalRenderable rightChild = rightStack.getVisibleContent();
-        if (rightChild != null && shouldIncludeInLayout(rightStack)) {
+        TerminalRenderable rightChild = rightStack.getContent();
+        if (rightChild != null && !rightChild.isEffectivelyHidden()) {
             rightWidth.set(resolveChildWidth(rightContext, rightStack));
         } else if (rightChild == null && reservedRightWidth > 0) {
             rightWidth.set(reservedRightWidth);
@@ -425,7 +408,7 @@ public class TerminalBorderPanel extends TerminalRegion {
         }
 
         TerminalStackPanel centerStack = regionStacks.get(BorderPanel.CENTER);
-        TerminalRenderable centerChild = centerStack.getVisibleContent();
+        TerminalRenderable centerChild = centerStack.getContent();
         int centerWidth = availableWidth - leftWidth.get() - rightWidth.get();
 
         if (centerChild != null && (middleHeight <= 0 || centerWidth <= 0)) {
@@ -450,35 +433,35 @@ public class TerminalBorderPanel extends TerminalRegion {
                     + "\n\tcenterSizing=" + RenderDiagnostics.summarizeSizing(centerChild)
             );
         }
-        
+
         // Layout each stack panel
-        layoutStackPanel(dataInterfaces, topStack, 
+        layoutStackPanel(dataInterfaces, topStack,
             insets.getLeft(), insets.getTop(), availableWidth, topHeight.get(), parentPanel);
-        
+
         layoutStackPanel(dataInterfaces, bottomStack,
             insets.getLeft(), insets.getTop() + availableHeight - bottomHeight.get(),
             availableWidth, bottomHeight.get(), parentPanel);
-        
+
         layoutStackPanel(dataInterfaces, leftStack,
             insets.getLeft(), middleY, leftWidth.get(), middleHeight, parentPanel);
-        
+
         layoutStackPanel(dataInterfaces, rightStack,
             insets.getLeft() + availableWidth - rightWidth.get(), middleY,
             rightWidth.get(), middleHeight, parentPanel);
-        
+
         int centerX = insets.getLeft() + leftWidth.get();
         layoutStackPanel(dataInterfaces, centerStack,
             centerX, middleY, Math.max(0, centerWidth), middleHeight, parentPanel);
 
-        Log.logMsg((this instanceof TerminalScrollPanel 
-                ? "[TerminalScrollPanel]" 
+        Log.logMsg((this instanceof TerminalScrollPanel
+                ? "[TerminalScrollPanel]"
                 : "[TerminalBorderPanel]"
             )
             + "\n\tTop Stack:" + availableWidth + " , " + topHeight
-            + "\n\tCenterStack:" + centerWidth +" , " + middleHeight 
+            + "\n\tCenterStack:" + centerWidth +" , " + middleHeight
         , LOG_LEVEL);
     }
-    
+
     private void layoutStackPanel(
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces,
         TerminalStackPanel stack,
@@ -489,15 +472,16 @@ public class TerminalBorderPanel extends TerminalRegion {
         TerminalRectangle parentPanel
     ) {
         boolean inBounds = isWithinParentBounds(x, y, width, height, parentPanel);
-        TerminalRenderable visibleContent = stack.getVisibleContent();
-        
+        TerminalRenderable visibleContent = stack.getContent();
+
         TerminalLayoutData.TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder()
             .setX(x)
             .setY(y)
             .setWidth(width)
             .setHeight(height);
+        boolean degenerate = width <= 0 || height <= 0 || !inBounds;
 
-        if (visibleContent != null && (width <= 0 || height <= 0 || !inBounds)) {
+        if (visibleContent != null && degenerate) {
             RenderDiagnostics.logRenderBlocker(
                 "borderpanel-stack-collapse:" + getName() + ":" + stack.getName(),
                 "TerminalBorderPanel.layoutStackPanel",
@@ -509,10 +493,11 @@ public class TerminalBorderPanel extends TerminalRegion {
                     + "\n\tvisibleSizing=" + RenderDiagnostics.summarizeSizing(visibleContent)
                     + "\n\tallocatedBounds=" + RenderDiagnostics.summarizeRegion(new TerminalRectangle(x, y, width, height))
                     + "\n\tparentPanel=" + RenderDiagnostics.summarizeRegion(parentPanel)
+                    + "\n\thiddenDesired= " + stack.isHiddenDesired()
             );
         }
 
-        if (!inBounds) {
+        if (degenerate) {
             builder.hidden(true);
         } else if (shouldManageHidden(stack)) {
             // Show the stack if it has visible content, hide it if empty
@@ -599,17 +584,6 @@ public class TerminalBorderPanel extends TerminalRegion {
         return 1;
     }
 
-    private boolean shouldIncludeInLayout(TerminalRenderable child) {
-        return !child.isLayoutExcluded();
-    }
-
-    private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalSizeable sizeable) {
-            return sizeable.isHiddenManaged();
-        }
-        return true;
-    }
-
     private boolean isWithinParentBounds(
         int x,
         int y,
@@ -623,12 +597,12 @@ public class TerminalBorderPanel extends TerminalRegion {
             y + height <= parentPanel.getHeight();
     }
 
-    
-    
-    
+
+
+
     // ===== TerminalSizeable implementation =====
 
-    
+
     /**
      * Pre-pass that computes this panel's own content size from the region stack
      * contexts. Only meaningful when the panel itself is FIT_CONTENT on either axis,
@@ -641,7 +615,7 @@ public class TerminalBorderPanel extends TerminalRegion {
      * mirroring the logic in the layout callback. FILL/PERCENT regions contribute
      * their minSize floor — they don't have an intrinsic size, so that's the best
      * approximation without a known parent size.
-     * 
+     *
      */
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
@@ -691,9 +665,9 @@ public class TerminalBorderPanel extends TerminalRegion {
      */
     private int resolveRegionHeight(TerminalLayoutContext[] contexts, BorderPanel region, int defaultH) {
         TerminalStackPanel stack = regionStacks.get(region);
-        if (stack == null || stack.isLayoutExcluded()) return 0;
+        if (stack == null || renderableIsExcluded(stack)) return 0;
 
-        TerminalRenderable visible = stack.getVisibleContent();
+        TerminalRenderable visible = stack.getContent();
         if (visible != null) {
             TerminalLayoutContext ctx = findRegionContext(contexts, region);
             return readDimension(ctx, stack, false);
@@ -710,9 +684,9 @@ public class TerminalBorderPanel extends TerminalRegion {
      */
     private int resolveRegionWidth(TerminalLayoutContext[] contexts, BorderPanel region, int defaultW) {
         TerminalStackPanel stack = regionStacks.get(region);
-        if (stack == null || stack.isLayoutExcluded()) return 0;
+        if (stack == null || renderableIsExcluded(stack)) return 0;
 
-        TerminalRenderable visible = stack.getVisibleContent();
+        TerminalRenderable visible = stack.getContent();
         if (visible != null) {
             TerminalLayoutContext ctx = findRegionContext(contexts, region);
             return readDimension(ctx, stack, true);
@@ -744,17 +718,13 @@ public class TerminalBorderPanel extends TerminalRegion {
         TerminalRectangle current = child.getRegion();
         return isWidth ? current.getWidth() : current.getHeight();
     }
-    
+
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
         // Border panel doesn't render anything itself
     }
-    
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(layoutGroupId);
-        layoutCallback = null;
-    }
 
-  
+
+
+
 }

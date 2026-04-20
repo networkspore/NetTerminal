@@ -10,6 +10,7 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.ui.Point2D;
 import io.netnotes.engine.ui.SpatialRegion;
+import io.netnotes.engine.ui.SpatialRegionPool;
 
 /**
  * 2D rectangular region
@@ -92,7 +93,7 @@ public class TerminalRectangle extends SpatialRegion<
         this.parentAbsoluteY = other.parentAbsoluteY;
     }
     
-
+    
     public int getAbsoluteX() {
         return parentAbsoluteX + x;
     }
@@ -828,6 +829,14 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         return copy;
     }
 
+    @Override
+    public TerminalRectangle copy(SpatialRegionPool<TerminalRectangle> regionPool) {
+        TerminalRectangle rect = regionPool.obtain();
+        rect.set(x, y, width, height, parentAbsoluteX, parentAbsoluteY);
+        return rect;
+    }
+
+
     public static TerminalRectangle fromNoteBytes(NoteBytesMap map){
         return fromNoteBytes(map, TerminalRectanglePool.getInstance());
     }
@@ -994,6 +1003,13 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         return 2;
     }
 
+    @Override
+    public void zeroParentAbsolutePosition() {
+        parentAbsoluteX = 0;
+        parentAbsoluteY = 0;
+    }
+
+    
 
  
 }

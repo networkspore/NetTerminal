@@ -5,15 +5,13 @@ import java.util.Map;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
-import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.layout.TerminalInsets;
-import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
@@ -33,7 +31,7 @@ import io.netnotes.terminal.layout.TerminalSizeable;
  * - SHRINK_ALL       : all children scale proportionally if total exceeds available
  * - DISTRIBUTE_EQUAL : every visible child receives an equal share of available primary space
  */
-public class TerminalPanel extends TerminalRegion {
+public class TerminalPanel extends TerminalGroupRegion {
 
     public enum Axis {
         VERTICAL,
@@ -73,44 +71,25 @@ public class TerminalPanel extends TerminalRegion {
     private TextStyle fillStyle = null;
 
     // ── layout group ──────────────────────────────────────────────────────────
-    private final String layoutGroupId;
-    private final String layoutCallbackId;
-    private TerminalLayoutGroupCallback layoutCallback = null;
 
     public TerminalPanel(String name) {
-        super(name);
-        this.layoutGroupId   = "panel-" + getName();
-        this.layoutCallbackId = "panel-default";
+        super(name, "term-panel");
+
         padding.setOnChanged(insets -> {
             updateBorderInsets();
             requestLayoutUpdate();
         });
         updateBorderInsets();
-        initLayoutCallback();
     }
 
-    protected void initLayoutCallback() {
-        this.layoutCallback = this::layoutChildren;
-      
-        registerChildGroupCallback(getLayoutGroupId(), layoutCallback);
+    protected TerminalLayoutGroupCallback createLayoutCallback() {
+        return this::layoutChildren;
     }
 
-    public TerminalLayoutGroupCallback getTerminalGroupCallbackEntry() { return layoutCallback; }
-    public String getLayoutCallbackId() { return layoutCallbackId; }
-    public String getLayoutGroupId()    { return layoutGroupId;    }
+
 
     // ===== CHILD MANAGEMENT =====
 
-    @Override
-    public void addChild(TerminalRenderable child) {
-        this.addChild(child, null);
-    }
-
-    @Override
-    public void addChild(TerminalRenderable child, TerminalLayoutCallback callback) {
-        super.addChild(child, null);
-        addToLayoutGroup(child, layoutGroupId);
-    }
 
     // ===== LAYOUT =====
 
@@ -149,17 +128,11 @@ public class TerminalPanel extends TerminalRegion {
             TerminalRenderable child = childContext.getRenderable();
             managedHidden[i] = shouldManageHidden(child);
 
-            if (child.isLayoutExcluded()) {
+            if (renderableIsExcluded(child)) {
                 widths[i] = 0;
                 heights[i] = 0;
                 dataInterfaces.get(child.getName())
                     .setLayoutData(TerminalLayoutData.getBuilder().build());
-                continue;
-            }
-
-            if (childContext.isHidden() && !managedHidden[i]) {
-                widths[i] = 0;
-                heights[i] = 0;
                 continue;
             }
 
@@ -495,24 +468,7 @@ public class TerminalPanel extends TerminalRegion {
             y + height <= parentRegion.getHeight();
     }
 
-    private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalSizeable sizable) {
-            return sizable.isHiddenManaged();
-        }
-        return true;
-    }
 
-    @Override
-    public void setWidthPreference(SizePreference widthPreference) {
-        super.setWidthPreference(widthPreference);
-        requestLayoutUpdate();
-    }
-
-    @Override
-    public void setHeightPreference(SizePreference heightPreference) {
-        super.setHeightPreference(heightPreference);
-        requestLayoutUpdate();
-    }
 
     // ===== MEASURE CONTENT (pre-pass for FIT_CONTENT sizing) =====
 
@@ -547,8 +503,8 @@ public class TerminalPanel extends TerminalRegion {
             for (TerminalLayoutContext ctx : childContexts) {
                 if (ctx == null) continue;
                 TerminalRenderable child = ctx.getRenderable();
-                if (child.isLayoutExcluded()) continue;
-                if (ctx.isHidden() && !shouldManageHidden(child)) continue;
+
+                if (renderableIsExcluded(child)) continue;
                 visibleCount++;
 
                 TerminalSizeable s = (child instanceof TerminalSizeable ts) ? ts : null;
@@ -817,9 +773,4 @@ public class TerminalPanel extends TerminalRegion {
         invalidate();
     }
 
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(layoutGroupId);
-        layoutCallback = null;
-    }
 }

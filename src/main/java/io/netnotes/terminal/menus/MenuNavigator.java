@@ -131,7 +131,7 @@ public class MenuNavigator extends TerminalVStack {
     public void showMenu(MenuContext menu) {
         if (menu == null) return;
         if (!uiExecutor.isCurrentThread()) {
-            uiExecutor.executeFireAndForget(() -> showMenu(menu));
+            uiExecutor.runLater(() -> showMenu(menu));
             return;
         }
 
@@ -158,7 +158,7 @@ public class MenuNavigator extends TerminalVStack {
 
     public void refreshMenu() {
         if (!uiExecutor.isCurrentThread()) {
-            uiExecutor.executeFireAndForget(this::refreshMenu);
+            uiExecutor.runLater(this::refreshMenu);
             return;
         }
         if (stateMachine.hasState(DISPLAYING_MENU) && currentMenu != null) {
@@ -364,7 +364,7 @@ public class MenuNavigator extends TerminalVStack {
         }
 
         if (!uiExecutor.isCurrentThread()) {
-            uiExecutor.executeFireAndForget(action);
+            uiExecutor.runLater(action);
         } else {
             action.run();
         }

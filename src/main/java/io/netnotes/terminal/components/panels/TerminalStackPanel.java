@@ -9,15 +9,15 @@ import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
-import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
@@ -37,7 +37,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * - OVERFLOW       : content is positioned with scroll offset applied but not
  *                    clipped; an outer container handles clipping.
  */
-public class TerminalStackPanel extends TerminalRegion {
+public class TerminalStackPanel extends TerminalGroupRegion {
 
     // ── stack state ───────────────────────────────────────────────────────────
 
@@ -55,35 +55,24 @@ public class TerminalStackPanel extends TerminalRegion {
 
     private int scrollOffsetX = 0;
     private int scrollOffsetY = 0;
-    private final TerminalInsets padding = new TerminalInsets();
+
     private LayoutOverflowStrategy overflowStrategy = LayoutOverflowStrategy.CLIP;
 
     // ── layout group ──────────────────────────────────────────────────────────
 
-    private final String layoutGroupId;
-    private final String layoutCallbackId;
-    private TerminalLayoutGroupCallback layoutCallback = null;
 
     // =========================================================================
     // CONSTRUCTION
     // =========================================================================
 
     public TerminalStackPanel(String name) {
-        super(name);
-        this.layoutGroupId    = "stackpanel-" + getName();
-        this.layoutCallbackId = "stackpanel-default";
-        padding.setOnChanged(insets -> requestLayoutUpdate());
-        init();
+        super(name, "stackpanel");
     }
 
-    private void init() {
-        this.layoutCallback = this::layoutStack;
-        registerChildGroupCallback(layoutGroupId, layoutCallback);
+    @Override
+    protected TerminalLayoutGroupCallback createLayoutCallback() {
+        return this::layoutStack;
     }
-
-    public String getLayoutCallbackId()                            { return layoutCallbackId; }
-    public String getLayoutGroupId()                               { return layoutGroupId;    }
-    public TerminalLayoutGroupCallback getTerminalGroupCallback()  { return layoutCallback;   }
 
     // =========================================================================
     // SCROLL / PADDING
@@ -112,27 +101,7 @@ public class TerminalStackPanel extends TerminalRegion {
     public int getScrollOffsetX() { return scrollOffsetX; }
     public int getScrollOffsetY() { return scrollOffsetY; }
 
-    public void setPadding(TerminalInsets insets) { setInsets(insets); }
-    public void setPadding(int pad)               { setContentPadding(pad); }
 
-    public void setContentPadding(int pad) {
-        int c = Math.max(0, pad);
-        if (padding.getTop() != c || padding.getRight() != c
-                || padding.getBottom() != c || padding.getLeft() != c) {
-            padding.setAll(c);
-        }
-    }
-
-    public void setInsets(TerminalInsets newInsets) {
-        if (newInsets == null) {
-            if (!padding.isZero()) padding.clear();
-            return;
-        }
-        if (!padding.equals(newInsets)) padding.copyFrom(newInsets);
-    }
-
-    @Override
-    public TerminalInsets getInsets() { return padding; }
 
     // =========================================================================
     // OVERFLOW
@@ -176,6 +145,17 @@ public class TerminalStackPanel extends TerminalRegion {
         if (!isVisible) return true;             // always allow hiding
         return renderable == currentContent;     // only the current child may show
     }
+    /**
+     * Adds a renderable to the stack.
+     *
+     * @param renderable the renderable to add
+     * @param cb ignored; the stack panel does not support child-specific layout callbacks
+     */
+    @Override
+    public void addChild(TerminalRenderable renderable, TerminalLayoutCallback cb) {
+
+        addToStack(renderable);
+    }
 
     /**
      * Add a renderable to the stack.
@@ -184,12 +164,20 @@ public class TerminalStackPanel extends TerminalRegion {
      * Subsequent children are hidden immediately — the panel owns their
      * hidden state from the moment they are added.
      *
-     * @throws IllegalArgumentException on null, nameless, or duplicate-name input.
+     * @throws IllegalArgumentException nameless, or duplicate-name input.
      */
-    public void addToStack(TerminalRenderable renderable) {
-        if (renderable == null) {
-            throw new IllegalArgumentException("Cannot add null renderable to stack");
+
+     public void addToStack(TerminalRenderable renderable) {
+         if (!getUIExecutor().isCurrentThread()) {
+            getUIExecutor().runLater(() -> addToStack(renderable));
+            return;
         }
+
+        if (renderable == null) {
+            setVisibleContent((TerminalRenderable)null);
+            return;
+        }
+
         if (stack.contains(renderable)) return;
 
         String name = renderable.getName();
@@ -205,8 +193,7 @@ public class TerminalStackPanel extends TerminalRegion {
 
         stack.add(renderable);
         nameToRenderable.put(name, renderable);
-        addChild(renderable);
-        addToLayoutGroup(renderable, layoutGroupId);
+
         renderable.setVisibilityPolicy(this::visibilityPolicy);
 
         if (currentContent == null) {
@@ -218,7 +205,7 @@ public class TerminalStackPanel extends TerminalRegion {
             renderable.hide();
         }
 
-        requestLayoutUpdate();
+        super.addChild(renderable, null);
     }
 
     @Override
@@ -227,10 +214,20 @@ public class TerminalStackPanel extends TerminalRegion {
     }
 
     public void removeFromStack(TerminalRenderable renderable) {
+        if (!getUIExecutor().isCurrentThread()) {
+            getUIExecutor().runLater(() -> removeFromStack(renderable));
+            return;
+        }
+
+        if (renderable == null) {
+            setVisibleContent((TerminalRenderable) null);
+            return;
+        }
+
         if (!stack.contains(renderable)) return;
         stack.remove(renderable);
         nameToRenderable.remove(renderable.getName());
-        super.removeChild(renderable);
+
         renderable.setVisibilityPolicy(null);
 
         if (renderable == currentContent) {
@@ -239,7 +236,7 @@ public class TerminalStackPanel extends TerminalRegion {
             if (currentContent != null) currentContent.show();
         }
 
-        requestLayoutUpdate();
+        super.removeChild(renderable);
     }
 
     public void removeFromStack(String name) {
@@ -248,9 +245,19 @@ public class TerminalStackPanel extends TerminalRegion {
     }
 
     public void clearStack() {
+        if (!getUIExecutor().isCurrentThread()) {
+            getUIExecutor().runLater(this::clearStack);
+            return;
+        }
+
         for (TerminalRenderable r : new ArrayList<>(stack)) {
             removeFromStack(r);
         }
+    }
+
+    @Override
+    public void clearChildren() {
+        clearStack();
     }
 
     // =========================================================================
@@ -264,12 +271,10 @@ public class TerminalStackPanel extends TerminalRegion {
      *
      * Passing null clears the current content (all children hidden).
      *
-     * @throws IllegalArgumentException if the renderable is not in the stack.
      */
     public void setVisibleContent(TerminalRenderable renderable) {
         if (renderable != null && !stack.contains(renderable)) {
-            throw new IllegalArgumentException(
-                "Renderable must be in stack before setting as visible");
+            return;
         }
 
         TerminalRenderable previous = currentContent;
@@ -306,7 +311,6 @@ public class TerminalStackPanel extends TerminalRegion {
                 + "\n\tprevious=" + RenderDiagnostics.summarizeRenderable(previous)
         );
 
-        requestLayoutUpdate();
     }
 
     public void setVisibleContent(String name) {
@@ -321,7 +325,7 @@ public class TerminalStackPanel extends TerminalRegion {
     // ── accessors ─────────────────────────────────────────────────────────────
 
     /** Returns the single currently visible child, or null if none. */
-    public TerminalRenderable getVisibleContent()          { return currentContent; }
+    public TerminalRenderable getContent()          { return currentContent; }
     public List<TerminalRenderable> getStackContents()     { return new ArrayList<>(stack); }
     public boolean contains(TerminalRenderable renderable) { return stack.contains(renderable); }
     public boolean contains(String name)                   { return nameToRenderable.containsKey(name); }
@@ -372,7 +376,7 @@ public class TerminalStackPanel extends TerminalRegion {
                 continue;
             }
 
-            if (child.isLayoutExcluded()) {
+            if (renderableIsExcluded(child)) {
                 dataInterfaces.get(child.getName())
                     .setLayoutData(TerminalLayoutData.getBuilder().build());
                 continue;
@@ -487,11 +491,6 @@ public class TerminalStackPanel extends TerminalRegion {
         // StackPanel does not render anything itself.
     }
 
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(layoutGroupId);
-        layoutCallback = null;
-    }
 
     // =========================================================================
     // PRIVATE HELPERS

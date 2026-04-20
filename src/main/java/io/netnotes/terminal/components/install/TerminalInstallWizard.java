@@ -128,7 +128,7 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     private TerminalInstallWizard(Builder builder) {
         super(builder.name);
-        
+
         headerComponent = new TerminalWizardHeader(name + "-termWizardHeader");
         footerComponent = new TerminalWizardFooter(name + "-termWizardFooter");
         brandView = new TerminalBitmapView(name + "-term-install-wizard-brand");
@@ -159,7 +159,7 @@ public class TerminalInstallWizard extends TerminalVStack {
     private void buildLayout(Builder builder) {
 
         // ── brand panel ───────────────────────────────────────────────────────────
-        
+
         brandView.setWidthPreference(SizePreference.FILL);
         brandView.setHeightPreference(SizePreference.FIT_CONTENT);
         brandView.setRenderMode(RenderMode.SEXTANT);
@@ -167,7 +167,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         brandView.setBilinear(true);
         brandView.hide();
 
-        
+
         brandDivider.setLineStyle(builder.borderLineStyle);
         brandDivider.setLineTextStyle(builder.borderTextStyle);
         brandDivider.hide();
@@ -187,7 +187,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         headerDivider.setLineTextStyle(builder.borderTextStyle);
 
         // ── step list
-        
+
         stepListStack.setSpacing(0);
         stepListStack.setVAlignment(VAlignment.TOP);
         stepListStack.setWidthPreference(SizePreference.FILL);
@@ -620,7 +620,7 @@ public class TerminalInstallWizard extends TerminalVStack {
             brandDivider.setLineStyle(style);
             headerDivider.setLineStyle(style);
             footerDivider.setLineStyle(style);
-            super.setBorderStyle(style);   
+            super.setBorderStyle(style);
         }
     }
 
@@ -869,8 +869,7 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     private boolean isMeasuredVisible(TerminalRenderable renderable) {
         return renderable != null
-            && renderable != contentSpacer
-            && !renderable.isLayoutExcluded();
+            && renderable != contentSpacer;
     }
 
     private int addMeasuredHeight(
@@ -917,7 +916,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         TerminalRenderable renderable,
         TerminalLayoutContext ctx
     ) {
-        if (renderable == null || renderable.isLayoutExcluded()) {
+        if (renderable == null) {
             return 0;
         }
         if (ctx != null) {
@@ -945,7 +944,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         TerminalRenderable renderable,
         TerminalLayoutContext ctx
     ) {
-        if (renderable == null || renderable.isLayoutExcluded()) {
+        if (renderable == null) {
             return 0;
         }
         if (ctx != null) {

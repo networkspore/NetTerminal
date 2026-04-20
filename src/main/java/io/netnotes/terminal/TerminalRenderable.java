@@ -14,7 +14,6 @@ import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.renderer.Renderable;
-import io.netnotes.engine.ui.renderer.RenderableStates;
 
 /**
  * TerminalRenderable - Abstract base class for terminal renderables
@@ -67,10 +66,6 @@ public abstract class TerminalRenderable extends Renderable<
      */
     protected TerminalRenderable(String name) {
         super(name, TerminalRectanglePool.getInstance());  
-    }
-
-    public boolean isLayoutExcluded() {
-        return hasState(RenderableStates.STATE_HIDDEN_DESIRED);
     }
 
     @Override
@@ -442,7 +437,7 @@ public abstract class TerminalRenderable extends Renderable<
         if (text.isEmpty()) {
             return;
         }
-        if (!isEffectivelyVisible()) {
+        if (!isEffectivelyHidden()) {
             RenderDiagnostics.logRenderDrop(
                 "printAt-hidden:" + getName(),
                 "TerminalRenderable.printAt",
@@ -583,7 +578,7 @@ public abstract class TerminalRenderable extends Renderable<
                     + "\n\tclipRegion=" + RenderDiagnostics.summarizeRegion(clipRegion)
             );
         }
-        if (isEffectivelyVisible()
+        if (!isEffectivelyHidden()
             && region != null
             && clipRegion != null
             && region.getWidth() > 0
@@ -691,11 +686,12 @@ public abstract class TerminalRenderable extends Renderable<
         clearRegion(batch, 0, 0, getWidth(), getHeight());
     }
     
+    
     /**
      * Clear a rectangular region (local coordinates)
      */
     protected void clearRegion(TerminalBatchBuilder batch, int x, int y, int width, int height) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
     
         int left = toAbsoluteX(Math.max(0, x));
         int top = toAbsoluteY(Math.max(0, y));
@@ -731,7 +727,7 @@ public abstract class TerminalRenderable extends Renderable<
     protected void drawBox(TerminalBatchBuilder batch, int x, int y, int width, int height, 
         String title, Position titlePos, LineStyle boxStyle, TextStyle textStyle
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -797,7 +793,7 @@ public abstract class TerminalRenderable extends Renderable<
         String title,
         Position titlePos
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -885,7 +881,7 @@ public abstract class TerminalRenderable extends Renderable<
      * Draw horizontal line (local coordinates)
      */
     protected void drawHLine(TerminalBatchBuilder batch, int x, int y, int length, LineStyle lineStyle, TextStyle style) {
-        if (!isEffectivelyVisible() || length <= 0 || y < 0 || y >= getHeight()) return;
+        if (isEffectivelyHidden() || length <= 0 || y < 0 || y >= getHeight()) return;
 
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -915,7 +911,7 @@ public abstract class TerminalRenderable extends Renderable<
      * Draw vertical line (local coordinates)
      */
     protected void drawVLine(TerminalBatchBuilder batch, int x, int y, int length, LineStyle lineStyle, TextStyle style) {
-        if (!isEffectivelyVisible() || length <= 0 || x < 0 || x >= getWidth()) return;
+        if (isEffectivelyHidden() || length <= 0 || x < 0 || x >= getWidth()) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(Math.max(0, y));    
@@ -950,7 +946,7 @@ public abstract class TerminalRenderable extends Renderable<
      */
     protected void fillRegion(TerminalBatchBuilder batch, int x, int y, int width, int height, 
                          int fillChar, TextStyle style) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -992,7 +988,7 @@ public abstract class TerminalRenderable extends Renderable<
         int x, int y, int width, int height,
         double[] values, TextStyle style, TextStyle peakStyle
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         TerminalRectangle sparkRegion = regionPool.obtain();
         sparkRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
@@ -1040,7 +1036,7 @@ public abstract class TerminalRenderable extends Renderable<
         int scrollPos, int totalItems, int visibleItems,
         boolean showArrows, TextStyle trackStyle, TextStyle thumbStyle
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         TerminalRectangle scrollRegion = regionPool.obtain();
         scrollRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
@@ -1087,7 +1083,7 @@ public abstract class TerminalRenderable extends Renderable<
         int pixelWidth, int pixelHeight,
         byte[] pixels, TextStyle style
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         TerminalRectangle bitmapRegion = regionPool.obtain();
         bitmapRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
@@ -1130,7 +1126,7 @@ public abstract class TerminalRenderable extends Renderable<
         int pixelWidth, int pixelHeight,
         byte[] pixels, TextStyle style
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         TerminalRectangle brailleRegion = regionPool.obtain();
         brailleRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
@@ -1180,7 +1176,7 @@ public abstract class TerminalRenderable extends Renderable<
         int pixelWidth, int pixelHeight,
         byte[] pixels, TextStyle style
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
 
         TerminalRectangle sextantRegion = regionPool.obtain();
         sextantRegion.set(toAbsoluteX(x), toAbsoluteY(y), width, height, 0, 0);
@@ -1300,7 +1296,7 @@ public abstract class TerminalRenderable extends Renderable<
         String text, Position textPos, LineStyle boxStyle, 
         TextStyle textStyle, TextStyle borderStyle
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -1343,7 +1339,7 @@ public abstract class TerminalRenderable extends Renderable<
         String title, Position titlePos, LineStyle boxStyle, 
         TextStyle borderStyle, TextStyle fillStyle
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -1383,7 +1379,7 @@ public abstract class TerminalRenderable extends Renderable<
      */
     protected void drawButton(TerminalBatchBuilder batch, int x, int y, int width, int height,
                          String label, Position labelPos, boolean selected, TextStyle style) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -1426,7 +1422,7 @@ public abstract class TerminalRenderable extends Renderable<
     protected void drawProgressBar(TerminalBatchBuilder batch, int x, int y, int width, int height,
         double progress, TextStyle style, TextStyle emptyStyle
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -1468,7 +1464,7 @@ public abstract class TerminalRenderable extends Renderable<
     protected void drawTextBlock(TerminalBatchBuilder batch, int x, int y, int width, int height,
         String text, TextAlignment align, TextStyle style
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);
@@ -1515,7 +1511,7 @@ public abstract class TerminalRenderable extends Renderable<
     protected void shadeRegion(TerminalBatchBuilder batch, int x, int y, int width, int height,
         char shadeChar, TextStyle style
     ) {
-        if (!isEffectivelyVisible() || width <= 0 || height <= 0) return;
+        if (isEffectivelyHidden() || width <= 0 || height <= 0) return;
         
         int absX = toAbsoluteX(x);
         int absY = toAbsoluteY(y);

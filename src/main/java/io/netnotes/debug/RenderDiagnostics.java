@@ -246,7 +246,7 @@ public final class RenderDiagnostics {
             + "{region=" + summarizeRegion(renderable.getRegion())
             + ", requested=" + summarizeRegion(renderable.getRequestedRegion())
             + ", visible=" + renderable.isVisible()
-            + ", effectiveVisible=" + renderable.isEffectivelyVisible()
+            + ", effectivelyHidden=" + renderable.isEffectivelyHidden()
             + ", hidden=" + renderable.isHidden()
             + ", invisible=" + renderable.isInvisible()
             + ", attached=" + renderable.isAttachedToLayoutManager()
@@ -296,7 +296,7 @@ public final class RenderDiagnostics {
             + ",h=" + layoutData.hasAxisChange(3)
             + "], hidden=" + layoutData.getHidden()
             + ", invisible=" + layoutData.getInvisible()
-            + ", effectiveVisible=" + layoutData.getEffectivelyVisible()
+            + ", effectiveVisible=" + layoutData.getEffectivelyHidden()
             + "}";
     }
 
@@ -399,8 +399,7 @@ public final class RenderDiagnostics {
         StringBuilder sb = new StringBuilder()
             .append(renderable.getName())
             .append("{hidden=").append(renderable.isHidden())
-            .append(", invisible=").append(renderable.isInvisible())
-            .append(", layoutExcluded=").append(renderable.isLayoutExcluded());
+            .append(", invisible=").append(renderable.isInvisible());
 
         if (renderable instanceof TerminalSizeable sizeable) {
             sb.append(", wPref=").append(sizeable.getWidthPreference())

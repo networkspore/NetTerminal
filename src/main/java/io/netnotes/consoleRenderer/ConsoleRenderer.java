@@ -20,14 +20,14 @@ import io.netnotes.noteBytes.collections.NoteBytesMap;
 import io.netnotes.noteBytes.processing.NoteBytesMetaData;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
-import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
+import io.netnotes.engine.virtualExecutors.DebouncedVirtualExecutor.DebounceStrategy;
 import io.netnotes.terminal.TerminalContainerConfig;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.Color;
-import io.netnotes.engine.utils.virtualExecutors.DebouncedVirtualExecutor;
-import io.netnotes.engine.utils.virtualExecutors.SerializedScheduledVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.DebouncedVirtualExecutor;
+import io.netnotes.engine.virtualExecutors.SerializedScheduledVirtualExecutor;
 
 import org.jline.terminal.Attributes;
 import org.jline.terminal.Terminal;

@@ -1,4 +1,4 @@
-package io.netnotes.terminal.components.wizard;
+package io.netnotes.terminal.components.panels;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -12,8 +12,6 @@ import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
-import io.netnotes.terminal.components.panels.TerminalDivider;
-import io.netnotes.terminal.components.panels.TerminalVStack;
 import io.netnotes.terminal.components.panels.TerminalAbstractStack.HAlignment;
 import io.netnotes.terminal.components.panels.TerminalAbstractStack.VAlignment;
 import io.netnotes.terminal.layout.TerminalInsets;
@@ -21,7 +19,7 @@ import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 
 /**
  * TerminalSetupFlow - Interactive multi-step user-driven wizard.
@@ -78,9 +76,9 @@ import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
  *   flow.start();
  * </pre>
  */
-public class TerminalSetupFlow extends TerminalRegion {
+public class TerminalSetupFlow extends TerminalGroupRegion {
 
-    private static final String INNER_GROUP = "setup-flow-inner";
+
 
     // ===== INNER TYPES =====
 
@@ -160,15 +158,13 @@ public class TerminalSetupFlow extends TerminalRegion {
     private final TerminalDivider headerDivider;
     private final TerminalVStack  bodySlot;
     private final TerminalDivider footerDivider;
-    private final String innerGroupName;
-    private TerminalLayoutGroupCallback innerGroupCallback = null;
 
     private TerminalRenderable mountedBody = null;
 
     // ===== CONSTRUCTION =====
 
     public TerminalSetupFlow(String name) {
-        super(name);
+        super(name, "setup-flow");
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FILL);
         setFocusable(true);
@@ -177,15 +173,14 @@ public class TerminalSetupFlow extends TerminalRegion {
         headerDivider = new TerminalDivider(name + "-hdiv");
         bodySlot      = new TerminalVStack(name + "-body");
         footerDivider = new TerminalDivider(name + "-fdiv");
-        innerGroupName = name + INNER_GROUP;
 
         buildLayout();
-        innerGroupCallback = this::layoutRootStack;
-        registerChildGroupCallback(innerGroupName, innerGroupCallback);
+
         addChild(rootStack);
-        addToLayoutGroup(rootStack, innerGroupName);
-        hide();
+
     }
+
+    @Override protected TerminalLayoutGroupCallback createLayoutCallback(){ return this::layoutRootStack; }
 
     private void buildLayout() {
         rootStack.setSpacing(0);
@@ -612,7 +607,7 @@ public class TerminalSetupFlow extends TerminalRegion {
     }
 
     private int measureRenderableDimension(TerminalRenderable renderable, boolean width) {
-        if (renderable == null || renderable.isLayoutExcluded()) {
+        if (renderableIsExcluded(renderable)) {
             return 0;
         }
 
@@ -639,9 +634,4 @@ public class TerminalSetupFlow extends TerminalRegion {
         return currentDimension;
     }
 
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(innerGroupName);
-        innerGroupCallback = null;
-    }
 }

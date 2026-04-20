@@ -8,15 +8,15 @@ import java.util.Map;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
-import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
+import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
 /**
@@ -53,7 +53,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
  * - OVERFLOW       : content is positioned with scroll offset applied but not
  *                    clipped; an outer container handles clipping.
  */
-public class TerminalOverlayPanel extends TerminalRegion {
+public class TerminalOverlayPanel extends TerminalGroupRegion {
 
     // ── stack state ───────────────────────────────────────────────────────────
 
@@ -82,32 +82,22 @@ public class TerminalOverlayPanel extends TerminalRegion {
     private final TerminalInsets padding = new TerminalInsets();
     private LayoutOverflowStrategy overflowStrategy = LayoutOverflowStrategy.CLIP;
 
-    // ── layout group ──────────────────────────────────────────────────────────
-
-    private final String layoutGroupId;
-    private final String layoutCallbackId;
-    private TerminalLayoutGroupCallback layoutCallback = null;
 
     // =========================================================================
     // CONSTRUCTION
     // =========================================================================
 
     public TerminalOverlayPanel(String name) {
-        super(name);
-        this.layoutGroupId    = "overlaypanel-" + getName();
-        this.layoutCallbackId = "overlaypanel-default";
+        super(name, "overlay-panel");
         padding.setOnChanged(insets -> requestLayoutUpdate());
-        init();
+
     }
 
-    private void init() {
-        this.layoutCallback = this::layoutStack;
-        registerChildGroupCallback(layoutGroupId, layoutCallback);
+    @Override
+    protected TerminalLayoutGroupCallback createLayoutCallback() {
+        return this::layoutStack;
     }
 
-    public String getLayoutCallbackId()                            { return layoutCallbackId; }
-    public String getLayoutGroupId()                               { return layoutGroupId;    }
-    public TerminalLayoutGroupCallback getTerminalGroupCallback()  { return layoutCallback;   }
 
     // =========================================================================
     // SCROLL / PADDING
@@ -222,6 +212,10 @@ public class TerminalOverlayPanel extends TerminalRegion {
         return visibleSet.contains(renderable);
     }
 
+    public void addToStack(TerminalRenderable renderable) {
+        addChild(renderable);
+    }
+
     /**
      * Add a renderable to the stack. In unlimited mode (-1) the child is shown
      * immediately. In capped modes (N > 0) the child is hidden until explicitly
@@ -229,7 +223,13 @@ public class TerminalOverlayPanel extends TerminalRegion {
      *
      * @throws IllegalArgumentException on null, nameless, or duplicate-name input.
      */
-    public void addToStack(TerminalRenderable renderable) {
+    @Override
+    public void addChild(TerminalRenderable renderable, TerminalLayoutCallback cb) {
+        if (!getUIExecutor().isCurrentThread()) {
+            getUIExecutor().runLater(() -> addChild(renderable, null));
+            return;
+        }
+
         if (renderable == null) {
             throw new IllegalArgumentException("Cannot add null renderable to stack");
         }
@@ -248,8 +248,7 @@ public class TerminalOverlayPanel extends TerminalRegion {
 
         stack.add(renderable);
         nameToRenderable.put(name, renderable);
-        addChild(renderable);
-        addToLayoutGroup(renderable, layoutGroupId);
+
         renderable.setVisibilityPolicy(this::visibilityPolicy);
 
         if (maxVisibleNodes == -1) {
@@ -260,8 +259,10 @@ public class TerminalOverlayPanel extends TerminalRegion {
             if (shouldManageHidden(renderable)) renderable.hide();
         }
 
-        requestLayoutUpdate();
+        super.addChild(renderable, null);
     }
+
+
 
     @Override
     public void removeChild(TerminalRenderable renderable) {
@@ -269,13 +270,18 @@ public class TerminalOverlayPanel extends TerminalRegion {
     }
 
     public void removeFromStack(TerminalRenderable renderable) {
+        if (!getUIExecutor().isCurrentThread()) {
+            getUIExecutor().runLater(() -> removeFromStack(renderable));
+            return;
+        }
+
         if (!stack.contains(renderable)) return;
         stack.remove(renderable);
         nameToRenderable.remove(renderable.getName());
         visibleSet.remove(renderable);
-        super.removeChild(renderable);
         renderable.setVisibilityPolicy(null);
-        requestLayoutUpdate();
+        super.removeChild(renderable);
+        
     }
 
     public void removeFromStack(String name) {
@@ -284,9 +290,19 @@ public class TerminalOverlayPanel extends TerminalRegion {
     }
 
     public void clearStack() {
+        if (!getUIExecutor().isCurrentThread()) {
+            getUIExecutor().runLater(this::clearStack);
+            return;
+        }
+
         for (TerminalRenderable r : new ArrayList<>(stack)) {
             removeFromStack(r);
         }
+    }
+
+    @Override
+    public void clearChildren() {
+        clearStack();
     }
 
     // =========================================================================
@@ -399,7 +415,7 @@ public class TerminalOverlayPanel extends TerminalRegion {
                 continue;
             }
 
-            if (child.isLayoutExcluded()) {
+            if (!child.isVisible()) {
                 dataInterfaces.get(child.getName())
                     .setLayoutData(TerminalLayoutData.getBuilder().build());
                 continue;
@@ -534,11 +550,6 @@ public class TerminalOverlayPanel extends TerminalRegion {
         // OverlayPanel does not render anything itself.
     }
 
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(layoutGroupId);
-        layoutCallback = null;
-    }
 
     // =========================================================================
     // PRIVATE HELPERS
@@ -577,16 +588,7 @@ public class TerminalOverlayPanel extends TerminalRegion {
         visibleSet.clear();
     }
 
-    /**
-     * Returns true if the panel is allowed to manage this child's hidden state.
-     * A child with isHiddenManaged()=false controls its own visibility; the
-     * panel assigns coordinates but never forces hide/show on it.
-     */
-    private boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalSizeable s) return s.isHiddenManaged();
-        return true;
-    }
-
+   
     private int resolveChildDimension(
         TerminalRenderable child,
         TerminalLayoutContext ctx,

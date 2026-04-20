@@ -11,13 +11,15 @@ import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.components.panels.TerminalVStack;
 import io.netnotes.terminal.components.panels.TerminalAbstractStack.HAlignment;
 import io.netnotes.terminal.components.panels.TerminalDivider;
+import io.netnotes.terminal.components.panels.TerminalGroupRegion;
+import io.netnotes.terminal.components.panels.TerminalSetupFlow;
 import io.netnotes.terminal.components.text.TerminalLabel;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
+import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 
 /**
  * TerminalDialog - Single-screen modal overlay with title, body, and action buttons.
@@ -64,11 +66,11 @@ import io.netnotes.engine.ui.renderer.layout.LayoutGroup.LayoutDataInterface;
  *   dialog.open();
  * </pre>
  */
-public class TerminalDialog extends TerminalRegion {
-
-    private static final String INNER_GROUP = "dialog-inner";
+public class TerminalDialog extends TerminalGroupRegion {
 
     // ===== INNER TYPES =====
+
+    public static int OVERHEAD_ROWS = 6;
 
     /** Visual style hint for a button — callers map this to TextStyle. */
     public enum ButtonStyle {
@@ -128,13 +130,12 @@ public class TerminalDialog extends TerminalRegion {
     private final TerminalDivider headerDivider;
     private final TerminalVStack  bodyWrapper;
     private final TerminalDivider footerDivider;
-    private final String innerGroupName;
-    private TerminalLayoutGroupCallback innerGroupCallback = null;
+
 
     // ===== CONSTRUCTION =====
 
     public TerminalDialog(String name) {
-        super(name);
+        super(name, "terminal-dialog");
         setWidthPreference(SizePreference.FIT_CONTENT);
         setHeightPreference(SizePreference.FIT_CONTENT);
         setFocusable(true);
@@ -144,14 +145,14 @@ public class TerminalDialog extends TerminalRegion {
         headerDivider = new TerminalDivider(name + "-hdiv");
         bodyWrapper   = new TerminalVStack(name + "-body");
         footerDivider = new TerminalDivider(name + "-fdiv");
-        innerGroupName = name + INNER_GROUP;
+
 
         buildLayout();
         addChild(rootStack);
-        addToLayoutGroup(rootStack, innerGroupName);
-        innerGroupCallback = this::layoutRootStack;
-        registerChildGroupCallback(innerGroupName, innerGroupCallback);
-        hide();
+
+    }
+    protected TerminalLayoutGroupCallback createLayoutCallback(){
+        return this::layoutRootStack;
     }
 
     private void buildLayout() {
@@ -197,22 +198,14 @@ public class TerminalDialog extends TerminalRegion {
         );
     }
 
-    private int renderOverheadRows() {
-        return 6;
-    }
+
 
     @Override
     public int getMinHeight() {
-        return super.getMinHeight() + renderOverheadRows();
+        return super.getMinHeight() + OVERHEAD_ROWS;
     }
 
-    public int getPreferredWidth() {
-        return resolveMeasuredWidth();
-    }
 
-    public int getPreferredHeight() {
-        return resolveMeasuredHeight();
-    }
 
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
@@ -277,9 +270,9 @@ public class TerminalDialog extends TerminalRegion {
     public void open() {
         if (isOpen) return;
         isOpen = true;
-        show();
+
         if (focusedBtn < 0 && !buttons.isEmpty()) focusedBtn = buttons.size() - 1;
-        invalidate();
+        show();
         if (onOpen != null) onOpen.run();
     }
 
@@ -287,7 +280,6 @@ public class TerminalDialog extends TerminalRegion {
         if (!isOpen) return;
         isOpen = false;
         hide();
-        invalidate();
         if (onClose != null) onClose.run();
     }
 
@@ -426,11 +418,11 @@ public class TerminalDialog extends TerminalRegion {
     }
 
     private int calculateFitContentHeight() {
-        return measureRenderableDimension(body, false) + renderOverheadRows();
+        return measureRenderableDimension(body, false) + OVERHEAD_ROWS;
     }
 
     private int measureRenderableDimension(TerminalRenderable renderable, boolean width) {
-        if (renderable == null || renderable.isHidden()) {
+        if (renderableIsExcluded(renderable)) {
             return 0;
         }
 
@@ -457,9 +449,5 @@ public class TerminalDialog extends TerminalRegion {
         return currentDimension;
     }
 
-    @Override
-    protected void onDestroying() {
-        destroyLayoutGroup(innerGroupName);
-        innerGroupCallback = null;
-    }
+
 }

@@ -13,7 +13,7 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     public static final int AXIS_Y = 1;
     public static final int AXIS_W = 2;
     public static final int AXIS_H = 3;
-    
+
     protected final TerminalInsets insets;
     private SizePreference widthPreference  = SizePreference.STATIC;
     private SizePreference heightPreference = SizePreference.STATIC;
@@ -109,12 +109,15 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     public void setInsets(int all) { insets.setAll(all); }
 
     public void setInsets(TerminalInsets padding) {
+
         if (padding == null) {
             if (!insets.isZero()) insets.clear();
             return;
         }
+
         if (!insets.equals(padding)) insets.copyFrom(padding);
     }
+
 
     // ── Percent dimensions ────────────────────────────────────────────────────
 
@@ -201,7 +204,7 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
 
         for (int i = 0; i < children.size(); i++) {
             TerminalRenderable child = children.get(i);
-            if (child.isLayoutExcluded()) continue;
+            if (child.isHiddenDesired()) continue;
 
             int childSize = resolveChildDimension(
                 child,
@@ -241,5 +244,10 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         }
 
         return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+    }
+
+    @Override
+    protected TerminalRenderable[] createRenderableArray(int size) {
+        return new TerminalRenderable[size];
     }
 }

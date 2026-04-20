@@ -5,7 +5,7 @@ import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRectanglePool;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.components.TerminalRegion;
-import io.netnotes.engine.ui.renderer.layout.LayoutData;
+import io.netnotes.engine.ui.renderer.LayoutData;
 
 
 /**
