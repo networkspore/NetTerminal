@@ -18,16 +18,25 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.atomic.AtomicLong;
-import java.util.concurrent.locks.LockSupport;
 
 /**
- * ConsoleRenderManager - Optimized pull-based rendering coordinator
- * 
- * SIMPLIFIED DESIGN:
- * - Removed concept of "active" state from container
- * - Uses container.shouldRender() which checks: VISIBLE && !HIDDEN && !ERROR
- * - Focused container gets rendered - that's what "active" really meant
- * - Error states directly prevent rendering via shouldRender()
+ * ConsoleRenderManager - Pull-based rendering coordinator with tight polling.
+ *
+ * DESIGN:
+ * - Tight poll loop with Thread.yield() - no artificial frame pacing
+ * - Render rate emerges from actual work + terminal I/O backpressure
+ * - Single thread serializes all container renders for consistency
+ * - Generation tracking for stale render detection
+ *
+ * RENDER LOOP:
+ * - Checks dirty flag each iteration, renders immediately when dirty
+ * - Thread.yield() gives scheduler breathing room when idle
+ * - Terminal I/O provides natural backpressure (write blocks → loop slows)
+ *
+ * SYNCHRONIZATION:
+ * - Single loop thread reads all visible container states
+ * - Deterministic cursor application (focused container after all renders)
+ * - No push races, no concurrent clobbering
  */
 public class ConsoleRenderManager {
 
@@ -50,10 +59,6 @@ public class ConsoleRenderManager {
     private volatile boolean running = false;
     private CompletableFuture<Void> renderLoop;
     private final Map<ContainerId, CompletableFuture<Void>> renderInFlight = new ConcurrentHashMap<>();
-    
-    // Frame timing
-    private static final long FRAME_NS = 16_000_000; // ~60fps
-    private long nextFrameTime = System.nanoTime();
     
     // Render failure tracking
     private static final int MAX_RENDER_FAILURES = 3;
@@ -120,36 +125,32 @@ public class ConsoleRenderManager {
     }
     
     /**
-     * Main render loop
+     * Main render loop - tight polling, no artificial frame pacing.
+     * Render rate emerges from actual work + terminal I/O backpressure.
      */
     private void renderLoopImpl() {
         while (running) {
-            long now = System.nanoTime();
-            if (now >= nextFrameTime) {
-                try {
-                    tick(now);
-                    nextFrameTime += FRAME_NS;
-                } catch (InterruptedException e) {
-                    Thread.currentThread().interrupt();
-                    break;
-                } catch (Exception e) {
-                    Log.logError("[ConsoleRenderManager] Render loop error: " + e.getMessage());
-                    e.printStackTrace();
-                }
-            } else {
-                LockSupport.parkNanos(nextFrameTime - now);
+            try {
+                tick();
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                break;
+            } catch (Exception e) {
+                Log.logError("[ConsoleRenderManager] Render loop error: " + e.getMessage());
+                e.printStackTrace();
             }
+            Thread.yield();
         }
     }
 
-    private void tick(long frameTime) throws InterruptedException {
+    private void tick() throws InterruptedException {
         processQueuedRequests();
-        
+
         if (isDirtyForCurrentGen()) {
             // Consume dirty before rendering. markDirty() during an in-flight render
             // will re-set dirtyGen, triggering a follow-up render on the next tick.
             dirtyGen = -1;
-            renderVisibleContainers(frameTime);
+            renderVisibleContainers();
         }
     }
     
@@ -387,9 +388,9 @@ public class ConsoleRenderManager {
         return dirtyGen == currentGen;
     }
 
-    private void renderVisibleContainers(long frameTime) {
+    private void renderVisibleContainers() {
         long currentGen = generation.get();
-        
+
 
         List<ConsoleContainer> all = renderer.getLayoutManager().getVisibleContainers();
         List<ConsoleContainer> toRender = new ArrayList<>(all.size());
@@ -405,7 +406,7 @@ public class ConsoleRenderManager {
                 toRender.add(c);
             }
         }
- 
+
         if (toRender.isEmpty()) {
             if (hasVisibleInFlight) {
                 RenderDiagnostics.logRenderBlocker(
@@ -413,7 +414,7 @@ public class ConsoleRenderManager {
                     250_000_000L,
                     "ConsoleRenderManager.renderVisibleContainers",
                     "all-visible-containers-already-in-flight",
-                    () -> "frameTime=" + frameTime
+                    () -> ""
                 );
                 markDirty();
             }
@@ -447,7 +448,7 @@ public class ConsoleRenderManager {
                         250_000_000L,
                         "ConsoleRenderManager.renderVisibleContainers",
                         "bounds-change-deferred-by-in-flight-render",
-                        () -> "frameTime=" + frameTime
+                        () -> ""
                     );
                     markDirty();
                     return;
@@ -460,7 +461,7 @@ public class ConsoleRenderManager {
                     RenderableState stateToRender = boundsChanged
                         ? forceFullRepaint(states[i])
                         : states[i];
-                    renderWithState(toRender.get(i), stateToRender, currentGen, frameTime);
+                    renderWithState(toRender.get(i), stateToRender, currentGen);
                 }
             }
 
@@ -505,10 +506,9 @@ public class ConsoleRenderManager {
      * Only renders if container.shouldRender() returns true
      */
     private void renderWithState(
-        ConsoleContainer container, 
-        RenderableState state, 
-        long currentGen, 
-        long frameTime
+        ConsoleContainer container,
+        RenderableState state,
+        long currentGen
     ) {
         ContainerId id = container.getId();
         if (renderInFlight.containsKey(id)) {
@@ -524,7 +524,8 @@ public class ConsoleRenderManager {
         }
 
         RenderFailureTracker tracker = failureTrackers.computeIfAbsent(id, k -> new RenderFailureTracker());
-        if (tracker.shouldSkipRender(frameTime)) {
+        long now = System.nanoTime();
+        if (tracker.shouldSkipRender(now)) {
             RenderDiagnostics.logRenderDrop(
                 "render-skip-after-failures:" + id,
                 "ConsoleRenderManager.renderWithState",
