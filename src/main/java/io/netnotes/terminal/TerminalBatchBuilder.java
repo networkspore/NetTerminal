@@ -3,6 +3,7 @@ import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
+import io.netnotes.debug.BatchTraceAspect;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.renderer.BatchBuilder;
@@ -82,25 +83,29 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     
     public void printAt(int x, int y, String text, TextStyle style) {
         TerminalRectangle clip = getCurrentClipRegion();
-        
+
         if (clip != null) {
             // Skip if position is completely outside clip region
             if (y < clip.getY() || y >= clip.getY() + clip.getHeight()) {
+                BatchTraceAspect.onPrintCommand(this, text, x, y, "REJECTED_Y_OUT_OF_CLIP:" + clip);
                 return;
             }
-            
+
             if (x >= clip.getX() + clip.getWidth()) {
+                BatchTraceAspect.onPrintCommand(this, text, x, y, "REJECTED_X_OUT_OF_CLIP:" + clip);
                 return;
             }
-            
+
             // Check if any part of the text would be visible
             int endX = x + text.length();
             if (endX <= clip.getX()) {
+                BatchTraceAspect.onPrintCommand(this, text, x, y, "REJECTED_TEXT_BEFORE_CLIP:" + clip);
                 return;  // Text ends before clip region starts
             }
         }
-        
+
         // Add command - TerminalRenderable will handle boundary enforcement
+        BatchTraceAspect.onPrintCommand(this, text, x, y, style);
         addCommand(TerminalCommands.printAt(x, y, text, style));
     }
 

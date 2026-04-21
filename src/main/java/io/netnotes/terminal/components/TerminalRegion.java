@@ -250,4 +250,5 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     protected TerminalRenderable[] createRenderableArray(int size) {
         return new TerminalRenderable[size];
     }
+
 }

@@ -1,6 +1,7 @@
 package io.netnotes.terminal;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.debug.RenderDiagnostics;
+import io.netnotes.debug.RenderableTraceAspect;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -437,11 +438,11 @@ public abstract class TerminalRenderable extends Renderable<
         if (text.isEmpty()) {
             return;
         }
-        if (!isEffectivelyHidden()) {
+        if (isEffectivelyHidden()) {
             RenderDiagnostics.logRenderDrop(
                 "printAt-hidden:" + getName(),
                 "TerminalRenderable.printAt",
-                "not-effectively-visible",
+                "effectively-hidden",
                 () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
                     + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
             );
@@ -1641,4 +1642,55 @@ public abstract class TerminalRenderable extends Renderable<
         TerminalLayoutGroupCallback,
         TerminalGroupStateEntry
     >{}
+
+
+    @Override
+    protected void onApplyLayoutData(TerminalRenderable arg0, boolean arg1, boolean arg2, boolean arg3) {
+        RenderableTraceAspect.onApplyLayoutData(arg0, arg1, arg2, arg3);
+    }
+
+    @Override
+    protected void onDamagePropagated(TerminalRenderable arg0, TerminalRenderable arg1, TerminalRectangle arg2) {
+        RenderableTraceAspect.onDamagePropagated(arg0, arg1, arg2);
+    }
+
+    @Override
+    protected void onDamageReported(TerminalRenderable arg0, TerminalRectangle arg1) {
+        RenderableTraceAspect.onDamageReported(arg0, arg1);
+    }
+
+    @Override
+    protected void onInvalidateDeferred(TerminalRenderable arg0, String arg1) {
+        RenderableTraceAspect.onInvalidateDeferred(arg0, arg1);
+    }
+
+    @Override
+    protected void onInvalidateImmediate(TerminalRenderable arg0, TerminalRectangle arg1) {
+        RenderableTraceAspect.onInvalidateImmediate(arg0, arg1);
+    }
+
+    @Override
+    protected void onInvalidateRequested(TerminalRenderable arg0, TerminalRectangle arg1) {
+        RenderableTraceAspect.onInvalidateRequested(arg0, arg1);
+    }
+
+    @Override
+    protected void onPendingInvalidateSet(TerminalRenderable arg0, String arg1) {
+        RenderableTraceAspect.onPendingInvalidateSet(arg0, arg1);
+    }
+
+    @Override
+    protected void onPhaseAdvance(TerminalRenderable arg0, String arg1, String arg2) {
+        RenderableTraceAspect.onPhaseAdvance(arg0, arg1, arg2);
+    }
+
+    @Override
+    protected void onToBatchEnd(TerminalRenderable arg0, boolean arg1) {
+        RenderableTraceAspect.onToBatchEnd(arg0, arg1);
+    }
+
+    @Override
+    protected void onToBatchStart(TerminalRenderable arg0) {
+        RenderableTraceAspect.onToBatchStart(arg0);
+    }
 }

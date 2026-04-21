@@ -1,5 +1,6 @@
 package io.netnotes.terminal.components.text;
 
+import io.netnotes.debug.BatchTraceAspect;
 import io.netnotes.engine.ui.LabelTruncation;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.TextAlignment;
@@ -89,7 +90,9 @@ public class TerminalLabel extends TerminalRegion {
         if ((this.text == null && text != null) || 
             (this.text != null && !this.text.equals(text))) {
             this.text = text;
+            // Text changes can affect both intrinsic size and painted content.
             requestLayoutUpdate();
+            invalidate();
         }
     }
     
@@ -161,7 +164,11 @@ public class TerminalLabel extends TerminalRegion {
     
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {
-        if (text == null || text.isEmpty()) return;
+        BatchTraceAspect.onTextRenderSelf(this, text, true);
+        if (text == null || text.isEmpty()) {
+            BatchTraceAspect.onTextRenderSelf(this, text, false);
+            return;
+        }
 
         int width  = getWidth();
         int height = getHeight();
