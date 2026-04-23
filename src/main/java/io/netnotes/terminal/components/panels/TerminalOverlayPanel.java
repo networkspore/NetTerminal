@@ -476,17 +476,19 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         int intersectH = Integer.MAX_VALUE;
         boolean anyVisible = false;
 
-        if (childContexts != null) {
-            for (TerminalRenderable visible : visibleSet) {
-                TerminalLayoutContext ctx = findContext(childContexts, visible);
-                if (ctx == null) continue;
-                anyVisible = true;
-                if (ownWP == SizePreference.FIT_CONTENT) {
-                    intersectW = Math.min(intersectW, readDimension(ctx, true));
-                }
-                if (ownHP == SizePreference.FIT_CONTENT) {
-                    intersectH = Math.min(intersectH, readDimension(ctx, false));
-                }
+        for (TerminalRenderable visible : visibleSet) {
+            if (renderableIsExcluded(visible)) {
+                continue;
+            }
+            anyVisible = true;
+            TerminalLayoutContext ctx = childContexts != null
+                ? findContext(childContexts, visible)
+                : null;
+            if (ownWP == SizePreference.FIT_CONTENT) {
+                intersectW = Math.min(intersectW, readMeasurementDimension(visible, ctx, ownWP, true));
+            }
+            if (ownHP == SizePreference.FIT_CONTENT) {
+                intersectH = Math.min(intersectH, readMeasurementDimension(visible, ctx, ownHP, false));
             }
         }
 
@@ -604,14 +606,16 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
             return switch (pref) {
                 case FILL        -> viewportSize;
                 case FIT_CONTENT -> {
-                    if (ctx == null || ctx.getMeasuredContentBounds() == null) {
-                        throw new IllegalStateException(
-                            "FIT_CONTENT requires measured content bounds for: "
-                                + child.getName());
+                    TerminalRectangle measured = ctx != null ? ctx.getMeasuredContentBounds() : null;
+                    if (measured != null) {
+                        yield isWidth ? measured.getWidth() : measured.getHeight();
                     }
-                    yield isWidth
-                        ? ctx.getMeasuredContentBounds().getWidth()
-                        : ctx.getMeasuredContentBounds().getHeight();
+                    if (ctx != null && ctx.getRequestedRegion() != null) {
+                        yield isWidth
+                            ? ctx.getRequestedRegion().getWidth()
+                            : ctx.getRequestedRegion().getHeight();
+                    }
+                    yield isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
                 }
                 case PERCENT -> Math.max(min, (int)(viewportSize *
                     (isWidth ? s.getPercentWidth() : s.getPercentHeight())));
@@ -646,13 +650,4 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         return null;
     }
 
-    private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
-        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
-        if (bounds != null) return isWidth ? bounds.getWidth() : bounds.getHeight();
-        TerminalRectangle requested = ctx.getRenderable().getRequestedRegion();
-        if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
-        return isWidth
-            ? ctx.getRenderable().getRegion().getWidth()
-            : ctx.getRenderable().getRegion().getHeight();
-    }
 }

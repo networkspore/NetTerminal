@@ -29,6 +29,11 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         insets.setOnChanged(this::handleInsetsChanged);
     }
 
+    public TerminalRegion(String regionName, int x, int y, int width, int height) {
+        this(regionName);
+        setRegion(x, y, width, height);
+    }
+
     private void handleInsetsChanged(TerminalInsets insets) {
         onInsetsChanged(insets);
         requestLayoutUpdate();
@@ -223,8 +228,9 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
      *
      * Priority:
      *   1. In-flight measuredContentBounds from this pass — freshest data.
-     *   2. Child's requested region — user-staged geometry.
-     *   3. Child's committed region — last known good value.
+     *   2. Parent-dependent child (FILL/PERCENT) contributes only minSize.
+     *   3. Child's requested region — user-staged geometry.
+     *   4. Child's committed region — last known good value.
      */
     private int resolveChildDimension(
         TerminalRenderable child,
@@ -238,6 +244,13 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
             }
         }
 
+        if (child instanceof TerminalSizeable sizeable) {
+            SizePreference pref = resolveChildPreference(isWidth, sizeable);
+            if (pref.isParentDependent()) {
+                return isWidth ? sizeable.getMinWidth() : sizeable.getMinHeight();
+            }
+        }
+
         TerminalRectangle requested = child.getRequestedRegion();
         if (requested != null) {
             return isWidth ? requested.getWidth() : requested.getHeight();
@@ -246,9 +259,215 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
     }
 
+    private SizePreference resolveChildPreference(boolean isWidth, TerminalSizeable sizeable) {
+        SizePreference pref = isWidth ? sizeable.getWidthPreference() : sizeable.getHeightPreference();
+        if (pref != SizePreference.INHERIT) {
+            return pref;
+        }
+        return isWidth ? widthPreference : heightPreference;
+    }
+
+    // ── Common measurement helpers for subclasses ─────────────────────────────
+
+    /**
+     * Reads a measurement dimension from a child renderable.
+     *
+     * This method implements the common logic for determining a child's size
+     * during the content measurement pass, with the following priority:
+     *
+     * 1. In-flight measuredContentBounds from this pass — freshest data
+     * 2. Parent-dependent child (FILL/PERCENT) contributes only minSize
+     * 3. Child's requested region — user-staged geometry
+     * 4. Child's committed region — last known good value
+     *
+     * @param child The child renderable to measure
+     * @param ctx The layout context for the child (may be null)
+     * @param parentPref The parent's size preference for inheritance
+     * @param isWidth true to measure width, false to measure height
+     * @return The measured dimension
+     */
+    protected int readMeasurementDimension(
+        TerminalRenderable child,
+        TerminalLayoutContext ctx,
+        SizePreference parentPref,
+        boolean isWidth
+    ) {
+        if (ctx != null) {
+            TerminalRectangle bounds = ctx.getMeasuredContentBounds();
+            if (bounds != null) {
+                return isWidth ? bounds.getWidth() : bounds.getHeight();
+            }
+        }
+
+        if (child instanceof TerminalSizeable sizeable) {
+            SizePreference pref = isWidth ? sizeable.getWidthPreference() : sizeable.getHeightPreference();
+            if (pref == SizePreference.INHERIT) {
+                pref = parentPref;
+            }
+            if (pref.isParentDependent()) {
+                return isWidth ? sizeable.getMinWidth() : sizeable.getMinHeight();
+            }
+        }
+
+        TerminalRectangle requested = child.getRequestedRegion();
+        if (requested != null) {
+            return isWidth ? requested.getWidth() : requested.getHeight();
+        }
+
+        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+    }
+
+    /**
+     * Calculates the maximum width from children when width preference is FIT_CONTENT.
+     *
+     * @param children List of child renderables
+     * @param childContexts Array of layout contexts for children
+     * @param parentPref The parent's width preference
+     * @return The maximum width required by children
+     */
+    protected int calculateMaxWidth(
+        java.util.List<TerminalRenderable> children,
+        TerminalLayoutContext[] childContexts,
+        SizePreference parentPref
+    ) {
+        int maxWidth = 0;
+
+        for (int i = 0; i < children.size(); i++) {
+            TerminalRenderable child = children.get(i);
+            if (child.isHiddenDesired()) continue;
+
+            TerminalLayoutContext ctx = childContexts != null && i < childContexts.length
+                ? childContexts[i]
+                : null;
+
+            int width = readMeasurementDimension(child, ctx, parentPref, true);
+            maxWidth = Math.max(maxWidth, width);
+        }
+
+        return maxWidth;
+    }
+
+    /**
+     * Calculates the total height from children when height preference is FIT_CONTENT.
+     *
+     * @param children List of child renderables
+     * @param childContexts Array of layout contexts for children
+     * @param parentPref The parent's height preference
+     * @return The total height required by children
+     */
+    protected int calculateTotalHeight(
+        java.util.List<TerminalRenderable> children,
+        TerminalLayoutContext[] childContexts,
+        SizePreference parentPref
+    ) {
+        int totalHeight = 0;
+
+        for (int i = 0; i < children.size(); i++) {
+            TerminalRenderable child = children.get(i);
+            if (child.isHiddenDesired()) continue;
+
+            TerminalLayoutContext ctx = childContexts != null && i < childContexts.length
+                ? childContexts[i]
+                : null;
+
+            int height = readMeasurementDimension(child, ctx, parentPref, false);
+            if (height > 0) {
+                totalHeight += height;
+            }
+        }
+
+        return totalHeight;
+    }
+
+    /**
+     * Calculates the total width from children when width preference is FIT_CONTENT.
+     *
+     * @param children List of child renderables
+     * @param childContexts Array of layout contexts for children
+     * @param parentPref The parent's width preference
+     * @return The total width required by children
+     */
+    protected int calculateTotalWidth(
+        java.util.List<TerminalRenderable> children,
+        TerminalLayoutContext[] childContexts,
+        SizePreference parentPref
+    ) {
+        int totalWidth = 0;
+
+        for (int i = 0; i < children.size(); i++) {
+            TerminalRenderable child = children.get(i);
+            if (child.isHiddenDesired()) continue;
+
+            TerminalLayoutContext ctx = childContexts != null && i < childContexts.length
+                ? childContexts[i]
+                : null;
+
+            int width = readMeasurementDimension(child, ctx, parentPref, true);
+            if (width > 0) {
+                totalWidth += width;
+            }
+        }
+
+        return totalWidth;
+    }
+
+    /**
+     * Calculates the maximum height from children when height preference is FIT_CONTENT.
+     *
+     * @param children List of child renderables
+     * @param childContexts Array of layout contexts for children
+     * @param parentPref The parent's height preference
+     * @return The maximum height required by children
+     */
+    protected int calculateMaxHeight(
+        java.util.List<TerminalRenderable> children,
+        TerminalLayoutContext[] childContexts,
+        SizePreference parentPref
+    ) {
+        int maxHeight = 0;
+
+        for (int i = 0; i < children.size(); i++) {
+            TerminalRenderable child = children.get(i);
+            if (child.isHiddenDesired()) continue;
+
+            TerminalLayoutContext ctx = childContexts != null && i < childContexts.length
+                ? childContexts[i]
+                : null;
+
+            int height = readMeasurementDimension(child, ctx, parentPref, false);
+            maxHeight = Math.max(maxHeight, height);
+        }
+
+        return maxHeight;
+    }
+
     @Override
     protected TerminalRenderable[] createRenderableArray(int size) {
         return new TerminalRenderable[size];
+    }
+
+    /**
+     * Reads a single dimension (width or height) for a child purely from its
+     * context — never calls {@code getPreferredWidth/Height()} on the child.
+     * Priority: measuredContentBounds → requestedRegion → currentRegion.
+     *
+     * @param ctx The layout context for the child
+     * @param isWidth true to read width, false to read height
+     * @return The dimension value
+     */
+    protected int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
+        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
+        if (bounds != null) {
+            return isWidth ? bounds.getWidth() : bounds.getHeight();
+        }
+
+        TerminalRenderable child = ctx.getRenderable();
+        TerminalRectangle requested = child.getRequestedRegion();
+        if (requested != null) {
+            return isWidth ? requested.getWidth() : requested.getHeight();
+        }
+
+        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
     }
 
 }

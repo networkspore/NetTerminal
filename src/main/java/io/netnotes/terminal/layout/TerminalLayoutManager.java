@@ -101,7 +101,7 @@ public class TerminalLayoutManager extends RenderableLayoutManager<
      * renderable that ended up with a zero-size region. This catches layout
      * misconfigurations (e.g. a FILL child inside a FIT_CONTENT parent) early,
      * without interfering with the base-class drain boundary or debounce logic.
-     */
+     
     @Override
     protected void onAfterLayoutPass(Set<TerminalLayoutNode> processedNodes) {
         for (TerminalLayoutNode node : processedNodes) {
@@ -123,7 +123,7 @@ public class TerminalLayoutManager extends RenderableLayoutManager<
                 );
             }
         }
-    }
+    }*/
 
     @Override
     protected void damageRenderingParentAtFloatingRegion(TerminalRenderable arg0) {

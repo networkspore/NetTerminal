@@ -144,10 +144,10 @@ public class TerminalRectangle extends SpatialRegion<
     @Override
     public boolean intersects(TerminalRectangle other) {
         if (other == null) return false;
-        return !(other.x >= this.x + this.width ||
-                 other.x + other.width <= this.x ||
-                 other.y >= this.y + this.height ||
-                 other.y + other.height <= this.y);
+        return !(other.x > this.x + this.width ||
+                 other.x + other.width < this.x ||
+                 other.y > this.y + this.height ||
+                 other.y + other.height < this.y);
     }
 
     /**
@@ -763,20 +763,21 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
             union.set(x, y, width, height);
             return union;
         }
-        
+
         if (this.isEmpty()) {
             TerminalRectangle union = TerminalRectanglePool.getInstance().obtain();
             union.set(other.x, other.y, other.width, other.height);
             return union;
         }
-        
+
         int x1 = Math.min(this.x, other.x);
         int y1 = Math.min(this.y, other.y);
         int x2 = Math.max(this.x + this.width, other.x + other.width);
         int y2 = Math.max(this.y + this.height, other.y + other.height);
-        
+
         TerminalRectangle union = TerminalRectanglePool.getInstance().obtain();
         union.set(x1, y1, x2 - x1, y2 - y1);
+
         return union;
     }
     

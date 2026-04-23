@@ -983,21 +983,6 @@ public class TerminalInstallWizard extends TerminalVStack {
         return null;
     }
 
-    private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
-        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
-        if (bounds != null) {
-            return isWidth ? bounds.getWidth() : bounds.getHeight();
-        }
-
-        TerminalRenderable child = ctx.getRenderable();
-        TerminalRectangle requested = child.getRequestedRegion();
-        if (requested != null) {
-            return isWidth ? requested.getWidth() : requested.getHeight();
-        }
-
-        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
-    }
-
     // ===== BUILDER =====
 
     public static Builder builder(String name) {
@@ -1038,7 +1023,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         // callbacks
         private CompletionListener completionListener = null;
 
-        private Builder(String name) {
+        public Builder(String name) {
             this.name = Objects.requireNonNull(name, "name must not be null");
         }
 

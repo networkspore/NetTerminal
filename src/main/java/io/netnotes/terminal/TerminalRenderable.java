@@ -98,28 +98,28 @@ public abstract class TerminalRenderable extends Renderable<
     /**
      * Get x coordinate (left edge) - local to this renderable
      */
-    protected int getX() {
+    public int getX() {
         return region.getX();
     }
     
     /**
      * Get y coordinate (top edge) - local to this renderable
      */
-    protected int getY() {
+    public int getY() {
         return region.getY();
     }
     
     /**
      * Get center y offset within this renderable's bounds (half-height)
      */
-    protected int getCenterYOffset() {
+    public int getCenterYOffset() {
         return region.getHeight() / 2;
     }
     
     /**
      * Get center x offset within this renderable's bounds (half-width)
      */
-    protected int getCenterXOffset() {
+    public int getCenterXOffset() {
         return region.getWidth() / 2;
     }
     

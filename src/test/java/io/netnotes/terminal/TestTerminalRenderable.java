@@ -22,7 +22,16 @@ public class TestTerminalRenderable extends TerminalLabel {
     private volatile boolean simulateInCurrentPass = false;
 
     public TestTerminalRenderable(String name) {
-        super(name, "");
+        super(name, "x");
+    }
+
+    /**
+     * Tests need deterministic committed bounds without requiring a layout pass.
+     * Override the convenience setter to commit directly.
+     */
+    @Override
+    public void setRegion(int x, int y, int width, int height) {
+        super.setRegion(new TerminalRectangle(x, y, width, height));
     }
 
     // Test control methods
@@ -74,5 +83,13 @@ public class TestTerminalRenderable extends TerminalLabel {
     public String getTrackingState() {
         return String.format("inv=%d, phase=%s, needsRender=%s",
             invalidateCount, getRenderPhase(), needsRender());
+    }
+
+    /**
+     * Returns a pooled snapshot of current absolute damage, or null when clean.
+     * Caller should recycle it via getRegionPool().recycle(snapshot).
+     */
+    public TerminalRectangle copyDamageSnapshot() {
+        return copyAbsoluteDamage();
     }
 }

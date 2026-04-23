@@ -426,11 +426,15 @@ public class TerminalStackPanel extends TerminalGroupRegion {
         int contentW = 0;
         int contentH = 0;
 
-        if (currentContent != null && childContexts != null) {
-            TerminalLayoutContext ctx = findContext(childContexts, currentContent);
-            if (ctx != null) {
-                if (ownWP == SizePreference.FIT_CONTENT) contentW = readDimension(ctx, true);
-                if (ownHP == SizePreference.FIT_CONTENT) contentH = readDimension(ctx, false);
+        if (currentContent != null) {
+            TerminalLayoutContext ctx = childContexts != null
+                ? findContext(childContexts, currentContent)
+                : null;
+            if (ownWP == SizePreference.FIT_CONTENT) {
+                contentW = readMeasurementDimension(currentContent, ctx, ownWP, true);
+            }
+            if (ownHP == SizePreference.FIT_CONTENT) {
+                contentH = readMeasurementDimension(currentContent, ctx, ownHP, false);
             }
         }
 
@@ -510,14 +514,17 @@ public class TerminalStackPanel extends TerminalGroupRegion {
             return switch (pref) {
                 case FILL        -> viewportSize;
                 case FIT_CONTENT -> {
-                    if (ctx == null || ctx.getMeasuredContentBounds() == null) {
-                        throw new IllegalStateException(
-                            "FIT_CONTENT requires measured content bounds for: "
-                                + content.getName());
+                    TerminalRectangle measured = ctx != null ? ctx.getMeasuredContentBounds() : null;
+                    if (measured != null) {
+                        yield isWidth ? measured.getWidth() : measured.getHeight();
+                    }
+                    TerminalRectangle requested = content.getRequestedRegion();
+                    if (requested != null) {
+                        yield isWidth ? requested.getWidth() : requested.getHeight();
                     }
                     yield isWidth
-                        ? ctx.getMeasuredContentBounds().getWidth()
-                        : ctx.getMeasuredContentBounds().getHeight();
+                        ? content.getRegion().getWidth()
+                        : content.getRegion().getHeight();
                 }
                 case PERCENT -> Math.max(min, (int)(viewportSize *
                     (isWidth ? s.getPercentWidth() : s.getPercentHeight())));
@@ -562,13 +569,4 @@ public class TerminalStackPanel extends TerminalGroupRegion {
         return null;
     }
 
-    private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
-        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
-        if (bounds != null) return isWidth ? bounds.getWidth() : bounds.getHeight();
-        TerminalRectangle requested = ctx.getRenderable().getRequestedRegion();
-        if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
-        return isWidth
-            ? ctx.getRenderable().getRegion().getWidth()
-            : ctx.getRenderable().getRegion().getHeight();
-    }
 }

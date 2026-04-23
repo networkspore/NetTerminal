@@ -16,6 +16,7 @@ public class TerminalRectanglePool extends ThreadLocalSpatialRegionPool<Terminal
      * Get the shared pool instance
      */
     public static TerminalRectanglePool getInstance() {
+        
         return INSTANCE;
     }
     

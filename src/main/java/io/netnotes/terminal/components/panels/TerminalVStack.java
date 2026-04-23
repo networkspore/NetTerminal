@@ -1,6 +1,7 @@
 package io.netnotes.terminal.components.panels;
 
 import java.util.Arrays;
+import java.util.List;
 import java.util.Map;
 
 import io.netnotes.debug.RenderDiagnostics;
@@ -177,13 +178,7 @@ public class TerminalVStack extends TerminalAbstractStack {
                     widths[i] = availableWidth;
                     break;
                 case FIT_CONTENT:
-                    widths[i] = childContext.getMeasuredContentBounds() != null
-                        ? childContext.getMeasuredContentBounds().getWidth() : -1;
-                    if (widths[i] == -1) {
-                        throw new IllegalStateException(
-                            "FIT_CONTENT width preference requires measured content bounds. Missing for child: "
-                                + child.getName());
-                    }
+                    widths[i] = readDimension(childContext, true);
                     break;
                 case PERCENT:
                     widths[i] = Math.max(s.getMinWidth(),
@@ -205,13 +200,7 @@ public class TerminalVStack extends TerminalAbstractStack {
                     fillHeightCount++;
                     break;
                 case FIT_CONTENT:
-                    heights[i] = childContext.getMeasuredContentBounds() != null
-                        ? childContext.getMeasuredContentBounds().getHeight() : -1;
-                    if (heights[i] == -1) {
-                        throw new IllegalStateException(
-                            "FIT_CONTENT height preference requires measured content bounds. Missing for child: "
-                                + child.getName());
-                    }
+                    heights[i] = readDimension(childContext, false);
                     break;
                 case PERCENT:
                     heights[i] = Math.max(s.getMinHeight(),
@@ -464,47 +453,31 @@ public class TerminalVStack extends TerminalAbstractStack {
         SizePreference ownWidthPref  = getWidthPreference();
         SizePreference ownHeightPref = getHeightPreference();
 
-        int maxWidth     = 0;
-        int totalHeight  = 0;
-        int visibleCount = 0;
+        List<TerminalRenderable> children = getChildren();
 
-        if (childContexts != null) {
-            for (TerminalLayoutContext ctx : childContexts) {
-                if (ctx == null) continue;
-                TerminalRenderable child = ctx.getRenderable();
-                if (renderableIsExcluded(child)) continue;
-                visibleCount++;
+        // Calculate content dimensions
+        int maxWidth = 0;
+        int totalHeight = 0;
 
-                TerminalSizeable s = (child instanceof TerminalSizeable) ? (TerminalSizeable) child : null;
-                SizePreference childWidthPref  = s != null
-                    ? (s.getWidthPreference() == SizePreference.INHERIT
-                        ? getWidthPreference()
-                        : s.getWidthPreference())
-                    : SizePreference.STATIC;
-                SizePreference childHeightPref = s != null
-                    ? (s.getHeightPreference() == SizePreference.INHERIT
-                        ? getHeightPreference()
-                        : s.getHeightPreference())
-                    : SizePreference.STATIC;
+        if (ownWidthPref == SizePreference.FIT_CONTENT) {
+            maxWidth = calculateMaxWidth(children, childContexts, ownWidthPref);
+        }
 
-                if (ownWidthPref == SizePreference.FIT_CONTENT
-                 && (childWidthPref == SizePreference.FIT_CONTENT
-                  || childWidthPref == SizePreference.STATIC)) {
-                    maxWidth = Math.max(maxWidth, readDimension(ctx, true));
-                }
-                if (ownHeightPref == SizePreference.FIT_CONTENT
-                 && (childHeightPref == SizePreference.FIT_CONTENT
-                  || childHeightPref == SizePreference.STATIC)) {
-                    int ch = readDimension(ctx, false);
-                    if (ch > 0) totalHeight += ch;
-                }
+        if (ownHeightPref == SizePreference.FIT_CONTENT) {
+            totalHeight = calculateTotalHeight(children, childContexts, ownHeightPref);
+
+            // Add spacing for multiple children
+            int visibleCount = 0;
+            for (TerminalRenderable child : children) {
+                if (!renderableIsExcluded(child)) visibleCount++;
+            }
+
+            if (visibleCount > 1) {
+                totalHeight += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
             }
         }
 
-        if (ownHeightPref == SizePreference.FIT_CONTENT && visibleCount > 1) {
-            totalHeight += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
-        }
-
+        // Calculate final dimensions
         int w = switch (ownWidthPref) {
             case STATIC      -> region.getWidth();
             case FIT_CONTENT -> Math.max(getMinWidth(), maxWidth + getInsets().getHorizontal());
@@ -521,16 +494,4 @@ public class TerminalVStack extends TerminalAbstractStack {
         return measured;
     }
 
-    private int readDimension(TerminalLayoutContext ctx, boolean isWidth) {
-        TerminalRectangle bounds = ctx.getMeasuredContentBounds();
-        if (bounds != null) return isWidth ? bounds.getWidth() : bounds.getHeight();
-
-        TerminalRenderable child = ctx.getRenderable();
-        TerminalRectangle requested = child.getRequestedRegion();
-        if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
-
-        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
     }
-
-
-}

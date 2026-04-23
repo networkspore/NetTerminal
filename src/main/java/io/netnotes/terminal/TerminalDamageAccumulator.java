@@ -11,5 +11,9 @@ public class TerminalDamageAccumulator extends DamageAccumulator<
     public TerminalDamageAccumulator(TerminalRectanglePool pool) {
         super(pool);
     }
-    
+
+    @Override
+    public void add(TerminalRectangle region) {
+        super.add(region);
+    }
 }
