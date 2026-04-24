@@ -123,16 +123,43 @@ public class TerminalWizardHeader extends TerminalRegion {
         String emptyPart = repeat(emptyChar, overallBarWidth - filled) + "]";
         String rightBlock = barLabel + fillPart + emptyPart;
 
-        int maxTitleW = w - rightBlock.length() - 2;
-        String displayedTitle = maxTitleW > 0 ? truncate(titleText, maxTitleW) : "";
-        printAt(batch, 0, 0, displayedTitle, styleTitle);
+        // Full layout: title + complete overall progress block.
+        if (w >= rightBlock.length() + 6) {
+            int maxTitleW = w - rightBlock.length() - 2;
+            String displayedTitle = maxTitleW > 0 ? truncate(titleText, maxTitleW) : "";
+            if (!displayedTitle.isEmpty()) {
+                printAt(batch, 0, 0, displayedTitle, styleTitle);
+            }
 
-        int barX = w - rightBlock.length();
-        if (barX >= 0 && barX + rightBlock.length() <= w) {
-            printAt(batch, barX, 0, barLabel, styleBarLabel);
-            int bx = barX + barLabel.length();
-            if (!fillPart.isEmpty()) { printAt(batch, bx, 0, fillPart,  styleBarFill);  bx += fillPart.length(); }
-            printAt(batch, bx, 0, emptyPart, styleBarEmpty);
+            int barX = w - rightBlock.length();
+            if (barX >= 0 && barX + rightBlock.length() <= w) {
+                printAt(batch, barX, 0, barLabel, styleBarLabel);
+                int bx = barX + barLabel.length();
+                if (!fillPart.isEmpty()) { printAt(batch, bx, 0, fillPart, styleBarFill); bx += fillPart.length(); }
+                printAt(batch, bx, 0, emptyPart, styleBarEmpty);
+            }
+            return;
+        }
+
+        // Compact layout for narrow widths: title + right-aligned percentage only.
+        if (w >= pctStr.length() + 4) {
+            int compactX = w - pctStr.length();
+            int maxTitleW = Math.max(0, compactX - 1);
+            String displayedTitle = maxTitleW > 0 ? truncate(titleText, maxTitleW) : "";
+            if (!displayedTitle.isEmpty()) {
+                printAt(batch, 0, 0, displayedTitle, styleTitle);
+            }
+            printAt(batch, compactX, 0, pctStr, styleBarLabel);
+            return;
+        }
+
+        // Ultra-narrow fallback: prefer title, otherwise show clipped percentage.
+        String titleFallback = truncate(titleText, w);
+        if (!titleFallback.isEmpty()) {
+            printAt(batch, 0, 0, titleFallback, styleTitle);
+        } else {
+            String pctFallback = pctStr.substring(Math.max(0, pctStr.length() - w));
+            printAt(batch, 0, 0, pctFallback, styleBarLabel);
         }
     }
 

@@ -114,7 +114,15 @@ public class TerminalWizardFooter extends TerminalRegion {
 
     private String buildText() {
         StringBuilder sb = new StringBuilder("  ");
-        sb.append("Step ").append(stepsDone).append(" of ").append(stepsTotal);
+        if (stepsTotal <= 0) {
+            sb.append("Ready");
+            return sb.toString();
+        }
+
+        int displayStep = complete
+            ? stepsTotal
+            : Math.min(stepsTotal, Math.max(1, stepsDone + 1));
+        sb.append("Step ").append(displayStep).append(" of ").append(stepsTotal);
 
         if (showElapsed && elapsedMs > 0) {
             long secs = elapsedMs / 1000L;
@@ -127,7 +135,7 @@ public class TerminalWizardFooter extends TerminalRegion {
 
         if (complete) {
             sb.append("  ·  ").append(hasError ? "FAILED" : "COMPLETE");
-        } else {
+        } else if (stepsDone < stepsTotal) {
             sb.append("  ·  Press Ctrl+C to cancel");
         }
 

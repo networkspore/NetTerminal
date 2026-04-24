@@ -211,4 +211,27 @@ public class InstallStep {
     public String toString() {
         return "InstallStep[" + id + ", " + status + ", " + (int)(progress * 100) + "%]";
     }
+
+    public static Builder builder(String id, String displayName){ return new Builder(id, displayName); }
+    public static Builder builder(String id){ return new Builder(id); }
+
+    public static class Builder{
+        private final String id;
+        private String displayName;
+
+        public Builder(String id){
+            this.id = id;
+        }
+
+        public Builder(String id, String displayName){
+            this.id = id;
+            this.displayName = displayName;
+        }
+
+        public Builder withDisplayName(String name){ this.displayName = name; return this; }
+
+        public InstallStep build(){
+            return new InstallStep(this.id, this.displayName);
+        }
+    }
 }

@@ -89,6 +89,19 @@ public class TerminalInstallWizard extends TerminalVStack {
         void onWizardComplete(boolean success, InstallStep failedStep);
     }
 
+    /**
+     * Callback fired when a step state transitions.
+     */
+    @FunctionalInterface
+    public interface StepStateListener {
+        /**
+         * @param step       the step whose state changed
+         * @param oldStatus  the previous status, or null for new steps
+         * @param newStatus  the new status
+         */
+        void onStepStateChanged(InstallStep step, Status oldStatus, Status newStatus);
+    }
+
     // ===== DEFAULT STYLES =====
 
 
@@ -110,7 +123,22 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     // Completion
     private CompletionListener completionListener = null;
+    private StepStateListener stepStateListener = null;
     private boolean wizardComplete = false;
+
+    // Footer state tracking for efficient updates
+    private int completedStepsCount = -1;
+    private long displayedElapsedMs = -1;
+    private String displayedDetail = null;
+    private boolean hadError = false;
+
+    // Additional measurement cache state tracking
+    private boolean brandViewVisible = false;
+    private boolean footerVisible = false;
+
+    // Measurement caching for FIT_CONTENT mode
+    private boolean measurementCacheValid = false;
+    private TerminalRectangle cachedMeasuredBounds = null;
 
     private final TerminalWizardHeader headerComponent;
     private final TerminalWizardFooter footerComponent;
@@ -126,7 +154,7 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     // ===== CONSTRUCTION =====
 
-    private TerminalInstallWizard(Builder builder) {
+    protected TerminalInstallWizard(Builder builder) {
         super(builder.name);
 
         headerComponent = new TerminalWizardHeader(name + "-termWizardHeader");
@@ -324,6 +352,78 @@ public class TerminalInstallWizard extends TerminalVStack {
         invalidate();
     }
 
+    /**
+     * Update step status with listener notification.
+     *
+     * @param step      the step to update
+     * @param newStatus the new status to set
+     * @return true if the status actually changed
+     */
+    private boolean updateStepStatus(InstallStep step, Status newStatus) {
+        Status oldStatus = step.getStatus();
+        if (oldStatus == newStatus) {
+            return false;
+        }
+
+        step.setStatus(newStatus);
+        if (stepStateListener != null) {
+            stepStateListener.onStepStateChanged(step, oldStatus, newStatus);
+        }
+
+        // Invalidate measurement cache when step state changes
+        invalidateMeasurementCache();
+        return true;
+    }
+
+    /** Invalidate the measurement cache when any structural change occurs. */
+    private void invalidateMeasurementCache() {
+        measurementCacheValid = false;
+        if (cachedMeasuredBounds != null) {
+            getRegionPool().recycle(cachedMeasuredBounds);
+            cachedMeasuredBounds = null;
+        }
+        // Also reset footer cache
+        completedStepsCount = -1;
+        displayedElapsedMs = -1;
+        displayedDetail = null;
+        hadError = false;
+    }
+
+    /** Update visual-only progress during animation without invalidating layout. */
+    public void updateProgressVisualOnly(String stepId, float progress) {
+        InstallStep step = findStep(stepId);
+        if (step == null) return;
+
+        // Only update if step is running and progress actually changed
+        if (step.getStatus() == Status.RUNNING && step.getProgress() != progress) {
+            step.setProgress(progress);
+
+            // Update overall progress bar header without layout
+            if (headerComponent != null) {
+                headerComponent.setOverallProgress(overallProgress);
+                headerComponent.invalidate();
+            }
+        }
+    }
+
+    /** Update overall progress only if force or actual progress change occurred. */
+    private void updateProgress(String stepId, float progress, String detail, boolean force) {
+        InstallStep step = findStep(stepId);
+        if (step == null) return;
+
+        boolean detailChanged = detail != null && !Objects.equals(step.getDetail(), detail);
+        boolean progressChanged = step.getProgress() != progress;
+
+        step.setProgress(progress);
+        if (detail != null) step.setDetail(detail);
+
+        if (force || progressChanged || detailChanged) {
+            refreshRow(step, detailChanged);
+            updateOverallProgress();
+            invalidate();
+        }
+    }
+
     /** Add multiple steps at once, then rebuild layout in one pass. */
     public void addSteps(List<InstallStep> newSteps) {
         if (newSteps == null || newSteps.isEmpty()) return;
@@ -352,6 +452,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         syncFooter();
         requestLayoutUpdate();
         invalidate();
+        invalidateMeasurementCache();
     }
 
     /** Rebuild step-row components from the current step list. */
@@ -392,12 +493,12 @@ public class TerminalInstallWizard extends TerminalVStack {
 
         if (activeStep != null && activeStep != step
                 && activeStep.getStatus() == Status.RUNNING) {
-            activeStep.setStatus(Status.COMPLETE);
+            updateStepStatus(activeStep, Status.COMPLETE);
             activeStep.setProgress(1f);
             refreshRow(activeStep);
         }
 
-        step.setStatus(Status.RUNNING);
+        updateStepStatus(step, Status.RUNNING);
         activeStep = step;
         refreshRow(step);
         updateOverallProgress();
@@ -407,14 +508,7 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     /** Update progress (0.0–1.0) and optional detail text for the given step. */
     public void updateProgress(String stepId, float progress, String detail) {
-        InstallStep step = findStep(stepId);
-        if (step == null) return;
-        boolean detailChanged = detail != null && !Objects.equals(step.getDetail(), detail);
-        step.setProgress(progress);
-        if (detail != null) step.setDetail(detail);
-        refreshRow(step, detailChanged);
-        updateOverallProgress();
-        invalidate();
+        updateProgress(stepId, progress, detail, false);
     }
 
     /** Append a log line to a step (shown when that row is expanded). */
@@ -433,7 +527,7 @@ public class TerminalInstallWizard extends TerminalVStack {
     public void completeStep(String stepId) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
-        step.setStatus(Status.COMPLETE);
+        updateStepStatus(step, Status.COMPLETE);
         step.setProgress(1f);
         if (activeStep == step) activeStep = null;
         refreshRow(step);
@@ -448,7 +542,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         InstallStep step = findStep(stepId);
         if (step == null) return;
         boolean detailChanged = errorMessage != null && !java.util.Objects.equals(step.getDetail(), errorMessage);
-        step.setStatus(Status.ERROR);
+        updateStepStatus(step, Status.ERROR);
         step.setErrorMessage(errorMessage);
         if (errorMessage != null) step.setDetail(errorMessage);
         if (activeStep == step) activeStep = null;
@@ -463,7 +557,7 @@ public class TerminalInstallWizard extends TerminalVStack {
     public void skipStep(String stepId) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
-        step.setStatus(Status.SKIPPED);
+        updateStepStatus(step, Status.SKIPPED);
         if (activeStep == step) activeStep = null;
         refreshRow(step);
         updateOverallProgress();
@@ -481,6 +575,13 @@ public class TerminalInstallWizard extends TerminalVStack {
         startTimeMs     = -1L;
         elapsedMs       = 0L;
         headerComponent.setOverallProgress(overallProgress);
+
+        // Clear footer state cache
+        completedStepsCount = -1;
+        displayedElapsedMs = -1;
+        displayedDetail = null;
+        hadError = false;
+
         for (TerminalInstallStepRow row : stepRows) {
             row.setExpanded(false);
             row.refresh();   // pushes reset state (PENDING icon/text) into child labels
@@ -497,18 +598,42 @@ public class TerminalInstallWizard extends TerminalVStack {
      * Call from a periodic timer (e.g. every 100–150 ms).
      */
     public void tick() {
+        boolean needsInvalidate = false;
+
+        // Update elapsed time
         if (startTimeMs > 0 && !wizardComplete) {
-            elapsedMs = System.currentTimeMillis() - startTimeMs;
+            long nextElapsedMs = System.currentTimeMillis() - startTimeMs;
+            long previousDisplayedSeconds = elapsedMs / 1000L;
+            long nextDisplayedSeconds = nextElapsedMs / 1000L;
+            if (nextDisplayedSeconds != previousDisplayedSeconds) {
+                elapsedMs = nextElapsedMs;
+                needsInvalidate = true;
+            }
         }
+
+        // Advance spinners only for running steps
+        int rowsWithSpinners = 0;
         for (TerminalInstallStepRow row : stepRows) {
-            if (row.getStep().getStatus() == Status.RUNNING) row.advanceSpinner();
+            if (row.getStep().getStatus() == Status.RUNNING) {
+                row.advanceSpinner();
+                rowsWithSpinners++;
+            }
         }
-        syncFooter();
-        invalidate();
+        needsInvalidate |= (rowsWithSpinners > 0); // If any spinners were advanced
+
+        // Update footer if needed
+        boolean footerChanged = syncFooter();
+        needsInvalidate |= footerChanged;
+
+        // Only invalidate if something actually changed
+        if (needsInvalidate) {
+            invalidate();
+        }
     }
 
-    private void syncFooter() {
-        if (footerComponent == null) return;
+    private boolean syncFooter() {
+        if (footerComponent == null) return false;
+
         String detail = activeStep != null ? activeStep.getDetail() : null;
         int done = 0;
         boolean hasErr = false;
@@ -519,7 +644,24 @@ public class TerminalInstallWizard extends TerminalVStack {
             if (status == Status.ERROR) hasErr = true;
         }
 
+        // Store previous state to check if anything changed
+        final int prevDone = completedStepsCount;
+        final long prevElapsed = displayedElapsedMs;
+        final String prevDetail = displayedDetail;
+        final boolean prevHasError = hadError;
+
+        boolean changed = (prevDone != done ||
+                          prevElapsed != elapsedMs ||
+                          !Objects.equals(prevDetail, detail) ||
+                          prevHasError != hasErr);
+
+        completedStepsCount = done;
+        displayedElapsedMs = elapsedMs;
+        displayedDetail = detail;
+        hadError = hasErr;
+
         footerComponent.update(done, steps.size(), elapsedMs, detail, wizardComplete, hasErr);
+        return changed;
     }
 
     // ===== EXPAND/COLLAPSE =====
@@ -609,6 +751,11 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     public TerminalInstallWizard withCompletionListener(CompletionListener listener) {
         this.completionListener = listener;
+        return this;
+    }
+
+    public TerminalInstallWizard withStepStateListener(StepStateListener listener) {
+        this.stepStateListener = listener;
         return this;
     }
 
@@ -795,6 +942,11 @@ public class TerminalInstallWizard extends TerminalVStack {
     // config sets the wizard to FILL x FILL, so this path is dormant unless a
     // caller explicitly switches the width preference to FIT_CONTENT.
     private int calculateFitContentWidth(TerminalLayoutContext[] childContexts) {
+        // Check if we have a valid cache
+        if (measurementCacheValid && cachedMeasuredBounds != null) {
+            return cachedMeasuredBounds.getWidth();
+        }
+
         int innerWidth = 0;
 
         if (isMeasuredVisible(brandView)) {
@@ -868,6 +1020,9 @@ public class TerminalInstallWizard extends TerminalVStack {
     }
 
     private boolean isMeasuredVisible(TerminalRenderable renderable) {
+        // TODO(layout-visibility): visibility can be finalized in group callbacks
+        // during layout pass. This prepass-level measurability check should be
+        // revisited with phase-aware visibility semantics.
         return renderable != null
             && renderable != contentSpacer;
     }

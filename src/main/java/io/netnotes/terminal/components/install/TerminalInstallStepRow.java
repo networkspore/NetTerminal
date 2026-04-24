@@ -103,14 +103,13 @@ public class TerminalInstallStepRow extends TerminalVStack {
 
         // Name: takes all remaining width, truncates at end
         nameLabel = new TerminalLabel(name + "-trm-install-lbl");
-        nameLabel.setWidthPreference(SizePreference.PERCENT);
-        nameLabel.setPercentWidth(.65);
+        nameLabel.setWidthPreference(SizePreference.FILL);
         nameLabel.setMinWidth(3);
         nameLabel.setMinHeight(1);
         nameLabel.setTextTruncation(LabelTruncation.END);
 
         progressBar = new TerminalProgressBar(name + "-trm-install-prog");
-        progressBar.setWidthPreference(SizePreference.FILL);
+        progressBar.setWidthPreference(SizePreference.FIT_CONTENT);
         progressBar.setHeightPreference(SizePreference.FIT_CONTENT);
         progressBar.setMinWidth(12);
         progressBar.setMinHeight(1);
@@ -119,8 +118,8 @@ public class TerminalInstallStepRow extends TerminalVStack {
         // Status tag: FILL, shown when not RUNNING (mutually exclusive with progressBar,
         // which is also FILL — exactly one of the two is in the layout at a time).
         statusTagLabel = new TerminalLabel(name + "-trm-install-tag");
-        statusTagLabel.setWidthPreference(SizePreference.FILL);
-        statusTagLabel.setMinWidth(10);
+        statusTagLabel.setWidthPreference(SizePreference.FIT_CONTENT);
+        statusTagLabel.setMinWidth(8);
         statusTagLabel.setMinHeight(1);
 
         statusTagLabel.setTextAlignment(TextAlignment.RIGHT);
@@ -201,8 +200,7 @@ public class TerminalInstallStepRow extends TerminalVStack {
         iconLabel.setTextStyle(iconStyle(status));
 
         // ── name ─────────────────────────────────────────────────────────────
-        String numStr  = step.getStepNumber() > 0 ? step.getStepNumber() + ". " : "";
-        nameLabel.setText(numStr + step.getDisplayName());
+        nameLabel.setText(buildStepLabelText());
         nameLabel.setTextStyle(status == Status.RUNNING ? styleLabelActive : styleLabel);
 
         // ── right side: progress bar XOR status tag ───────────────────────────
@@ -267,7 +265,7 @@ public class TerminalInstallStepRow extends TerminalVStack {
     public void setExpanded(boolean expanded) {
         if (this.expanded != expanded) {
             this.expanded = expanded;
-            syncExpandedArea();
+            syncFromStep();
             requestLayoutUpdate();
         }
     }
@@ -449,8 +447,9 @@ public class TerminalInstallStepRow extends TerminalVStack {
     }
 
     private String buildStepLabelText() {
+        String expandGlyph = expanded ? "▾ " : "▸ ";
         String numStr = step.getStepNumber() > 0 ? step.getStepNumber() + ". " : "";
-        return numStr + step.getDisplayName();
+        return expandGlyph + numStr + step.getDisplayName();
     }
 
     private int measureRightSlotWidth() {
