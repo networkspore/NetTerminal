@@ -119,7 +119,9 @@ public class TerminalVStack extends TerminalAbstractStack {
         int[] layoutIndices = new int[contexts.length];
         int layoutCount = 0;
         for (int i = 0; i < contexts.length; i++) {
-            layoutIndices[layoutCount++] = i;
+            if(!contexts[i].getRenderable().isHiddenForced()){
+                layoutIndices[layoutCount++] = i;
+            }
         }
 
         if (layoutCount == 0) {
@@ -404,15 +406,15 @@ public class TerminalVStack extends TerminalAbstractStack {
         int visibleCount = 0;
 
         for (TerminalLayoutContext childContext : childContexts) {
-            TerminalRenderable renderable = childContext.getRenderable();
+            
+            TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
 
-            // Children that are hidden (layout-controlled) need another pass
-            // to become visible — skip their contribution this pass.
-            // this causes renderables that are becomming unhidden to fail, the pass does not seem to propagate into a second pass
-            if (renderable.isHiddenDesired()) continue;
-
-            visibleCount++;
-            TerminalRegion child = checkTerminalRegion(renderable);
+            if(ownHeightPref == SizePreference.FIT_CONTENT || overflowStrategy == LayoutOverflowStrategy.OVERFLOW){
+                visibleCount++;
+            }else if(!child.isHidden()){
+                visibleCount++;
+            }
+            
 
             SizePreference childWidthPref = child.getWidthPreference() == SizePreference.INHERIT
                 ? ownWidthPref : child.getWidthPreference();

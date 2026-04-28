@@ -82,17 +82,16 @@ public class VisibilityContentSizeLayoutTest {
                 try {
                     switch (step[0]++) {
                         case 0 -> {
-                            // Initial layout: only fixedLabel visible.
-                            assertEquals(3, parentVStack.getHeight(), "Parent = fixedLabel height (3)");
-                            assertTrue(nestedVStack.isHidden(), "Nested stack is force-hidden");
-
-                            nestedVStack.show(); // → triggers multi-pass stabilization
+                            // initial idle: only fixedLabel visible
+                            assertEquals(3, parentVStack.getHeight());
+                            assertTrue(nestedVStack.isHidden());   // will now pass
+                            nestedVStack.show();                   // triggers multi-pass
                         }
                         case 1 -> {
-                            // After unhide: nested stack laid out, parent re-measured.
-                            assertFalse(nestedVStack.isHidden(), "Nested stack visible after unhide");
-                            assertEquals(4, nestedVStack.getHeight(), "Nested: 2 labels × 2 = 4");
-                            assertEquals(7, parentVStack.getHeight(), "Parent: 3 + 4 = 7");
+                            // second pass: everything stable
+                            assertFalse(nestedVStack.isHidden());
+                            assertEquals(4, nestedVStack.getHeight());
+                            assertEquals(7, parentVStack.getHeight());
                             gate.open();
                         }
                     }
