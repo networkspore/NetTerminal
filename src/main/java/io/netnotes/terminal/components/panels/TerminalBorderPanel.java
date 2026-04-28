@@ -16,6 +16,7 @@ import io.netnotes.engine.utils.LoggingHelpers.Log;
 import io.netnotes.engine.utils.LoggingHelpers.LogLevel;
 import io.netnotes.noteBytes.processing.IntCounter;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.TerminalRectangle;
 
 /**
@@ -157,7 +158,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
      * Set a single child for a region, replacing any existing content.
      * The stack for that region will be cleared and only this child will be added.
      */
-    public void setPanel(BorderPanel region, TerminalRenderable child) {
+    public void setPanel(BorderPanel region, TerminalRegion child) {
         if (!getUIExecutor().isCurrentThread()) {
             getUIExecutor().runLater(() -> setPanel(region, child));
             return;
@@ -182,7 +183,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
      * region's stack, it will be added. The child will become visible and all
      * other children in that region will be hidden.
      */
-    public void swapPanel(BorderPanel region, TerminalRenderable newChild) {
+    public void swapPanel(BorderPanel region, TerminalRegion newChild) {
         if (!getUIExecutor().isCurrentThread()) {
             getUIExecutor().runLater(() -> swapPanel(region, newChild));
             return;
@@ -280,7 +281,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
     /**
      * Remove a child from a region's stack.
      */
-    public void removeFromPanel(BorderPanel region, TerminalRenderable child) {
+    public void removeFromPanel(BorderPanel region, TerminalRegion child) {
         if (region == null) {
             throw new IllegalArgumentException("Panel cannot be null");
         }
@@ -298,7 +299,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
     /**
      * Get the currently visible child in a region.
      */
-    public TerminalRenderable getPanel(BorderPanel region) {
+    public TerminalRegion getPanel(BorderPanel region) {
         if (region == null) {
             return null;
         }
@@ -307,28 +308,28 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         return stack.getContent();
     }
 
-    public TerminalRenderable getCenterContent() {
+    public TerminalRegion getCenterContent() {
 
         TerminalStackPanel stack = regionStacks.get(BorderPanel.CENTER);
         return stack.getContent();
     }
 
-    public TerminalRenderable getBottomContent() {
+    public TerminalRegion getBottomContent() {
         TerminalStackPanel stack = regionStacks.get(BorderPanel.BOTTOM);
         return stack.getContent();
     }
 
-    public TerminalRenderable getLeftContent() {
+    public TerminalRegion getLeftContent() {
         TerminalStackPanel stack = regionStacks.get(BorderPanel.LEFT);
         return stack.getContent();
     }
 
-    public TerminalRenderable getRightContent() {
+    public TerminalRegion getRightContent() {
         TerminalStackPanel stack = regionStacks.get(BorderPanel.RIGHT);
         return stack.getContent();
     }
 
-    public TerminalRenderable getTopContent() {
+    public TerminalRegion getTopContent() {
         TerminalStackPanel stack = regionStacks.get(BorderPanel.TOP);
         return stack.getContent();
     }
@@ -414,7 +415,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         IntCounter rightWidth = new IntCounter();
 
         TerminalStackPanel topStack = regionStacks.get(BorderPanel.TOP);
-        TerminalRenderable topChild = topStack.getContent();
+        TerminalRegion topChild = topStack.getContent();
         TerminalLayoutContext topContext = findContext(contexts, topStack);
         if (topChild != null) {
             topHeight.set(resolveChildHeight(topContext, topStack));
@@ -426,7 +427,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         }
 
         TerminalStackPanel bottomStack = regionStacks.get(BorderPanel.BOTTOM);
-        TerminalRenderable bottomChild = bottomStack.getContent();
+        TerminalRegion bottomChild = bottomStack.getContent();
         TerminalLayoutContext bottomContext = findContext(contexts, bottomStack);
         if (bottomChild != null) {
             bottomHeight.set(resolveChildHeight(bottomContext, bottomStack));
@@ -442,7 +443,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         int middleY = insets.getTop() + topHeight.get();
 
         TerminalStackPanel leftStack = regionStacks.get(BorderPanel.LEFT);
-        TerminalRenderable leftChild = leftStack.getContent();
+        TerminalRegion leftChild = leftStack.getContent();
         TerminalLayoutContext leftContext = findContext(contexts, leftStack);
         if (leftChild != null) {
             leftWidth.set(resolveChildWidth(leftContext, leftStack));
@@ -454,7 +455,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         }
 
         TerminalStackPanel rightStack = regionStacks.get(BorderPanel.RIGHT);
-        TerminalRenderable rightChild = rightStack.getContent();
+        TerminalRegion rightChild = rightStack.getContent();
         TerminalLayoutContext rightContext = findContext(contexts, rightStack);
         if (rightChild != null) {
             rightWidth.set(resolveChildWidth(rightContext, rightStack));
@@ -467,7 +468,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         }
 
         TerminalStackPanel centerStack = regionStacks.get(BorderPanel.CENTER);
-        TerminalRenderable centerChild = centerStack.getContent();
+        TerminalRegion centerChild = centerStack.getContent();
         int centerWidth = availableWidth - leftWidth.get() - rightWidth.get();
 
         if (centerChild != null && (middleHeight <= 0 || centerWidth <= 0)) {
@@ -531,7 +532,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         TerminalRectangle parentPanel
     ) {
         boolean inBounds = isWithinParentBounds(x, y, width, height, parentPanel);
-        TerminalRenderable visibleContent = stack.getContent();
+        TerminalRegion visibleContent = stack.getContent();
 
         TerminalLayoutData.TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder()
             .setX(x)
@@ -614,12 +615,13 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
 
         if (child instanceof TerminalSizeable sizeable) {
             SizePreference pref = resolveChildPreference(child, isWidth, sizeable);
+            int min = isWidth ? sizeable.getMinWidth() : sizeable.getMinHeight();
 
-            if (pref.isParentDependent()) {
-                return isWidth ? sizeable.getMinWidth() : sizeable.getMinHeight();
-            }
-
-            return readRequestedOrCurrentDimension(child, isWidth);
+            return switch (pref) {
+                case FILL, PERCENT -> min;
+                
+                default ->  Math.max(min, readRequestedOrCurrentDimension(child, isWidth));
+            };
         }
 
         // Non-sizeable: requested/current region is the only sizing hint available.
@@ -708,8 +710,8 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
 
             TerminalLayoutContext centerCtx = findRegionContext(childContexts, BorderPanel.CENTER);
             TerminalStackPanel centerStack  = regionStacks.get(BorderPanel.CENTER);
-            int centerW = centerStack != null ? readDimension(centerCtx, centerStack, true)  : 0;
-            int centerH = centerStack != null ? readDimension(centerCtx, centerStack, false) : 0;
+            int centerW = centerStack != null ? readContentDimension( centerStack, centerCtx, true)  : 0;
+            int centerH = centerStack != null ? readContentDimension( centerStack, centerCtx, false) : 0;
 
             contentW = leftW + centerW + rightW;
             contentH = topH  + centerH + bottomH;
@@ -739,12 +741,12 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
      */
     private int resolveRegionHeight(TerminalLayoutContext[] contexts, BorderPanel region, int defaultH) {
         TerminalStackPanel stack = regionStacks.get(region);
-        if (stack == null || renderableIsExcluded(stack)) return 0;
+        if (stack == null || !canUnhide(stack)) return 0;
 
         TerminalRenderable visible = stack.getContent();
         if (visible != null) {
             TerminalLayoutContext ctx = findRegionContext(contexts, region);
-            return readDimension(ctx, stack, false);
+            return readContentDimension( stack, ctx, false);
         }
 
         return defaultH > 0 ? defaultH : 0;
@@ -758,12 +760,12 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
      */
     private int resolveRegionWidth(TerminalLayoutContext[] contexts, BorderPanel region, int defaultW) {
         TerminalStackPanel stack = regionStacks.get(region);
-        if (stack == null || renderableIsExcluded(stack)) return 0;
+        if (stack == null || !canUnhide(stack)) return 0;
 
         TerminalRenderable visible = stack.getContent();
         if (visible != null) {
             TerminalLayoutContext ctx = findRegionContext(contexts, region);
-            return readDimension(ctx, stack, true);
+            return readContentDimension(stack, ctx, true);
         }
 
         return defaultW > 0 ? defaultW : 0;
@@ -790,14 +792,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
         return null;
     }  */
     
-    /**
-     * Reads a single dimension from a stack's context.
-     * Priority: measuredContentBounds → parent-dependent min floor →
-     * requestedRegion → currentRegion.
-     */
-    private int readDimension(TerminalLayoutContext ctx, TerminalRenderable child, boolean isWidth) {
-        return resolveChildDimension(ctx, child, isWidth);
-    }
+  
 
     @Override
     protected void renderSelf(TerminalBatchBuilder batch) {

@@ -1,0 +1,9 @@
+{
+  "profile": "openai",
+  "env": {
+    "OPENAI_BASE_URL": "https://api.z.ai/api/paas/v4",
+    "OPENAI_MODEL": "glm-4.7-flash",
+    "OPENAI_API_KEY": "cc40f028c48c4cf88dc7ec9f47e29392.BxY8oOCBb9YJfnm2"
+  },
+  "createdAt": "2026-04-28T07:31:25.189Z"
+}

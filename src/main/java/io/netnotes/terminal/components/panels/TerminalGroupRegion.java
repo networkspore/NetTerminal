@@ -105,19 +105,7 @@ public abstract class TerminalGroupRegion extends TerminalRegion {
         return true;
     }
 
-    /**
-     * Returns true when a child should be removed from flow before layout math
-     * runs. An explicit local hidden request always excludes the child. For
-     * unmanaged children we also respect their current hidden state because the
-     * child owns that visibility contract.
-     */
-    protected boolean renderableIsExcluded(TerminalRenderable child) {
-        if (child == null) {
-            return true;
-        }
- 
-        return !shouldManageHidden(child) && child.isHidden();
-    }
+
 
     /**
      * Extension point for subclasses that need to react to layout-manager

@@ -1,6 +1,5 @@
 package io.netnotes.terminal.components.panels;
 
-import java.util.List;
 import java.util.Map;
 
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
@@ -12,6 +11,7 @@ import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
@@ -84,7 +84,7 @@ public class TerminalPanel extends TerminalGroupRegion {
     }
 
     protected TerminalLayoutGroupCallback createLayoutCallback() {
-        return this::layoutChildren;
+        return this::layoutAllChildren;
     }
 
 
@@ -94,7 +94,7 @@ public class TerminalPanel extends TerminalGroupRegion {
 
     // ===== LAYOUT =====
 
-    private void layoutChildren(
+    private void layoutAllChildren(
         TerminalLayoutContext[] contexts,
         Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
     ) {
@@ -129,7 +129,7 @@ public class TerminalPanel extends TerminalGroupRegion {
             TerminalRenderable child = childContext.getRenderable();
             managedHidden[i] = shouldManageHidden(child);
 
-            if (renderableIsExcluded(child)) {
+            if (!canUnhide(child)) {
                 widths[i] = 0;
                 heights[i] = 0;
                 dataInterfaces.get(child.getName())
@@ -168,37 +168,36 @@ public class TerminalPanel extends TerminalGroupRegion {
             if (!inFlow[i]) continue;
 
             TerminalLayoutContext childContext = contexts[i];
-            TerminalRenderable child = childContext.getRenderable();
-            TerminalSizeable sizeable = child instanceof TerminalSizeable ts ? ts : null;
+            TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
+       
 
-            int minWidth = sizeable != null ? sizeable.getMinWidth() : 0;
-            int minHeight = sizeable != null ? sizeable.getMinHeight() : 0;
+            int minWidth = child.getMinWidth();
+            int minHeight = child.getMinHeight();
 
             switch (widthPrefs[i]) {
                 case FILL -> widths[i] = axis == Axis.HORIZONTAL
                     ? -1
                     : Math.max(0, availableCross);
-                case FIT_CONTENT -> widths[i] = readDimension(childContext, true);
+                case FIT_CONTENT -> widths[i] = readContentDimension(child, childContext, true);
                 case PERCENT -> widths[i] = Math.max(
                     minWidth,
                     (int) (Math.max(0, axis == Axis.HORIZONTAL ? availableForChildren : availableCross)
-                        * sizeable.getPercentWidth())
+                        * child.getPercentWidth())
                 );
-                case STATIC -> widths[i] = childContext.getRequestedRegion() != null
+                default -> widths[i] = childContext.getRequestedRegion() != null
                     ? childContext.getRequestedRegion().getWidth()
                     : childContext.getCurrentRegion().getWidth();
-                default -> widths[i] = childContext.getCurrentRegion().getWidth();
             }
 
             switch (heightPrefs[i]) {
                 case FILL -> heights[i] = axis == Axis.VERTICAL
                     ? -1
                     : Math.max(0, availableCross);
-                case FIT_CONTENT -> heights[i] = readDimension(childContext, false);
+                case FIT_CONTENT -> heights[i] = readContentDimension(child, childContext, false);
                 case PERCENT -> heights[i] = Math.max(
                     minHeight,
                     (int) (Math.max(0, axis == Axis.VERTICAL ? availableForChildren : availableCross)
-                        * sizeable.getPercentHeight())
+                        * child.getPercentHeight())
                 );
                 case STATIC -> heights[i] = childContext.getRequestedRegion() != null
                     ? childContext.getRequestedRegion().getHeight()
@@ -240,19 +239,19 @@ public class TerminalPanel extends TerminalGroupRegion {
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
 
-                    TerminalRenderable child = contexts[i].getRenderable();
+                    TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
                     int minPrimary = axis == Axis.VERTICAL
-                        ? (child instanceof TerminalSizeable sizeable ? sizeable.getMinHeight() : 0)
-                        : (child instanceof TerminalSizeable sizeable ? sizeable.getMinWidth() : 0);
+                        ? child.getMinHeight()
+                        : child.getMinWidth();
 
                     if (axis == Axis.VERTICAL) {
                         if (heights[i] < 0) {
-                            heights[i] = Math.max(minPrimary, readDimension(contexts[i], false));
+                            heights[i] = Math.max(minPrimary, readContentDimension(child, contexts[i], false));
                         }
                         totalPrimaryUsed += heights[i];
                     } else {
                         if (widths[i] < 0) {
-                            widths[i] = Math.max(minPrimary, readDimension(contexts[i], true));
+                            widths[i] = Math.max(minPrimary, readContentDimension(child, contexts[i], true));
                         }
                         totalPrimaryUsed += widths[i];
                     }
@@ -265,10 +264,10 @@ public class TerminalPanel extends TerminalGroupRegion {
                     for (int i = 0; i < count; i++) {
                         if (!inFlow[i]) continue;
 
-                        TerminalRenderable child = contexts[i].getRenderable();
+                        TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
                         int minPrimary = axis == Axis.VERTICAL
-                            ? (child instanceof TerminalSizeable sizeable ? sizeable.getMinHeight() : 0)
-                            : (child instanceof TerminalSizeable sizeable ? sizeable.getMinWidth() : 0);
+                            ? child.getMinHeight()
+                            : child.getMinWidth();
 
                         if (axis == Axis.VERTICAL) {
                             heights[i] = Math.max(minPrimary, (int) (heights[i] * scale));
@@ -289,10 +288,10 @@ public class TerminalPanel extends TerminalGroupRegion {
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
 
-                    TerminalRenderable child = contexts[i].getRenderable();
+                    TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
                     int minPrimary = axis == Axis.VERTICAL
-                        ? (child instanceof TerminalSizeable sizeable ? sizeable.getMinHeight() : 0)
-                        : (child instanceof TerminalSizeable sizeable ? sizeable.getMinWidth() : 0);
+                        ? child.getMinHeight()
+                        : child.getMinWidth();
 
                     if (axis == Axis.VERTICAL) {
                         heights[i] = Math.max(minPrimary, equalShare);
@@ -308,10 +307,10 @@ public class TerminalPanel extends TerminalGroupRegion {
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
 
-                    TerminalRenderable child = contexts[i].getRenderable();
+                    TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
                     int minPrimary = axis == Axis.VERTICAL
-                        ? (child instanceof TerminalSizeable sizeable ? sizeable.getMinHeight() : 0)
-                        : (child instanceof TerminalSizeable sizeable ? sizeable.getMinWidth() : 0);
+                        ? child.getMinHeight()
+                        : child.getMinWidth();
 
                     if (axis == Axis.VERTICAL) {
                         if (heights[i] < 0) heights[i] = Math.max(minPrimary, rawFillPrimary);
@@ -475,49 +474,99 @@ public class TerminalPanel extends TerminalGroupRegion {
      */
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        SizePreference ownWidthPref  = getWidthPreference();
-        SizePreference ownHeightPref = getHeightPreference();
-
-        List<TerminalRenderable> children = getChildren();
-
         // Calculate content dimensions based on axis
-        int contentW = 0;
-        int contentH = 0;
+        int totalPrimary = 0;  // sum for primary axis
+        int maxCross = 0;       // max for cross axis
 
-        if (ownWidthPref == SizePreference.FIT_CONTENT) {
-            contentW = axis == Axis.HORIZONTAL
-                ? calculateTotalWidth(children, childContexts, ownWidthPref)
-                : calculateMaxWidth(children, childContexts, ownWidthPref);
+        // Count visible children
+        int visibleCount = 0;
+        for (TerminalRenderable child : getChildren()) {
+            if (canUnhide(child)) visibleCount++;
         }
 
-        if (ownHeightPref == SizePreference.FIT_CONTENT) {
-            contentH = axis == Axis.VERTICAL
-                ? calculateTotalHeight(children, childContexts, ownHeightPref)
-                : calculateMaxHeight(children, childContexts, ownHeightPref);
+        // Measure each child based on their SizePreference
+        for (int i = 0; i < childContexts.length; i++) {
+            TerminalLayoutContext childContext = childContexts[i];
+            TerminalRenderable renderable = childContext.getRenderable();
+
+            if (!canUnhide(renderable)) {
+                continue;
+            }
+
+            TerminalRegion child = checkTerminalRegion(renderable);
+
+            // Get child's width preference (respecting INHERIT)
+            SizePreference childWidthPref = child.getWidthPreference() == SizePreference.INHERIT
+                ? getWidthPreference()
+                : child.getWidthPreference();
+            int minWidth = child.getMinWidth();
+            int childWidth;
+            switch (childWidthPref) {
+                case FIT_CONTENT:
+                    childWidth = Math.max(minWidth, readContentDimension(child, childContext, true));
+                    break;
+                case PERCENT:
+                case FILL:
+                    childWidth = minWidth;
+                    break;
+                case STATIC:
+                default:
+                    childWidth = Math.max(minWidth, childContext.getRequestedRegion() != null
+                        ? childContext.getRequestedRegion().getWidth()
+                        : childContext.getCurrentRegion().getWidth());
+                    break;
+            }
+
+            // Get child's height preference (respecting INHERIT)
+            SizePreference childHeightPref = child.getHeightPreference() == SizePreference.INHERIT
+                ? getHeightPreference()
+                : child.getHeightPreference();
+            int minHeight = child.getMinHeight();
+            int childHeight;
+            switch (childHeightPref) {
+                case FIT_CONTENT:
+                    childHeight = Math.max(minHeight, readContentDimension(child, childContext, false));
+                    break;
+                case PERCENT:
+                case FILL:
+                    childHeight = minHeight;
+                    break;
+                case STATIC:
+                default:
+                    childHeight = Math.max(minHeight, childContext.getRequestedRegion() != null
+                        ? childContext.getRequestedRegion().getHeight()
+                        : childContext.getCurrentRegion().getHeight());
+                    break;
+            }
+
+            // Accumulate based on axis
+            if (axis == Axis.HORIZONTAL) {
+                totalPrimary += childWidth;
+                maxCross = Math.max(maxCross, childHeight);
+            } else {
+                totalPrimary += childHeight;
+                maxCross = Math.max(maxCross, childWidth);
+            }
         }
 
         // Add spacing for multiple children
-        int visibleCount = 0;
-        for (TerminalRenderable child : children) {
-            if (!renderableIsExcluded(child)) visibleCount++;
+        if (visibleCount > 1) {
+            totalPrimary += (visibleCount - 1) * spacing;
         }
 
-        if (visibleCount > 1) {
-            if (axis == Axis.HORIZONTAL && ownWidthPref == SizePreference.FIT_CONTENT) {
-                contentW += (visibleCount - 1) * spacing;
-            }
-            if (axis == Axis.VERTICAL && ownHeightPref == SizePreference.FIT_CONTENT) {
-                contentH += (visibleCount - 1) * spacing;
-            }
-        }
+        // Calculate final dimensions
+        int contentW = axis == Axis.HORIZONTAL ? totalPrimary : maxCross;
+        int contentH = axis == Axis.VERTICAL ? totalPrimary : maxCross;
+
+        SizePreference ownWidthPref = getWidthPreference();
+        SizePreference ownHeightPref = getHeightPreference();
 
         TerminalInsets ins = getInsets();
 
-        // Calculate final dimensions
         int w = switch (ownWidthPref) {
             case STATIC      -> region.getWidth();
-            case FIT_CONTENT -> Math.min(maxWidth,  Math.max(getMinWidth(),  contentW + ins.getHorizontal()));
-            default          -> Math.min(maxWidth,  getMinWidth());
+            case FIT_CONTENT -> Math.min(maxWidth, Math.max(getMinWidth(), contentW + ins.getHorizontal()));
+            default          -> Math.min(maxWidth, getMinWidth());
         };
         int h = switch (ownHeightPref) {
             case STATIC      -> region.getHeight();

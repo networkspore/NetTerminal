@@ -471,7 +471,7 @@ public class TerminalInstallStepRow extends TerminalVStack {
 
     private boolean shouldMeasureCurrentChild(TerminalRenderable child) {
         return child != null
-            && !renderableIsExcluded(child);
+            && !child.isHidden();
     }
 
     private int measureCurrentChildHeight(TerminalRenderable child) {

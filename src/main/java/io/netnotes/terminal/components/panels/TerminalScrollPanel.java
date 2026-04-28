@@ -6,6 +6,7 @@ import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.components.HScrollIndicator;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.components.VScrollIndicator;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -295,7 +296,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
             return;
         }
 
-        TerminalRenderable indicatorRenderable = indicator.getRenderable();
+        TerminalRegion indicatorRenderable = checkTerminalRegion(indicator.getRenderable());
         removeIndicatorIfPresent(alternateRegion, indicatorRenderable);
 
         if (!enabled) {
@@ -321,7 +322,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
      * Set the primary content for the scroll panel, replacing any existing content.
      * Content sizing is determined by the content's TerminalSizeable implementation.
      */
-    public void setContent(TerminalRenderable content) {
+    public void setContent(TerminalRegion content) {
         if (content == null) {
             clearPanel(BorderPanel.CENTER);
         } else {
@@ -334,7 +335,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
      * Swap to different content in the CENTER region.
      * If the content is not already added, it will be added to the stack.
      */
-    public void swapContent(TerminalRenderable newContent) {
+    public void swapContent(TerminalRegion newContent) {
         if (newContent == null) {
             return;
         }
@@ -420,7 +421,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
     /**
      * Remove content from the CENTER region by reference.
      */
-    public void removeContent(TerminalRenderable content) {
+    public void removeContent(TerminalRegion content) {
         if (content == null) {
             return;
         }
@@ -690,7 +691,7 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
             return;
         }
 
-        if (content == null || renderableIsExcluded(content)) {
+        if (content == null || !canUnhide(content)) {
             scrollX = 0;
             scrollY = 0;
             centerStack.setScrollOffsetDuringLayout(0, 0);
@@ -815,26 +816,26 @@ public class TerminalScrollPanel extends TerminalBorderPanel {
         if (autoShowScrollIndicators) {
             if (vScrollIndicator != null) {
                 if (needsVScroll) {
-                    vScrollIndicator.getRenderable().show();
+                    vScrollIndicator.getRenderable().setVisible(true);
                     vScrollIndicator.updatePosition(
                         scrollY,
                         Math.max(0, contentHeight - viewportHeight),
                         Math.max(0, viewportHeight)
                     );
                 } else {
-                    vScrollIndicator.getRenderable().hide();
+                    vScrollIndicator.getRenderable().setVisible(false);
                 }
             }
             if (hScrollIndicator != null) {
                 if (needsHScroll) {
-                    hScrollIndicator.getRenderable().show();
+                    hScrollIndicator.getRenderable().setVisible(true);
                     hScrollIndicator.updatePosition(
                         scrollX,
                         Math.max(0, contentWidth - viewportWidth),
                         Math.max(0, viewportWidth)
                     );
                 } else {
-                    hScrollIndicator.getRenderable().hide();
+                    hScrollIndicator.getRenderable().setVisible(false);
                 }
             }
             return;

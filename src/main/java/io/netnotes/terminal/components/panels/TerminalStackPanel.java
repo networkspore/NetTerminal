@@ -8,6 +8,7 @@ import java.util.Map;
 import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
@@ -41,15 +42,15 @@ public class TerminalStackPanel extends TerminalGroupRegion {
 
     // ── stack state ───────────────────────────────────────────────────────────
 
-    private final List<TerminalRenderable>        stack            = new ArrayList<>();
-    private final Map<String, TerminalRenderable> nameToRenderable = new HashMap<>();
+    private final List<TerminalRegion>        stack            = new ArrayList<>();
+    private final Map<String, TerminalRegion> nameToRenderable = new HashMap<>();
 
     /**
      * The single currently visible child. All layout sizing and coordinate
      * assignment is derived from this child. Null if the stack is empty or
      * no content has been set.
      */
-    private TerminalRenderable currentContent = null;
+    private TerminalRegion currentContent = null;
 
     // ── configuration ─────────────────────────────────────────────────────────
 
@@ -174,73 +175,75 @@ public class TerminalStackPanel extends TerminalGroupRegion {
         }
 
         if (renderable == null) {
-            setVisibleContent((TerminalRenderable)null);
+            setVisibleContent((TerminalRegion) null);
             return;
         }
+        TerminalRegion child = checkTerminalRegion(renderable);
+        
 
-        if (stack.contains(renderable)) return;
+        if (stack.contains(child)) return;
 
-        String name = renderable.getName();
+        String name = child.getName();
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("Renderable must have a non-empty name");
         }
         TerminalRenderable existing = nameToRenderable.get(name);
         if (existing != null) {
-            if (existing == renderable) return;
+            if (existing == child) return;
             throw new IllegalArgumentException(
                 "Renderable with name '" + name + "' already exists in stack");
         }
 
-        stack.add(renderable);
-        nameToRenderable.put(name, renderable);
+        stack.add(child);
+        nameToRenderable.put(name, child);
 
-        renderable.setVisibilityPolicy(this::visibilityPolicy);
+        child.setVisibilityPolicy(this::visibilityPolicy);
 
         if (currentContent == null) {
             // First child: auto-promote.
-            currentContent = renderable;
-            renderable.show();
+            currentContent = child;
+            child.show();
         } else {
             // All subsequent children start hidden — no negotiation.
-            renderable.hide();
+            child.hide();
         }
 
-        super.addChild(renderable, null);
+        super.addChild(child, null);
     }
 
     @Override
     public void removeChild(TerminalRenderable renderable) {
-        removeFromStack(renderable);
+        removeFromStack(checkTerminalRegion(renderable));
     }
 
-    public void removeFromStack(TerminalRenderable renderable) {
+    public void removeFromStack(TerminalRegion child) {
         if (!getUIExecutor().isCurrentThread()) {
-            getUIExecutor().runLater(() -> removeFromStack(renderable));
+            getUIExecutor().runLater(() -> removeFromStack(child));
             return;
         }
 
-        if (renderable == null) {
-            setVisibleContent((TerminalRenderable) null);
+        if (child == null) {
+            setVisibleContent((TerminalRegion) null);
             return;
         }
 
-        if (!stack.contains(renderable)) return;
-        stack.remove(renderable);
-        nameToRenderable.remove(renderable.getName());
+        if (!stack.contains(child)) return;
+        stack.remove(child);
+        nameToRenderable.remove(child.getName());
 
-        renderable.setVisibilityPolicy(null);
+        child.setVisibilityPolicy(null);
 
-        if (renderable == currentContent) {
+        if (child == currentContent) {
             // Promote the last remaining child, if any.
             currentContent = stack.isEmpty() ? null : stack.get(stack.size() - 1);
             if (currentContent != null) currentContent.show();
         }
 
-        super.removeChild(renderable);
+        super.removeChild(child);
     }
 
     public void removeFromStack(String name) {
-        TerminalRenderable r = nameToRenderable.get(name);
+        TerminalRegion r = nameToRenderable.get(name);
         if (r != null) removeFromStack(r);
     }
 
@@ -250,7 +253,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
             return;
         }
 
-        for (TerminalRenderable r : new ArrayList<>(stack)) {
+        for (TerminalRegion r : new ArrayList<>(stack)) {
             removeFromStack(r);
         }
     }
@@ -272,8 +275,8 @@ public class TerminalStackPanel extends TerminalGroupRegion {
      * Passing null clears the current content (all children hidden).
      *
      */
-    public void setVisibleContent(TerminalRenderable renderable) {
-        if (renderable != null && !stack.contains(renderable)) {
+    public void setVisibleContent(TerminalRegion child) {
+        if (child != null && !stack.contains(child)) {
             return;
         }
 
@@ -281,28 +284,28 @@ public class TerminalStackPanel extends TerminalGroupRegion {
         RenderDiagnostics.logSwapTrace(
             "TerminalStackPanel.setVisibleContent:start", this,
             () -> "previous=" + RenderDiagnostics.summarizeRenderable(previous)
-                + "\n\ttarget=" + RenderDiagnostics.summarizeRenderable(renderable)
+                + "\n\ttarget=" + RenderDiagnostics.summarizeRenderable(child)
                 + "\n\tstackSize=" + stack.size()
         );
 
-        if (previous != null && previous != renderable) {
+        if (previous != null && previous != child) {
             RenderDiagnostics.logSwapTrace(
                 "TerminalStackPanel.setVisibleContent:hide", previous,
                 () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\ttarget=" + RenderDiagnostics.summarizeRenderable(renderable)
+                    + "\n\ttarget=" + RenderDiagnostics.summarizeRenderable(child)
             );
             previous.hide();
         }
 
-        currentContent = renderable;
+        currentContent = child;
 
-        if (renderable != null && renderable.isHidden()) {
+        if (child != null && child.isHidden()) {
             RenderDiagnostics.logSwapTrace(
-                "TerminalStackPanel.setVisibleContent:show", renderable,
+                "TerminalStackPanel.setVisibleContent:show", child,
                 () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
                     + "\n\tprevious=" + RenderDiagnostics.summarizeRenderable(previous)
             );
-            renderable.show();
+            child.show();
         }
 
         RenderDiagnostics.logSwapTrace(
@@ -314,7 +317,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
     }
 
     public void setVisibleContent(String name) {
-        TerminalRenderable r = nameToRenderable.get(name);
+        TerminalRegion r = nameToRenderable.get(name);
         if (r == null) {
             throw new IllegalArgumentException(
                 "No renderable with name '" + name + "' exists in stack");
@@ -325,7 +328,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
     // ── accessors ─────────────────────────────────────────────────────────────
 
     /** Returns the single currently visible child, or null if none. */
-    public TerminalRenderable getContent()          { return currentContent; }
+    public TerminalRegion getContent()          { return currentContent; }
     public List<TerminalRenderable> getStackContents()     { return new ArrayList<>(stack); }
     public boolean contains(TerminalRenderable renderable) { return stack.contains(renderable); }
     public boolean contains(String name)                   { return nameToRenderable.containsKey(name); }
@@ -376,7 +379,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
                 continue;
             }
 
-            if (renderableIsExcluded(child)) {
+            if (!canUnhide(child)) {
                 dataInterfaces.get(child.getName())
                     .setLayoutData(TerminalLayoutData.getBuilder().build());
                 continue;
@@ -430,11 +433,57 @@ public class TerminalStackPanel extends TerminalGroupRegion {
             TerminalLayoutContext ctx = childContexts != null
                 ? findContext(childContexts, currentContent)
                 : null;
-            if (ownWP == SizePreference.FIT_CONTENT) {
-                contentW = readMeasurementDimension(currentContent, ctx, ownWP, true);
+
+            // Get child's width preference (respecting INHERIT)
+            SizePreference childWidthPref = currentContent.getWidthPreference() == SizePreference.INHERIT
+                ? ownWP
+                : currentContent.getWidthPreference();
+            int minWidth = currentContent.getMinWidth();
+
+            // Calculate width based on child's preference
+            switch (childWidthPref) {
+                case FILL:
+                    contentW = Math.max(minWidth, readContentDimension(currentContent, ctx, true));
+                    break;
+                case FIT_CONTENT:
+                    contentW = Math.max(minWidth, readContentDimension(currentContent, ctx, true));
+                    break;
+                case PERCENT:
+                    contentW = Math.max(minWidth, (int) (readContentDimension(currentContent, ctx, true) * currentContent.getPercentWidth()));
+                    break;
+                case STATIC:
+                default:
+                    int width = ctx != null && ctx.getRequestedRegion() != null
+                        ? ctx.getRequestedRegion().getWidth()
+                        : currentContent.getRegion().getWidth();
+                    contentW = Math.max(minWidth, width);
+                    break;
             }
-            if (ownHP == SizePreference.FIT_CONTENT) {
-                contentH = readMeasurementDimension(currentContent, ctx, ownHP, false);
+
+            // Get child's height preference (respecting INHERIT)
+            SizePreference childHeightPref = currentContent.getHeightPreference() == SizePreference.INHERIT
+                ? ownHP
+                : currentContent.getHeightPreference();
+            int minHeight = currentContent.getMinHeight();
+
+            // Calculate height based on child's preference
+            switch (childHeightPref) {
+                case FILL:
+                    contentH = Math.max(minHeight, readContentDimension(currentContent, ctx, false));
+                    break;
+                case FIT_CONTENT:
+                    contentH = Math.max(minHeight, readContentDimension(currentContent, ctx, false));
+                    break;
+                case PERCENT:
+                    contentH = Math.max(minHeight, (int) (readContentDimension(currentContent, ctx, false) * currentContent.getPercentHeight()));
+                    break;
+                case STATIC:
+                default:
+                    int height = ctx != null && ctx.getRequestedRegion() != null
+                        ? ctx.getRequestedRegion().getHeight()
+                        : currentContent.getRegion().getHeight();
+                    contentH = Math.max(minHeight, height);
+                    break;
             }
         }
 

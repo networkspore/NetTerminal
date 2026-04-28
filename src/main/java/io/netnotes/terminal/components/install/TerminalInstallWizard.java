@@ -1020,21 +1020,18 @@ public class TerminalInstallWizard extends TerminalVStack {
     }
 
     private boolean isMeasuredVisible(TerminalRenderable renderable) {
-        // TODO(layout-visibility): visibility can be finalized in group callbacks
-        // during layout pass. This prepass-level measurability check should be
-        // revisited with phase-aware visibility semantics.
         return renderable != null
-            && renderable != contentSpacer;
+            && renderable != contentSpacer && !renderable.isHidden();
     }
 
     private int addMeasuredHeight(
-        TerminalRenderable renderable,
+        TerminalRegion child,
         TerminalLayoutContext[] childContexts
     ) {
-        if (!isMeasuredVisible(renderable)) {
+        if (!isMeasuredVisible(child)) {
             return 0;
         }
-        return measureRenderableHeight(renderable, findChildContext(renderable, childContexts));
+        return measureRenderableHeight(child, findChildContext(child, childContexts));
     }
 
     private int measureStepListHeight(TerminalLayoutContext[] childContexts) {
@@ -1068,22 +1065,22 @@ public class TerminalInstallWizard extends TerminalVStack {
     }
 
     private int measureRenderableWidth(
-        TerminalRenderable renderable,
+        TerminalRegion child,
         TerminalLayoutContext ctx
     ) {
-        if (renderable == null) {
+        if (child == null) {
             return 0;
         }
         if (ctx != null) {
-            return readDimension(ctx, true);
+            return readContentDimension(child, ctx, true);
         }
 
-        TerminalRectangle requested = renderable.getRequestedRegion();
+        TerminalRectangle requested = child.getRequestedRegion();
         if (requested != null) {
             return requested.getWidth();
         }
 
-        if (renderable instanceof TerminalRegion terminalRegion) {
+        if (child instanceof TerminalRegion terminalRegion) {
             TerminalRectangle measured = terminalRegion.measureContent(null);
             int measuredWidth = measured.getWidth();
             terminalRegion.getRegionPool().recycle(measured);
@@ -1092,35 +1089,35 @@ public class TerminalInstallWizard extends TerminalVStack {
             }
         }
 
-        return renderable.getRegion().getWidth();
+        return child.getRegion().getWidth();
     }
 
     private int measureRenderableHeight(
-        TerminalRenderable renderable,
+        TerminalRegion child,
         TerminalLayoutContext ctx
     ) {
-        if (renderable == null) {
+        if (child == null) {
             return 0;
         }
         if (ctx != null) {
-            return readDimension(ctx, false);
+            return readContentDimension(child, ctx, false);
         }
 
-        TerminalRectangle requested = renderable.getRequestedRegion();
+        TerminalRectangle requested = child.getRequestedRegion();
         if (requested != null) {
             return requested.getHeight();
         }
 
-        if (renderable instanceof TerminalRegion terminalRegion) {
-            TerminalRectangle measured = terminalRegion.measureContent(null);
-            int measuredHeight = measured.getHeight();
-            terminalRegion.getRegionPool().recycle(measured);
-            if (measuredHeight > 0) {
-                return measuredHeight;
-            }
+      
+        TerminalRectangle measured = child.measureContent(null);
+        int measuredHeight = measured.getHeight();
+        child.getRegionPool().recycle(measured);
+        if (measuredHeight > 0) {
+            return measuredHeight;
         }
+      
 
-        return renderable.getRegion().getHeight();
+        return child.getRegion().getHeight();
     }
 
     private TerminalLayoutContext findChildContext(

@@ -1,7 +1,6 @@
 package io.netnotes.terminal.components.panels;
 
 import java.util.Arrays;
-import java.util.List;
 import java.util.Map;
 
 import io.netnotes.debug.RenderDiagnostics;
@@ -11,6 +10,7 @@ import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
@@ -100,35 +100,48 @@ public class TerminalVStack extends TerminalAbstractStack {
         TerminalRectangle parentRegion = contexts[0].getParentRegion();
         if (parentRegion == null) return;
 
-        TerminalInsets ins  = getInsets();   // border-enforced when drawBorder=true
-        int effectiveW      = parentRegion.getWidth();
-        int effectiveH      = parentRegion.getHeight();
-        int availableWidth  = effectiveW - ins.getHorizontal();
-        int availableHeight = effectiveH - ins.getVertical();
+        TerminalInsets ins       = getInsets();
+        int effectiveW           = parentRegion.getWidth();
+        int effectiveH           = parentRegion.getHeight();
+        int availableWidth       = effectiveW - ins.getHorizontal();
+        int availableHeight      = effectiveH - ins.getVertical();
 
-        // ── collect visible indices ────────────────────────────────────────────
+        // Whether this stack hides children that don't fit in the available height.
+        // FIT_CONTENT and OVERFLOW never hide — FIT_CONTENT because the stack grows
+        // to fit its children, OVERFLOW because children intentionally exceed bounds.
+        boolean clipsChildren = getHeightPreference() != SizePreference.FIT_CONTENT
+                            && overflowStrategy != LayoutOverflowStrategy.OVERFLOW;
+
+        // ── separate participating children from layout-hidden ones ───────────────
+        // Layout-hidden children (isHidden()) need another pass to become visible.
+        // They get a zero-size placeholder and are otherwise ignored this pass.
+        // Force-hidden children are not in contexts[] at all — the manager excluded them.
         int[] layoutIndices = new int[contexts.length];
         int layoutCount = 0;
         for (int i = 0; i < contexts.length; i++) {
-            if (!renderableIsExcluded(contexts[i].getRenderable())) {
+            if (contexts[i].getRenderable().isHidden()) {
+                dataInterfaces.get(contexts[i].getRenderable().getName())
+                    .setLayoutData(TerminalLayoutData.getBuilder()
+                        .setX(0).setY(0).setWidth(0).setHeight(0)
+                        .build());
+            } else {
                 layoutIndices[layoutCount++] = i;
             }
         }
+
         if (layoutCount == 0) {
             separatorYs    = new int[0];
             dividerChildYs = new int[0];
             return;
         }
 
-        // ── gap accounting ─────────────────────────────────────────────────────
-        // drawSeparators=true: each gap is exactly 1 row (the separator row).
-        // drawSeparators=false: each gap is the spacing value.
+        // ── gap accounting ─────────────────────────────────────────────────────────
         int gapSize           = drawSeparators ? 1 : spacing;
-        int separatorRowCount = drawSeparators ? Math.max(0, layoutCount - 1) : 0;
-        int totalGapHeight    = Math.max(0, layoutCount - 1) * gapSize;
-        int availableForChildren = availableHeight - totalGapHeight;
+        int separatorRowCount = drawSeparators ? layoutCount - 1 : 0;
+        int totalGapHeight    = (layoutCount - 1) * gapSize;
+        int availableForChildren = Math.max(0, availableHeight - totalGapHeight);
 
-        if (availableWidth <= 0 || availableHeight <= 0 || availableForChildren < 0) {
+        if (availableWidth <= 0 || (clipsChildren && availableHeight <= 0)) {
             RenderDiagnostics.logRenderBlocker(
                 "vstack-no-space:" + getName(),
                 "TerminalVStack.layoutAllChildren",
@@ -138,100 +151,64 @@ public class TerminalVStack extends TerminalAbstractStack {
                     + "\n\tparentRegion=" + RenderDiagnostics.summarizeRegion(parentRegion)
                     + "\n\tavailableWidth=" + availableWidth
                     + "\n\tavailableHeight=" + availableHeight
-                    + "\n\tavailableForChildren=" + availableForChildren
-                    + "\n\tspacing=" + spacing
-                    + "\n\tgapSize=" + gapSize
+                    + "\n\tclipsChildren=" + clipsChildren
                     + "\n\tinsets=" + ins
                     + "\n\tchildren=" + RenderDiagnostics.summarizeRenderables(getChildren(), 10)
             );
         }
 
-        // ── pass 1: measure ────────────────────────────────────────────────────
+        // ── pass 1: measure each child's width and height ─────────────────────────
         int[] widths      = new int[layoutCount];
         int[] heights     = new int[layoutCount];
         SizePreference[] widthPrefs  = new SizePreference[layoutCount];
         SizePreference[] heightPrefs = new SizePreference[layoutCount];
-        Arrays.fill(widthPrefs,  SizePreference.STATIC);
-        Arrays.fill(heightPrefs, SizePreference.STATIC);
         int totalResolvedHeight = 0;
-        int fillHeightCount = 0;
+        int fillHeightCount     = 0;
 
         for (int i = 0; i < layoutCount; i++) {
-            TerminalLayoutContext childContext = contexts[layoutIndices[i]];
-            TerminalRenderable child = childContext.getRenderable();
-            TerminalSizeable s = (child instanceof TerminalSizeable) ? (TerminalSizeable) child : null;
+            TerminalLayoutContext ctx   = contexts[layoutIndices[i]];
+            TerminalRegion        child = checkTerminalRegion(ctx.getRenderable());
 
-            if (s != null) {
-                widthPrefs[i] = s.getWidthPreference() == SizePreference.INHERIT
-                    ? getWidthPreference()
-                    : s.getWidthPreference();
-                heightPrefs[i] = s.getHeightPreference() == SizePreference.INHERIT
-                    ? getHeightPreference()
-                    : s.getHeightPreference();
-            } else {
-                widthPrefs[i] = SizePreference.STATIC;
-                heightPrefs[i] = SizePreference.STATIC;
-            }
+            widthPrefs[i]  = child.getWidthPreference()  == SizePreference.INHERIT ? getWidthPreference()  : child.getWidthPreference();
+            heightPrefs[i] = child.getHeightPreference() == SizePreference.INHERIT ? getHeightPreference() : child.getHeightPreference();
 
-            switch (widthPrefs[i]) {
-                case FILL:
-                    widths[i] = availableWidth;
-                    break;
-                case FIT_CONTENT:
-                    widths[i] = readDimension(childContext, true);
-                    break;
-                case PERCENT:
-                    widths[i] = Math.max(s.getMinWidth(),
-                        (int) (availableWidth * s.getPercentWidth()));
-                    break;
-                case STATIC:
-                    widths[i] = childContext.getRequestedRegion() != null
-                        ? childContext.getRequestedRegion().getWidth()
-                        : childContext.getCurrentRegion().getWidth();
-                    break;
-                default:
-                    widths[i] = childContext.getCurrentRegion().getWidth();
-                    break;
-            }
+            widths[i] = switch (widthPrefs[i]) {
+                case FILL        -> availableWidth;
+                case FIT_CONTENT -> readContentDimension(child, ctx, true);
+                case PERCENT     -> Math.max(child.getMinWidth(), (int)(availableWidth * child.getPercentWidth()));
+                default          -> Math.max(child.getMinWidth(), ctx.getRequestedRegion() != null
+                                        ? ctx.getRequestedRegion().getWidth()
+                                        : ctx.getCurrentRegion().getWidth());
+            };
 
-            switch (heightPrefs[i]) {
-                case FILL:
-                    heights[i] = -1;   // resolved after all fixed sizes are known
-                    fillHeightCount++;
-                    break;
-                case FIT_CONTENT:
-                    heights[i] = readDimension(childContext, false);
-                    break;
-                case PERCENT:
-                    heights[i] = Math.max(s.getMinHeight(),
-                        (int) (availableForChildren * s.getPercentHeight()));
-                    break;
-                case STATIC:
-                    heights[i] = childContext.getRequestedRegion() != null
-                        ? childContext.getRequestedRegion().getHeight()
-                        : childContext.getCurrentRegion().getHeight();
-                    break;
-                default:
-                    heights[i] = childContext.getCurrentRegion().getHeight();
-                    break;
-            }
+            heights[i] = switch (heightPrefs[i]) {
+                case FILL        -> { fillHeightCount++; yield -1; } // resolved after fixed pass
+                case FIT_CONTENT -> readContentDimension(child, ctx, false);
+                case PERCENT     -> Math.max(child.getMinHeight(), (int)(availableForChildren * child.getPercentHeight()));
+                default          -> Math.max(child.getMinHeight(), ctx.getRequestedRegion() != null
+                                        ? ctx.getRequestedRegion().getHeight()
+                                        : ctx.getCurrentRegion().getHeight());
+            };
 
-            if (heights[i] >= 0) {
-                totalResolvedHeight += heights[i];
-            }
+            if (heights[i] >= 0) totalResolvedHeight += heights[i];
         }
 
-        // ── resolve FILL heights ───────────────────────────────────────────────
+        // ── resolve FILL heights ───────────────────────────────────────────────────
+        // For clipping stacks, FILL children split the remaining space after fixed
+        // children are placed. For non-clipping stacks (FIT_CONTENT, OVERFLOW),
+        // there is no fixed budget so FILL children fall back to their minHeight.
         int remaining  = availableForChildren - totalResolvedHeight;
-        int fillHeight = fillHeightCount > 0 ? Math.max(0, remaining / fillHeightCount) : 0;
+        int fillHeight = (clipsChildren && fillHeightCount > 0)
+                    ? Math.max(0, remaining / fillHeightCount)
+                    : 0;
 
+        // ── resolve per-strategy final heights and totalHeight ────────────────────
         int totalHeight = totalGapHeight;
 
         switch (overflowStrategy) {
 
             case SHRINK_FILL -> {
-                // Give FILL children exactly the available share; do not inflate
-                // to minHeight, so a space-starved stack shrinks gracefully.
+                // FILL children get exactly the available share, no minHeight inflation.
                 for (int i = 0; i < layoutCount; i++) {
                     if (heights[i] == -1) heights[i] = Math.max(0, fillHeight);
                     totalHeight += heights[i];
@@ -239,19 +216,23 @@ public class TerminalVStack extends TerminalAbstractStack {
             }
 
             case SHRINK_ALL -> {
-                // Use each child's hint height, then scale everyone down
-                // proportionally if the total exceeds the available space.
+                // Resolve FILL children at their content/min size first, then scale
+                // everyone proportionally if the total exceeds the available space.
                 for (int i = 0; i < layoutCount; i++) {
-                    if (heights[i] == -1) heights[i] = getLayoutHeightHint(contexts[layoutIndices[i]]);
+                    if (heights[i] == -1) {
+                        TerminalRegion r = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
+                        heights[i] = Math.max(r.getMinHeight(),
+                            readContentDimension(r, contexts[layoutIndices[i]], false));
+                    }
                     totalHeight += heights[i];
                 }
-                int totalRequested = totalHeight - totalGapHeight;
-                if (totalRequested > availableForChildren && totalRequested > 0) {
-                    float scale = (float) availableForChildren / totalRequested;
+                int totalContent = totalHeight - totalGapHeight;
+                if (totalContent > availableForChildren && totalContent > 0) {
+                    float scale = (float) availableForChildren / totalContent;
                     totalHeight = totalGapHeight;
                     for (int i = 0; i < layoutCount; i++) {
-                        TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
-                        int min = (child instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
+                        TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
+                        int min = (r instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
                         heights[i] = Math.max(min, (int)(heights[i] * scale));
                         totalHeight += heights[i];
                     }
@@ -259,123 +240,95 @@ public class TerminalVStack extends TerminalAbstractStack {
             }
 
             case DISTRIBUTE_EQUAL -> {
-                int equalShare = layoutCount > 0
-                    ? Math.max(0, availableForChildren / layoutCount) : 0;
+                // Every child gets an equal share of the available height.
+                int share = Math.max(0, availableForChildren / layoutCount);
                 for (int i = 0; i < layoutCount; i++) {
-                    TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
-                    int min = (child instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
-                    heights[i] = Math.max(min, equalShare);
+                    TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
+                    int min = (r instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
+                    heights[i] = Math.max(min, share);
                     totalHeight += heights[i];
                 }
             }
 
-            // SCROLL falls through to CLIP until scroll support is implemented.
             default -> {
+                // CLIP, OVERFLOW, SCROLL (not yet implemented), FIT_CONTENT:
+                // FILL children get fillHeight (0 for non-clipping stacks → minHeight).
                 for (int i = 0; i < layoutCount; i++) {
                     if (heights[i] == -1) {
-                        TerminalRenderable child = contexts[layoutIndices[i]].getRenderable();
-                        heights[i] = (child instanceof TerminalSizeable s)
-                            ? Math.max(s.getMinHeight(), fillHeight)
-                            : Math.max(0, fillHeight);
+                        TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
+                        int min = (r instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
+                        heights[i] = Math.max(min, fillHeight);
                     }
                     totalHeight += heights[i];
                 }
             }
         }
 
-        // ── starting Y (vertical alignment) ───────────────────────────────────
+        // ── starting Y (vertical alignment) ───────────────────────────────────────
         int startY = switch (vAlignment) {
             case TOP    -> ins.getTop();
             case CENTER -> ins.getTop() + Math.max(0, (availableHeight - totalHeight) / 2);
             case BOTTOM -> ins.getTop() + Math.max(0, availableHeight - totalHeight);
         };
 
-        // ── pass 2: place + record junction positions ──────────────────────────
+        // ── pass 2: place children ─────────────────────────────────────────────────
         separatorYs    = new int[separatorRowCount];
         dividerChildYs = new int[0];
         int sepIdx   = 0;
         int currentY = startY;
 
         for (int i = 0; i < layoutCount; i++) {
-            final int childIndex = i;
-            TerminalRenderable r = contexts[layoutIndices[childIndex]].getRenderable();
+            TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
 
-            int x;
-            if (widthPrefs[childIndex] == SizePreference.FILL) {
-                x = ins.getLeft();
-            } else {
-                int remaining2 = Math.max(0, availableWidth - widths[childIndex]);
-                x = switch (hAlignment) {
-                    case LEFT   -> ins.getLeft();
-                    case RIGHT  -> ins.getLeft() + remaining2;
-                    default     -> ins.getLeft() + remaining2 / 2;
+            int x = widthPrefs[i] == SizePreference.FILL
+                ? ins.getLeft()
+                : ins.getLeft() + switch (hAlignment) {
+                    case LEFT  -> 0;
+                    case RIGHT -> Math.max(0, availableWidth - widths[i]);
+                    default    -> Math.max(0, availableWidth - widths[i]) / 2;
                 };
-            }
 
-            int remainingWidth  = Math.max(0, effectiveW - ins.getRight() - x);
-            int remainingHeight = Math.max(0, effectiveH - ins.getBottom() - currentY);
-            int allocatedWidth  = Math.min(widths[childIndex],  remainingWidth);
-            int allocatedHeight = overflowStrategy == LayoutOverflowStrategy.OVERFLOW
-                ? Math.max(0, heights[childIndex])
-                : Math.min(heights[childIndex], remainingHeight);
-            boolean hasSpace  = allocatedWidth > 0 && allocatedHeight > 0;
-            boolean inBounds  = overflowStrategy == LayoutOverflowStrategy.OVERFLOW
-                ? hasSpace && x >= 0 && x + allocatedWidth <= parentRegion.getWidth()
-                : hasSpace && isWithinParentBounds(
-                    x, currentY, allocatedWidth, allocatedHeight, parentRegion);
-            boolean manageHidden = shouldManageHidden(r);
+            // For clipping stacks, clamp to remaining space so a child never
+            // overlaps the inset boundary. For non-clipping stacks, use the
+            // natural size directly — the child is allowed to exceed the parent.
+            int allocatedWidth  = clipsChildren
+                ? Math.min(widths[i],  Math.max(0, effectiveW - ins.getRight() - x))
+                : Math.max(0, widths[i]);
+            int allocatedHeight = clipsChildren
+                ? Math.min(heights[i], Math.max(0, effectiveH - ins.getBottom() - currentY))
+                : Math.max(0, heights[i]);
 
             TerminalLayoutData.TerminalLayoutDataBuilder b = TerminalLayoutData.getBuilder()
                 .setX(x)
                 .setY(currentY)
-                .setWidth(Math.max(0, allocatedWidth))
-                .setHeight(Math.max(0, allocatedHeight));
+                .setWidth(allocatedWidth)
+                .setHeight(allocatedHeight);
 
-            if (!inBounds) {
-                final int childX      = x;
-                final int childY      = currentY;
-                final int childWidth  = allocatedWidth;
-                final int childHeight = allocatedHeight;
-                if (overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
-                    if (manageHidden) b.hidden(false);
-                } else {
-                    RenderDiagnostics.logRenderBlocker(
-                        "vstack-child-oob:" + getName() + ":" + r.getName(),
-                        "TerminalVStack.layoutAllChildren",
-                        hasSpace ? "child-hidden-out-of-parent-bounds" : "child-hidden-no-space-remaining",
-                        () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
-                            + "\n\tstackSizing=" + RenderDiagnostics.summarizeSizing(this)
-                            + "\n\tchild=" + RenderDiagnostics.summarizeRenderable(r)
-                            + "\n\tchildSizing=" + RenderDiagnostics.summarizeSizing(r)
-                            + "\n\twidthPref=" + widthPrefs[childIndex]
-                            + "\n\theightPref=" + heightPrefs[childIndex]
-                            + "\n\tmeasuredSize=" + widths[childIndex] + "x" + heights[childIndex]
-                            + "\n\tallocatedSize=" + childWidth + "x" + childHeight
-                            + "\n\tcomputedBounds="
-                            + RenderDiagnostics.summarizeRegion(
-                                new TerminalRectangle(childX, childY, childWidth, childHeight))
-                            + "\n\tparentRegion=" + RenderDiagnostics.summarizeRegion(parentRegion)
-                    );
-                    b.hidden(true);
-                }
-            } else if (manageHidden) {
-                b.hidden(false);
+            // Clipping stacks hide children that no longer fit in the remaining space.
+            // Non-clipping stacks (FIT_CONTENT, OVERFLOW) never hide a placed child.
+            if (clipsChildren && !isWithinParentBounds(x, currentY, allocatedWidth, allocatedHeight, parentRegion)) {
+                RenderDiagnostics.logRenderBlocker(
+                    "vstack-child-oob:" + getName() + ":" + r.getName(),
+                    "TerminalVStack.layoutAllChildren",
+                    allocatedWidth > 0 && allocatedHeight > 0
+                        ? "child-hidden-out-of-parent-bounds"
+                        : "child-hidden-no-space-remaining",
+                    () -> "stack=" + RenderDiagnostics.summarizeRenderable(this)
+                        + "\n\tchild=" + RenderDiagnostics.summarizeRenderable(r)
+                        + "\n\tallocated=" + allocatedWidth + "x" + allocatedHeight
+                        + "\n\tparentRegion=" + RenderDiagnostics.summarizeRegion(parentRegion)
+                );
+                b.hidden(true);
             }
 
             dataInterfaces.get(r.getName()).setLayoutData(b.build());
 
             int childStartY = currentY;
-            currentY += Math.max(0, allocatedHeight);
+            currentY += allocatedHeight;
 
-            // Gap separator: record the row immediately below this child where the
-            // 1-row separator will be drawn (drawSeparators=true only).
-            if (drawSeparators && i < layoutCount - 1
-                    && currentY < effectiveH - ins.getBottom()) {
+            if (drawSeparators && i < layoutCount - 1) {
                 separatorYs[sepIdx++] = currentY;
             }
-
-            // Divider child junction: a TerminalDivider placed as a child always
-            // produces left/right junction characters at its own row.
             if (drawBorder && r instanceof TerminalDivider) {
                 dividerChildYs = appendInt(dividerChildYs, childStartY);
             }
@@ -388,15 +341,7 @@ public class TerminalVStack extends TerminalAbstractStack {
         }
     }
 
-    /**
-     * Height hint for SHRINK_ALL: measured content height → minHeight → requestedRegion height.
-     * Returns 0 when no sizing information is available.
-     */
-    private int getLayoutHeightHint(TerminalLayoutContext ctx) {
-        return Math.max(0, readDimension(ctx, false));
-    }
-
-
+  
 
     // =========================================================================
     // RENDERING
@@ -448,36 +393,63 @@ public class TerminalVStack extends TerminalAbstractStack {
         }
     }
 
+    /***
+     *  Hidden children are not provided for measurement, must measure when they become visible.
+     */
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        System.out.println("[VSTACK:" + getName() + "] measureContent called, childContexts=" + childContexts.length);
+        System.out.println("[VSTACK:" + getName() + "]   own region=" + getRegion() + " widthPref=" + getWidthPreference() + " heightPref=" + getHeightPreference());
+
         SizePreference ownWidthPref  = getWidthPreference();
         SizePreference ownHeightPref = getHeightPreference();
 
-        List<TerminalRenderable> children = getChildren();
-
-        // Calculate content dimensions
-        int maxWidth = 0;
+        int maxWidth    = 0;
         int totalHeight = 0;
+        int visibleCount = 0;
 
-        if (ownWidthPref == SizePreference.FIT_CONTENT) {
-            maxWidth = calculateMaxWidth(children, childContexts, ownWidthPref);
+        for (TerminalLayoutContext childContext : childContexts) {
+            TerminalRenderable renderable = childContext.getRenderable();
+
+            // Children that are hidden (layout-controlled) need another pass
+            // to become visible — skip their contribution this pass.
+            if (renderable.isHidden()) continue;
+
+            visibleCount++;
+            TerminalRegion child = checkTerminalRegion(renderable);
+
+            SizePreference childWidthPref = child.getWidthPreference() == SizePreference.INHERIT
+                ? ownWidthPref : child.getWidthPreference();
+            SizePreference childHeightPref = child.getHeightPreference() == SizePreference.INHERIT
+                ? ownHeightPref : child.getHeightPreference();
+
+            int minWidth  = child.getMinWidth();
+            int minHeight = child.getMinHeight();
+
+            // width contribution
+            maxWidth = Math.max(maxWidth, switch (childWidthPref) {
+                case FIT_CONTENT -> Math.max(minWidth, readContentDimension(child, childContext, true));
+                case PERCENT, FILL -> minWidth;
+                default -> Math.max(minWidth, childContext.getRequestedRegion() != null
+                    ? childContext.getRequestedRegion().getWidth()
+                    : childContext.getCurrentRegion().getWidth());
+            });
+
+
+            // height contribution
+            totalHeight += switch (childHeightPref) {
+                case FIT_CONTENT -> Math.max(minHeight, readContentDimension(child, childContext, false));
+                case FILL, PERCENT -> minHeight;
+                default -> Math.max(minHeight, childContext.getRequestedRegion() != null
+                    ? childContext.getRequestedRegion().getHeight()
+                    : childContext.getCurrentRegion().getHeight());
+            };
         }
 
-        if (ownHeightPref == SizePreference.FIT_CONTENT) {
-            totalHeight = calculateTotalHeight(children, childContexts, ownHeightPref);
-
-            // Add spacing for multiple children
-            int visibleCount = 0;
-            for (TerminalRenderable child : children) {
-                if (!renderableIsExcluded(child)) visibleCount++;
-            }
-
-            if (visibleCount > 1) {
-                totalHeight += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
-            }
+        if (visibleCount > 1) {
+            totalHeight += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
         }
 
-        // Calculate final dimensions
         int w = switch (ownWidthPref) {
             case STATIC      -> region.getWidth();
             case FIT_CONTENT -> Math.max(getMinWidth(), maxWidth + getInsets().getHorizontal());
@@ -491,7 +463,8 @@ public class TerminalVStack extends TerminalAbstractStack {
 
         TerminalRectangle measured = getRegionPool().obtain();
         measured.set(0, 0, w, h);
+        System.out.println("[VSTACK:" + getName() + "] measureContent returning w=" + w + " h=" + h);
         return measured;
     }
 
-    }
+ }

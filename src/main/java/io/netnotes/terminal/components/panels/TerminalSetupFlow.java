@@ -607,7 +607,7 @@ public class TerminalSetupFlow extends TerminalGroupRegion {
     }
 
     private int measureRenderableDimension(TerminalRenderable renderable, boolean width) {
-        if (renderableIsExcluded(renderable)) {
+        if (renderable.isHidden()) {
             return 0;
         }
 

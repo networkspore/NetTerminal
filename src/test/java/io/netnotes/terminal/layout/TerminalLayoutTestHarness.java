@@ -4,9 +4,11 @@ import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.layout.TerminalLayoutData.TerminalLayoutDataBuilder;
 
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
+import io.netnotes.engine.state.ConcurrentBitFlagStateMachine;
 import io.netnotes.engine.virtualExecutors.SerializedVirtualExecutor;
 import io.netnotes.engine.virtualExecutors.VirtualExecutors;
 import io.netnotes.noteBytes.NoteBytesObject;
@@ -17,31 +19,120 @@ import io.netnotes.terminal.TerminalRectanglePool;
 
 /**
  * TerminalLayoutTestHarness
+ *
+ * LAYOUT PHASE STATE MACHINE:
+ *
+ *   STATE_LAYOUT_ACTIVE  — a layout pass is currently executing
+ *   STATE_LAYOUT_PENDING — pass finished but another is queued (debounce window)
+ *   STATE_LAYOUT_IDLE    — no pass running, no pass pending; geometry is stable
+ *
+ * The state machine executor is the uiExecutor, so all onStateAdded /
+ * onStateRemoved callbacks fire on the UI thread. STATE_LAYOUT_IDLE is only
+ * entered once all queued passes have drained — intermediate passes stay in
+ * ACTIVE or PENDING, so tests never observe a false idle between passes.
+ *
+ * USAGE IN TESTS
+ * ──────────────
+ * Register a persistent step-dispatch handler on STATE_LAYOUT_IDLE *before*
+ * triggering any layout changes. Use an int[] step counter to fan out work
+ * across numbered cases. The final case opens a TestGate so the JUnit thread
+ * can exit. There is no need for CompletableFuture or blocking wait calls
+ * between steps — the state machine drives execution entirely.
+ *
+ *   int[] step = {0};
+ *   harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+ *       switch (step[0]++) {
+ *           case 0 -> { /* assert, trigger next action *\/ }
+ *           case 1 -> { /* assert, gate.open() *\/ }
+ *       }
+ *   });
+ *   rootPanel.addChild(myComponent);
+ *   harness.triggerRender();
+ *   gate.awaitDone();
  */
 public class TerminalLayoutTestHarness {
+
+    // ── Harness layout phase states ──────────────────────────────────────────
+
+    /** A layout pass is currently executing. */
+    public static final int STATE_LAYOUT_ACTIVE  = 1;
+
+    /** No pass running, but another is queued in the debounce window. */
+    public static final int STATE_LAYOUT_PENDING = 2;
+
+    /** No pass running and none pending — geometry is stable and safe to read. */
+    public static final int STATE_LAYOUT_IDLE    = 3;
+
+    // ── Infrastructure ───────────────────────────────────────────────────────
+
     public final String name = "TerminalLayoutTestHarness";
 
     private TerminalLayoutManager layoutManager;
     private TerminalFloatingLayoutManager floatingLayoutManager;
 
     private TerminalRectanglePool regionPool;
-    private TerminalRenderable focused = null;
+    private TerminalRenderable focused        = null;
     private TerminalRenderable rootRenderable = null;
     protected TerminalDamageAccumulator damageAccumulator = null;
     private SerializedVirtualExecutor uiExecutor = VirtualExecutors.getUiExecutor();
     private TerminalRectangle allocatedRegion;
     private NoteBytesObject lastBatchCommand;
 
+    private final ConcurrentBitFlagStateMachine harnessState;
+
+    // ── Constructor ──────────────────────────────────────────────────────────
+
     public TerminalLayoutTestHarness(int width, int height) {
-        this.regionPool = TerminalRectanglePool.getInstance();
+        this.regionPool        = TerminalRectanglePool.getInstance();
         this.damageAccumulator = new TerminalDamageAccumulator(regionPool);
-        this.allocatedRegion = new TerminalRectangle(0, 0, width, height);
+        this.allocatedRegion   = new TerminalRectangle(0, 0, width, height);
         this.floatingLayoutManager = new TerminalFloatingLayoutManager(name, regionPool);
-        this.layoutManager = new TerminalLayoutManager(name, floatingLayoutManager);
+        this.layoutManager     = new TerminalLayoutManager(name, floatingLayoutManager);
         this.layoutManager.setFocusRequester(this::requestFocusInternal);
         this.layoutManager.setRenderRequester(this::renderableRequestRender);
 
+        this.harnessState = new ConcurrentBitFlagStateMachine("harness");
+        this.harnessState.setSerialExecutor(VirtualExecutors.getUiExecutor());
+
+        // Route layout manager callbacks through the phase switch.
+        layoutManager.setLayoutStateListener(active -> {
+            switch (resolvePhase(active)) {
+                case ACTIVE  -> onLayoutActive();
+                case PENDING -> onLayoutPending();
+                case IDLE    -> onLayoutIdle();
+            }
+        });
     }
+
+    // ── Layout phase resolution ──────────────────────────────────────────────
+
+    private enum LayoutPhase { ACTIVE, PENDING, IDLE }
+
+    private LayoutPhase resolvePhase(boolean active) {
+        if (active)                           return LayoutPhase.ACTIVE;
+        if (layoutManager.hasPendingLayout()) return LayoutPhase.PENDING;
+        return LayoutPhase.IDLE;
+    }
+
+    private void onLayoutActive() {
+        harnessState.removeState(STATE_LAYOUT_IDLE);
+        harnessState.removeState(STATE_LAYOUT_PENDING);
+        harnessState.addState(STATE_LAYOUT_ACTIVE);
+    }
+
+    private void onLayoutPending() {
+        harnessState.removeState(STATE_LAYOUT_IDLE);
+        harnessState.removeState(STATE_LAYOUT_ACTIVE);
+        harnessState.addState(STATE_LAYOUT_PENDING);
+    }
+
+    private void onLayoutIdle() {
+        harnessState.removeState(STATE_LAYOUT_ACTIVE);
+        harnessState.removeState(STATE_LAYOUT_PENDING);
+        harnessState.addState(STATE_LAYOUT_IDLE);
+    }
+
+    // ── Rendering ────────────────────────────────────────────────────────────
 
     private void renderableRequestRender(TerminalRenderable renderable) {
         uiExecutor.runRentrant(() -> renderableRequestRenderInternal(renderable));
@@ -49,144 +140,115 @@ public class TerminalLayoutTestHarness {
 
     private void renderableRequestRenderInternal(TerminalRenderable renderable) {
         if (renderable != null && rootRenderable != renderable) {
-            
             return;
         }
-
-        /*if (!renderReadySnapshot) {
-            
-            return;
-        }*/
-
-
         if (!rootRenderable.needsRender() && damageAccumulator.isEmpty()) {
-            /*logRenderDropped(
-                String.format(
-                    "request arrived with no pending damage or dirty renderables (committingNodes=%s)",
-                    renderableLayoutManager.summarizeCommittingNodes()
-                ),
-                RenderableLayoutManager.DiagnosticMode.TRACE,
-                ROUTINE_DIAGNOSTIC_LOG_LEVEL
-            );*/
             return;
         }
-        
         render();
     }
-
-  
 
     private void render() {
         if (!uiExecutor.isCurrentThread()) {
             uiExecutor.runLater(this::render);
             return;
         }
-    
         if (rootRenderable == null) {
-            
             return;
         }
-        
 
         List<TerminalRectangle> damageRegions = null;
-        try (TerminalBatchBuilder batch = new TerminalBatchBuilder(regionPool);) {
+        try (TerminalBatchBuilder batch = new TerminalBatchBuilder(regionPool)) {
             rootRenderable.toBatch(batch);
             if (allocatedRegion != null) {
                 floatingLayoutManager.toBatch(batch, allocatedRegion);
             }
 
-            // Drain after toBatch — ownership of regions transfers to us.
-            // We are responsible for recycling them after use.
             damageRegions = damageAccumulator.drainRegions();
 
             if (batch.isBatchEmpty() && damageRegions.isEmpty()) {
-              
-                /*String.format(
-                    "batch builder and damage accumulator were both empty (committingNodes=%s)",
-                    layoutManager.summarizeCommittingNodes()
-                )*/
-                
                 layoutManager.clearIdleCommittingNodes();
                 rootRenderable.clearRenderFlag();
-                return; // damageRegions is empty so nothing to recycle
+                return;
             }
 
             NoteBytesObject batchCommand = buildBatchCommand(batch, damageRegions);
-    
             sendRenderCommand(batchCommand);
             layoutManager.notifyRenderDispatched();
             rootRenderable.clearRenderFlag();
 
         } catch (Exception e) {
-           
-     
             throw new RuntimeException(e);
         } finally {
             damageRegions = null;
         }
     }
 
-
     protected TerminalRectangle getContentBoundsForBatch(TerminalBatchBuilder batch) {
         return rootRenderable != null ? rootRenderable.getRegion() : null;
     }
-    
 
-     protected NoteBytesObject buildBatchCommand(TerminalBatchBuilder batch, List<TerminalRectangle> damage) {
+    protected NoteBytesObject buildBatchCommand(
+            TerminalBatchBuilder batch, List<TerminalRectangle> damage) {
         TerminalRectangle contentBounds = getContentBoundsForBatch(batch);
         NoteBytesObject result = batch.build(contentBounds, damage);
-
-        // Both contentBounds and damage regions have been serialized into result.
-        // Recycle them now — no caller above us holds a reference to either.
-        if (contentBounds != null) {
-            regionPool.recycle(contentBounds);
-        }
-        for (TerminalRectangle region : damage) {
-            regionPool.recycle(region);
-        }
-
+        if (contentBounds != null) regionPool.recycle(contentBounds);
+        for (TerminalRectangle region : damage) regionPool.recycle(region);
         return result;
     }
 
+    // ── Focus ────────────────────────────────────────────────────────────────
+
     private void requestFocusInternal(TerminalRenderable renderable) {
-        if (renderable == null) {
-            return;
-        }
-        if (!renderable.isFocusable()) {
-            return;
-        }
+        if (renderable == null || !renderable.isFocusable()) return;
         setFocusedInternal(renderable);
     }
 
     private void setFocusedInternal(TerminalRenderable next) {
-        if (next == focused) {
-            return;
-        }
-
-        if (focused != null) {
-            focused.clearFocus();
-        }
-
+        if (next == focused) return;
+        if (focused != null) focused.clearFocus();
         focused = next;
-        if (focused != null) {
-            focused.focus();
-        }
+        if (focused != null) focused.focus();
     }
 
-
-    public NoteBytesObject getLastBatchCommand() {
-        return lastBatchCommand;
-    }
+    // ── Attachment ───────────────────────────────────────────────────────────
 
     /**
-     * Wire a root renderable into the layout system and give it a region,
-     * *no callback for now as the callback is set internally align with the allocated region
-     *
-     * @param root         the root renderable (e.g. a TerminalRegion)
+     * Attach a root renderable and block until the first STATE_LAYOUT_IDLE is
+     * reached. This is the one permitted synchronization point for
+     * infrastructure setup — it is not a test-assertion wait. After this
+     * returns, isIdle() is guaranteed to be true and tests may safely read
+     * geometry or register their step-dispatch handlers.
      */
     public void attach(TerminalRenderable root) {
-        if(!uiExecutor.isCurrentThread()){
-            uiExecutor.runLater(() -> attach(root));
+        CountDownLatch firstIdle = new CountDownLatch(1);
+        AtomicBoolean  fired     = new AtomicBoolean(false);
+
+        // Register before attaching so we never miss the transition.
+        harnessState.onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+            if (fired.compareAndSet(false, true)) firstIdle.countDown();
+        });
+
+        uiExecutor.runRentrant(() -> attachInternal(root));
+
+        // Race guard: if the tree was already idle before attachInternal ran.
+        if (harnessState.hasState(STATE_LAYOUT_IDLE) && fired.compareAndSet(false, true)) {
+            firstIdle.countDown();
+        }
+
+        try {
+            if (!firstIdle.await(2, TimeUnit.SECONDS)) {
+                throw new AssertionError("attach: timed out waiting for first layout idle");
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            throw new AssertionError("attach: interrupted", e);
+        }
+    }
+
+    private void attachInternal(TerminalRenderable root) {
+        if (!uiExecutor.isCurrentThread()) {
+            uiExecutor.runLater(() -> attachInternal(root));
             return;
         }
         TerminalRenderable old = rootRenderable;
@@ -194,13 +256,12 @@ public class TerminalLayoutTestHarness {
 
         if (old != null) {
             old.unregisterRenderable();
-            // Remove: old.setRenderRequest(null);
             old.setDamageAccumulator(null);
             damageAccumulator.clear();
         }
 
-        this.rootRenderable = root;
-        this.focused = null;
+        this.rootRenderable  = root;
+        this.focused         = null;
         this.lastBatchCommand = null;
 
         if (root == null) return;
@@ -208,8 +269,15 @@ public class TerminalLayoutTestHarness {
         this.layoutManager.registerRenderable(rootRenderable, (ctx) -> {
             TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder();
             TerminalRectangle regionUpdate = ctx.getRequestedRegion();
+            System.out.println("[HARNESS] root layout callback fired");
+            System.out.println("[HARNESS]   requestedRegion = " + regionUpdate);
+            System.out.println("[HARNESS]   currentRegion   = " + ctx.getCurrentRegion());
+            System.out.println("[HARNESS]   allocatedRegion = " + allocatedRegion);
+            if (regionUpdate == null) regionUpdate = ctx.getCurrentRegion();
             builder.setHeight(regionUpdate.getHeight());
             builder.setWidth(regionUpdate.getWidth());
+            System.out.println("[HARNESS]   -> built h=" + regionUpdate.getHeight()
+                + " w=" + regionUpdate.getWidth());
             return builder.build();
         });
 
@@ -221,77 +289,63 @@ public class TerminalLayoutTestHarness {
         damageAccumulator.add(absoluteRegion);
     }
 
-    /**
-     * parse batch command
-     * @param batchCommand
-     */
-    private void sendRenderCommand(NoteBytesObject batchCommand){
+    private void sendRenderCommand(NoteBytesObject batchCommand) {
         this.lastBatchCommand = batchCommand;
     }
 
-    public void setAllocatedRegion(int x, int y, int width, int height){
-        allocatedRegion.set(x, y, width, height);
-        rootRenderable.setBounds(allocatedRegion);
-    }
+    // ── Region management ────────────────────────────────────────────────────
 
     /**
-     * Update the allocated region on the harness, which will be propagated to rootRenderable
-     * and trigger a layout cascade through the preferredSizing methods.
+     * Update the allocated region and notify the root renderable. Fires on the
+     * UI executor and returns immediately — the state machine will enter
+     * STATE_LAYOUT_IDLE once the resulting layout pass (or passes) settle, at
+     * which point the test's step-dispatch handler will advance to its next
+     * case.
      */
-    public void setAllocatedRegion(TerminalRectangle allocatedRegion) {
-        this.allocatedRegion = allocatedRegion;
-        setAllocatedRegion(allocatedRegion.getX(), allocatedRegion.getY(),
-                           allocatedRegion.getWidth(), allocatedRegion.getHeight());
-    }
-
-    public TerminalRenderable getRoot() { return rootRenderable; }
-    public int getWidth()  { return allocatedRegion.getWidth(); }
-    public int getHeight() { return allocatedRegion.getHeight(); }
-
-
-
-    /**
-     * Wait for the next layout pass to complete.
-     * This blocks until the debounced layout cascade finishes and the callback fires.
-     *
-     * @return true if layout completed, false if timeout
-     */
-
-        public boolean waitForLayoutComplete() {
-        CompletableFuture<Boolean> done = new CompletableFuture<>();
-
-        layoutManager.setLayoutStateListener(active -> {
-            if (!active) done.complete(Boolean.TRUE);
+    public void setAllocatedRegion(int x, int y, int width, int height) {
+        uiExecutor.runRentrant(() -> {
+            allocatedRegion.set(x, y, width, height);
+            if (rootRenderable != null) rootRenderable.setBounds(allocatedRegion);
         });
-
-        try {
-            return done.get(1, TimeUnit.SECONDS);
-        } catch (java.util.concurrent.TimeoutException e) {
-            return false;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AssertionError("Interrupted while waiting for layout", e);
-        } catch (Exception e) {
-            throw new AssertionError("Failed while waiting for layout", e);
-        } finally {
-            layoutManager.setLayoutStateListener(null);
-        }
     }
 
+    public void setAllocatedRegion(TerminalRectangle region) {
+        setAllocatedRegion(region.getX(), region.getY(), region.getWidth(), region.getHeight());
+    }
+
+    // ── Trigger ──────────────────────────────────────────────────────────────
 
     /**
-     * Ensure all layout work completes by flushing the UI executor.
-     * This is needed after mutations like resizing to ensure the cascade
-     * through preferredSizing methods has fully committed.
+     * Request a layout/render pass. Use to kick off the layout chain in tests
+     * after adding components to the hierarchy.
      */
-    public void flushLayout() {
-        try {
-            uiExecutor.submit(() -> null).get(1, TimeUnit.SECONDS);
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AssertionError("Interrupted while draining UI executor", e);
-        } catch (Exception e) {
-            throw new AssertionError("Failed while draining UI executor", e);
-        }
+    public void triggerRender() {
+        uiExecutor.runRentrant(() -> {
+            if (rootRenderable != null) {
+                rootRenderable.requestLayoutUpdate();
+            }
+        });
     }
+
+    // ── State inspection ─────────────────────────────────────────────────────
+
+    /**
+     * @return true if no layout pass is running and none is pending.
+     *         Safe to assert renderable geometry when this is true.
+     */
+    public boolean isIdle()    { return harnessState.hasState(STATE_LAYOUT_IDLE); }
+
+    /** @return true if a layout pass is currently executing. */
+    public boolean isActive()  { return harnessState.hasState(STATE_LAYOUT_ACTIVE); }
+
+    /** @return true if a pass finished but another is queued (debounce window). */
+    public boolean isPending() { return harnessState.hasState(STATE_LAYOUT_PENDING); }
+
+    // ── Accessors ────────────────────────────────────────────────────────────
+
+    public NoteBytesObject getLastBatchCommand()         { return lastBatchCommand; }
+    public TerminalRenderable getRoot()                  { return rootRenderable; }
+    public int getWidth()                                { return allocatedRegion.getWidth(); }
+    public int getHeight()                               { return allocatedRegion.getHeight(); }
+    public ConcurrentBitFlagStateMachine getStateMachine(){ return harnessState; }
 }

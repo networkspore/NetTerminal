@@ -7,6 +7,7 @@ import java.util.Map;
 
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
@@ -58,14 +59,14 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
     // ── stack state ───────────────────────────────────────────────────────────
 
     private final List<TerminalRenderable>        stack            = new ArrayList<>();
-    private final Map<String, TerminalRenderable> nameToRenderable = new HashMap<>();
+    private final Map<String, TerminalRegion> nameToRenderable = new HashMap<>();
 
     /**
      * Ordered visible set — children in this list receive coordinates and
      * hidden(false) during layout. Maintained in least-recently-shown order so
      * the head is always the eviction candidate when maxVisibleNodes is exceeded.
      */
-    private final List<TerminalRenderable> visibleSet = new ArrayList<>();
+    private final List<TerminalRegion> visibleSet = new ArrayList<>();
 
     // ── configuration ─────────────────────────────────────────────────────────
 
@@ -233,33 +234,35 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         if (renderable == null) {
             throw new IllegalArgumentException("Cannot add null renderable to stack");
         }
-        if (stack.contains(renderable)) return;
+        TerminalRegion child = checkTerminalRegion(renderable);
 
-        String name = renderable.getName();
+        if (stack.contains(child)) return;
+
+        String name = child.getName();
         if (name == null || name.isEmpty()) {
             throw new IllegalArgumentException("Renderable must have a non-empty name");
         }
         TerminalRenderable existing = nameToRenderable.get(name);
         if (existing != null) {
-            if (existing == renderable) return;
+            if (existing == child) return;
             throw new IllegalArgumentException(
                 "Renderable with name '" + name + "' already exists in stack");
         }
 
-        stack.add(renderable);
-        nameToRenderable.put(name, renderable);
+        stack.add(child);
+        nameToRenderable.put(name, child);
 
-        renderable.setVisibilityPolicy(this::visibilityPolicy);
+        child.setVisibilityPolicy(this::visibilityPolicy);
 
         if (maxVisibleNodes == -1) {
             // Unlimited: show every child by default.
-            addToVisibleSet(renderable);
+            addToVisibleSet(child);
         } else {
             // Capped or zero: new children wait until explicitly shown.
-            if (shouldManageHidden(renderable)) renderable.hide();
+            if (shouldManageHidden(child)) child.hide();
         }
 
-        super.addChild(renderable, null);
+        super.addChild(child, null);
     }
 
 
@@ -316,7 +319,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
      *
      * @throws IllegalArgumentException if the renderable is not in the stack.
      */
-    public void showContent(TerminalRenderable renderable) {
+    public void showContent(TerminalRegion renderable) {
         if (maxVisibleNodes == 0) return;
         if (!stack.contains(renderable)) {
             throw new IllegalArgumentException(
@@ -330,7 +333,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
     }
 
     public void showContent(String name) {
-        TerminalRenderable r = nameToRenderable.get(name);
+        TerminalRegion r = nameToRenderable.get(name);
         if (r == null) {
             throw new IllegalArgumentException(
                 "No renderable with name '" + name + "' exists in stack");
@@ -407,7 +410,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         int y = ins.getTop()  - scrollOffsetY;
 
         for (TerminalLayoutContext context : contexts) {
-            TerminalRenderable child = context.getRenderable();
+            TerminalRegion child = checkTerminalRegion(context.getRenderable());
 
             if (!stack.contains(child)) {
                 Log.logError("[TerminalOverlayPanel] layoutStack: skipping unknown child: "
@@ -472,23 +475,72 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         SizePreference ownHP = getHeightPreference();
         TerminalInsets ins   = getInsets();
 
+        // Single loop to calculate both dimensions
         int intersectW = Integer.MAX_VALUE;
         int intersectH = Integer.MAX_VALUE;
         boolean anyVisible = false;
 
-        for (TerminalRenderable visible : visibleSet) {
-            if (renderableIsExcluded(visible)) {
+        for (TerminalRegion child : visibleSet) {
+            if (!canUnhide(child)) {
                 continue;
             }
             anyVisible = true;
             TerminalLayoutContext ctx = childContexts != null
-                ? findContext(childContexts, visible)
+                ? findContext(childContexts, child)
                 : null;
-            if (ownWP == SizePreference.FIT_CONTENT) {
-                intersectW = Math.min(intersectW, readMeasurementDimension(visible, ctx, ownWP, true));
+
+            // Get child's width preference (respecting INHERIT)
+            SizePreference childWidthPref = child.getWidthPreference() == SizePreference.INHERIT
+                ? ownWP
+                : child.getWidthPreference();
+            int minWidth = child.getMinWidth();
+
+            // Calculate width based on child's preference
+            switch (childWidthPref) {
+                case FIT_CONTENT:
+                    int childWidth = Math.max(minWidth, readContentDimension(child, ctx, true));
+                    intersectW = Math.min(intersectW, childWidth);
+                    break;
+                case FILL:
+                    intersectW = Math.min(intersectW, minWidth);
+                    break;
+                case PERCENT:
+                    intersectW = Math.min(intersectW, minWidth);
+                    break;
+                case STATIC:
+                default:
+                    int width = childContexts != null && ctx != null && ctx.getRequestedRegion() != null
+                        ? ctx.getRequestedRegion().getWidth()
+                        : child.getRegion().getWidth();
+                    intersectW = Math.min(intersectW, Math.max(minWidth, width));
+                    break;
             }
-            if (ownHP == SizePreference.FIT_CONTENT) {
-                intersectH = Math.min(intersectH, readMeasurementDimension(visible, ctx, ownHP, false));
+
+            // Get child's height preference (respecting INHERIT)
+            SizePreference childHeightPref = child.getHeightPreference() == SizePreference.INHERIT
+                ? ownHP
+                : child.getHeightPreference();
+            int minHeight = child.getMinHeight();
+
+            // Calculate height based on child's preference
+            switch (childHeightPref) {
+                case FIT_CONTENT:
+                    int childHeight = Math.max(minHeight, readContentDimension(child, ctx, false));
+                    intersectH = Math.min(intersectH, childHeight);
+                    break;
+                case FILL:
+                    intersectH = Math.min(intersectH, minHeight);
+                    break;
+                case PERCENT:
+                    intersectH = Math.min(intersectH, minHeight);
+                    break;
+                case STATIC:
+                default:
+                    int height = childContexts != null && ctx != null && ctx.getRequestedRegion() != null
+                        ? ctx.getRequestedRegion().getHeight()
+                        : child.getRegion().getHeight();
+                    intersectH = Math.min(intersectH, Math.max(minHeight, height));
+                    break;
             }
         }
 
@@ -561,7 +613,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
      * Add a child to the visible set, refreshing its MRU position. If the set
      * is at capacity, the least-recently-shown entry is evicted and hidden.
      */
-    private void addToVisibleSet(TerminalRenderable renderable) {
+    private void addToVisibleSet(TerminalRegion renderable) {
         visibleSet.remove(renderable);
         if (maxVisibleNodes > 0 && visibleSet.size() >= maxVisibleNodes) {
             TerminalRenderable evicted = visibleSet.remove(0);
@@ -592,7 +644,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
 
    
     private int resolveChildDimension(
-        TerminalRenderable child,
+        TerminalRegion child,
         TerminalLayoutContext ctx,
         int viewportSize,
         boolean isWidth
@@ -604,36 +656,44 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
             }
             int min = isWidth ? s.getMinWidth() : s.getMinHeight();
             return switch (pref) {
-                case FILL        -> viewportSize;
+                case FILL        -> Math.max(min, viewportSize);
                 case FIT_CONTENT -> {
+                    int dimension;
                     TerminalRectangle measured = ctx != null ? ctx.getMeasuredContentBounds() : null;
                     if (measured != null) {
-                        yield isWidth ? measured.getWidth() : measured.getHeight();
-                    }
-                    if (ctx != null && ctx.getRequestedRegion() != null) {
-                        yield isWidth
+                        dimension = isWidth ? measured.getWidth() : measured.getHeight();
+                    } else if (ctx != null && ctx.getRequestedRegion() != null) {
+                        dimension = isWidth
                             ? ctx.getRequestedRegion().getWidth()
                             : ctx.getRequestedRegion().getHeight();
+                    } else {
+                        dimension = isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
                     }
-                    yield isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+                    yield Math.max(min, dimension);
                 }
                 case PERCENT -> Math.max(min, (int)(viewportSize *
                     (isWidth ? s.getPercentWidth() : s.getPercentHeight())));
                 case STATIC -> {
+                    int dimension;
                     if (ctx != null && ctx.getRequestedRegion() != null) {
-                        yield isWidth
+                        dimension = isWidth
                             ? ctx.getRequestedRegion().getWidth()
                             : ctx.getRequestedRegion().getHeight();
+                    } else {
+                        dimension = isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
                     }
-                    yield isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+                    yield Math.max(min, dimension);
                 }
-                default -> viewportSize;
+                default -> Math.max(min, viewportSize);
             };
         }
 
         TerminalRectangle requested = child.getRequestedRegion();
-        if (requested != null) return isWidth ? requested.getWidth() : requested.getHeight();
-        return isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight();
+        int dimension = requested != null
+            ? (isWidth ? requested.getWidth() : requested.getHeight())
+            : (isWidth ? child.getRegion().getWidth() : child.getRegion().getHeight());
+        int min = isWidth ? child.getMinWidth() : child.getMinHeight();
+        return Math.max(min, dimension);
     }
 
     private TerminalLayoutContext findContext(
