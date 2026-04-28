@@ -8,9 +8,13 @@ import io.netnotes.terminal.components.text.TerminalLabel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import static io.netnotes.terminal.layout.TerminalLayoutTestHarness.STATE_LAYOUT_IDLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Debug tests for visibility and content sizing behavior.
@@ -29,8 +33,7 @@ public class VisibilityStabilizationDebugTest {
     void setup() {
         rootPanel = new TerminalPanel("root");
         harness = new TerminalLayoutTestHarness(80, 24);
-        harness.attach(rootPanel);
-        assertTrue(harness.waitForLayoutComplete());
+        harness.attach(rootPanel); // blocks until first idle
     }
 
     @Test
@@ -38,36 +41,42 @@ public class VisibilityStabilizationDebugTest {
         TerminalVStack container = new TerminalVStack("container");
         container.setHeightPreference(SizePreference.FIT_CONTENT);
 
-        // 5 labels × 3 height = total 15
         for (int i = 0; i < 5; i++) {
             container.addChild(createLabel("label-" + i, 3));
         }
 
+        TestGate gate = new TestGate();
+        int[] step = {0};
+
+        harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+            try {
+                switch (step[0]++) {
+                    case 0 -> {
+                        // Initial layout – plenty of space.
+                        assertEquals(15, container.getHeight(), "All 5 children: 5 × 3 = 15");
+                        harness.setAllocatedRegion(0, 0, 80, 7); // shrink region
+                    }
+                    case 1 -> {
+                        // After shrink: children still visible, FIT_CONTENT disables auto-hide.
+                        for (int i = 0; i < container.getChildren().size(); i++) {
+                            assertFalse(container.getChildren().get(i).isHidden(),
+                                "Child " + i + " must NOT be auto-hidden");
+                        }
+                        harness.setAllocatedRegion(0, 0, 80, 24); // restore
+                    }
+                    case 2 -> {
+                        assertEquals(15, container.getHeight(), "Still 15 after restore");
+                        gate.open();
+                    }
+                }
+            } catch (Throwable t) {
+                gate.fail(t);
+            }
+        });
+
         rootPanel.addChild(container);
-        assertTrue(harness.waitForLayoutComplete());
-        debugState("Initial layout (plenty of space)");
-
-        assertEquals(15, container.getHeight(), "All 5 children: 5 × 3 = 15");
-
-        // Shrink to only fit 2 labels — region changes but content hasn't changed.
-        // For a FIT_CONTENT VStack, getHeight() reflects the layout height which
-        // is based on allocated region. Content size is unchanged.
-        harness.setAllocatedRegion(0, 0, 80, 7);
-        assertTrue(harness.waitForLayoutComplete());
-        debugState("After shrink to height 7 (overflow, no auto-hide)");
-
-        // Children still visible — FIT_CONTENT VStack never auto-hides.
-        for (int i = 0; i < container.getChildren().size(); i++) {
-            assertFalse(container.getChildren().get(i).isHidden(),
-                "Child " + i + " must NOT be auto-hidden");
-        }
-
-        // Expand back — no stale hidden state.
-        harness.setAllocatedRegion(0, 0, 80, 24);
-        assertTrue(harness.waitForLayoutComplete());
-        debugState("After expand back to 24");
-
-        assertEquals(15, container.getHeight(), "Still 15 after restore");
+        harness.triggerRender();
+        gate.awaitDone();
     }
 
     @Test
@@ -86,31 +95,40 @@ public class VisibilityStabilizationDebugTest {
 
         parent.addChild(staticChild);
         parent.addChild(contentChild);
+
+        TestGate gate = new TestGate();
+        int[] step = {0};
+
+        harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+            try {
+                switch (step[0]++) {
+                    case 0 -> {
+                        // Both children visible.
+                        assertEquals(7, parent.getHeight(), "Parent: 2 + 5 = 7");
+                        contentChild.hide(); // force-hide
+                    }
+                    case 1 -> {
+                        // After hiding content child.
+                        assertTrue(contentChild.isHidden(), "contentChild is force-hidden");
+                        assertEquals(2, parent.getHeight(), "Parent = 2 (only staticChild)");
+                        contentChild.show(); // unhide, multi-pass
+                    }
+                    case 2 -> {
+                        // After unhide.
+                        assertFalse(contentChild.isHidden(), "contentChild visible after unhide");
+                        assertEquals(5, contentChild.getHeight(), "contentChild height = 5");
+                        assertEquals(7, parent.getHeight(), "Parent re-measured: 2 + 5 = 7");
+                        gate.open();
+                    }
+                }
+            } catch (Throwable t) {
+                gate.fail(t);
+            }
+        });
+
         rootPanel.addChild(parent);
-
-        assertTrue(harness.waitForLayoutComplete());
-        debugState("Initial: both children visible");
-
-        // Force-hide content child — parent should shrink.
-        contentChild.hide();
-        assertTrue(harness.waitForLayoutComplete());
-        debugState("After force-hiding content child");
-
-        assertTrue(contentChild.isHidden(), "contentChild is force-hidden");
-        assertEquals(2, parent.getHeight(), "Parent = 2 (only staticChild)");
-
-        // Unhide — multi-pass stabilization.
-        contentChild.show();
-        assertTrue(harness.waitForLayoutComplete());
-        debugState("After unhiding content child");
-
-        assertFalse(contentChild.isHidden(), "contentChild visible after unhide");
-        assertEquals(5, contentChild.getHeight(), "contentChild height = 5");
-        assertEquals(7, parent.getHeight(), "Parent re-measured: 2 + 5 = 7");
-    }
-
-    private void debugState(String label) {
-        System.out.println("\n=== " + label + " ===");
+        harness.triggerRender();
+        gate.awaitDone();
     }
 
     private TerminalLabel createLabel(String name, int height) {
@@ -118,5 +136,30 @@ public class VisibilityStabilizationDebugTest {
         label.setMinHeight(height);
         label.setHeightPreference(SizePreference.FIT_CONTENT);
         return label;
+    }
+
+    // ── TestGate ─────────────────────────────────────────────────────────
+    static final class TestGate {
+        private final CountDownLatch latch = new CountDownLatch(1);
+        private volatile Throwable failure;
+
+        void open() { latch.countDown(); }
+        void fail(Throwable t) {
+            failure = t;
+            latch.countDown();
+        }
+
+        void awaitDone() {
+            try {
+                if (!latch.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Test timed out: STATE_LAYOUT_IDLE never reached final step");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Test interrupted", e);
+            }
+            if (failure instanceof AssertionError a) throw a;
+            if (failure != null) throw new AssertionError("Test step failed", failure);
+        }
     }
 }

@@ -326,7 +326,7 @@ public class TerminalHStack extends TerminalAbstractStack {
             boolean hasSpace  = allocatedWidth > 0 && allocatedHeight > 0;
             boolean inBounds  = hasSpace && isWithinParentBounds(
                 currentX, y, allocatedWidth, allocatedHeight, parentRegion);
-            boolean manageHidden = shouldManageHidden(r);
+            
 
             TerminalLayoutData.TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder()
                 .setX(currentX)
@@ -340,7 +340,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                 final int childWidth  = allocatedWidth;
                 final int childHeight = allocatedHeight;
                 if (overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
-                    if (manageHidden) builder.hidden(false);
+                    builder.hidden(false);
                 } else {
                     RenderDiagnostics.logRenderBlocker(
                         "hstack-child-oob:" + getName() + ":" + r.getName(),
@@ -361,7 +361,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                     );
                     builder.hidden(true);
                 }
-            } else if (manageHidden) {
+            } else {
                 builder.hidden(false);
             }
 

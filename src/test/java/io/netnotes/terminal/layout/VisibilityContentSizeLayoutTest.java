@@ -10,9 +10,13 @@ import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
+
+import static io.netnotes.terminal.layout.TerminalLayoutTestHarness.STATE_LAYOUT_IDLE;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
  * Tests for content-sized VStacks with visibility toggling.
@@ -36,8 +40,7 @@ public class VisibilityContentSizeLayoutTest {
     void setup() {
         rootPanel = new TerminalPanel("root");
         harness = new TerminalLayoutTestHarness(W, H);
-        harness.attach(rootPanel);
-        assertTrue(harness.waitForLayoutComplete(), "Initial layout pass must complete");
+        harness.attach(rootPanel); // blocks until first layout idle
     }
 
     @AfterEach
@@ -71,19 +74,36 @@ public class VisibilityContentSizeLayoutTest {
             // Start with nested stack force-hidden.
             nestedVStack.hide();
             parentVStack.addChild(nestedVStack);
+
+            TestGate gate = new TestGate();
+            int[] step = {0};
+
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    switch (step[0]++) {
+                        case 0 -> {
+                            // Initial layout: only fixedLabel visible.
+                            assertEquals(3, parentVStack.getHeight(), "Parent = fixedLabel height (3)");
+                            assertTrue(nestedVStack.isHidden(), "Nested stack is force-hidden");
+
+                            nestedVStack.show(); // → triggers multi-pass stabilization
+                        }
+                        case 1 -> {
+                            // After unhide: nested stack laid out, parent re-measured.
+                            assertFalse(nestedVStack.isHidden(), "Nested stack visible after unhide");
+                            assertEquals(4, nestedVStack.getHeight(), "Nested: 2 labels × 2 = 4");
+                            assertEquals(7, parentVStack.getHeight(), "Parent: 3 + 4 = 7");
+                            gate.open();
+                        }
+                    }
+                } catch (Throwable t) {
+                    gate.fail(t);
+                }
+            });
+
             rootPanel.addChild(parentVStack);
-
-            assertTrue(harness.waitForLayoutComplete(), "Initial layout");
-            assertEquals(3, parentVStack.getHeight(), "Parent = fixedLabel height (3)");
-            assertTrue(nestedVStack.isHidden(), "Nested stack is force-hidden");
-
-            // Unhide — multi-pass stabilization.
-            nestedVStack.show();
-            assertTrue(harness.waitForLayoutComplete(), "After unhiding nested");
-
-            assertFalse(nestedVStack.isHidden(), "Nested stack visible after unhide");
-            assertEquals(4, nestedVStack.getHeight(), "Nested: 2 labels × 2 = 4");
-            assertEquals(7, parentVStack.getHeight(), "Parent: 3 + 4 = 7");
+            harness.triggerRender();
+            gate.awaitDone();
         }
 
         @Test
@@ -103,18 +123,34 @@ public class VisibilityContentSizeLayoutTest {
 
             rootStack.addChild(section1);
             rootStack.addChild(section2);
+
+            TestGate gate = new TestGate();
+            int[] step = {0};
+
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    switch (step[0]++) {
+                        case 0 -> {
+                            assertEquals(2, rootStack.getHeight(), "Only header visible: 2");
+
+                            section1.show();
+                            section2.show(); // → triggers multi-pass
+                        }
+                        case 1 -> {
+                            assertFalse(section1.isHidden());
+                            assertFalse(section2.isHidden());
+                            assertEquals(9, rootStack.getHeight(), "2 + 3 + 4 = 9");
+                            gate.open();
+                        }
+                    }
+                } catch (Throwable t) {
+                    gate.fail(t);
+                }
+            });
+
             rootPanel.addChild(rootStack);
-
-            assertTrue(harness.waitForLayoutComplete(), "Initial layout");
-            assertEquals(2, rootStack.getHeight(), "Only header visible: 2");
-
-            section1.show();
-            section2.show();
-            assertTrue(harness.waitForLayoutComplete(), "After unhiding both");
-
-            assertFalse(section1.isHidden());
-            assertFalse(section2.isHidden());
-            assertEquals(9, rootStack.getHeight(), "2 + 3 + 4 = 9");
+            harness.triggerRender();
+            gate.awaitDone();
         }
 
         @Test
@@ -136,26 +172,49 @@ public class VisibilityContentSizeLayoutTest {
             level2.hide();
             level3.hide();
 
+            TestGate gate = new TestGate();
+            int[] step = {0};
+
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    switch (step[0]++) {
+                        case 0 -> {
+                            // All hidden.
+                            assertTrue(deepParent.isHidden());
+                            // Unhide top-down step by step. Each show() will cause
+                            // a new idle transition, so we sequence through separate cases.
+                            deepParent.show(); // → step 1
+                        }
+                        case 1 -> {
+                            level1.show(); // → step 2
+                        }
+                        case 2 -> {
+                            level2.show(); // → step 3
+                        }
+                        case 3 -> {
+                            level3.show(); // → step 4 (final)
+                        }
+                        case 4 -> {
+                            assertFalse(level3.isHidden());
+                            assertFalse(level2.isHidden());
+                            assertFalse(level1.isHidden());
+                            assertFalse(deepParent.isHidden());
+
+                            assertEquals(2, level3.getHeight());
+                            assertEquals(4, level2.getHeight());
+                            assertEquals(7, level1.getHeight());
+                            assertEquals(7, deepParent.getHeight());
+                            gate.open();
+                        }
+                    }
+                } catch (Throwable t) {
+                    gate.fail(t);
+                }
+            });
+
             rootPanel.addChild(deepParent);
-            assertTrue(harness.waitForLayoutComplete(), "All hidden");
-
-            // Unhide top-down.
-            deepParent.show();
-            assertTrue(harness.waitForLayoutComplete(), "Unhide deepParent");
-
-            level1.show();
-            assertTrue(harness.waitForLayoutComplete(), "Unhide level1");
-
-            level2.show();
-            assertTrue(harness.waitForLayoutComplete(), "Unhide level2");
-
-            level3.show();
-            assertTrue(harness.waitForLayoutComplete(), "Unhide level3");
-
-            assertEquals(2, level3.getHeight());
-            assertEquals(4, level2.getHeight());
-            assertEquals(7, level1.getHeight());
-            assertEquals(7, deepParent.getHeight());
+            harness.triggerRender();
+            gate.awaitDone();
         }
     }
 
@@ -173,17 +232,31 @@ public class VisibilityContentSizeLayoutTest {
 
             container.addChild(child1);
             container.addChild(child2);
+
+            TestGate gate = new TestGate();
+            int[] step = {0};
+
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    switch (step[0]++) {
+                        case 0 -> {
+                            assertEquals(3, container.getHeight(), "Only child1 visible: 3");
+                            child1.hide();
+                            child2.show(); // toggle → multi-pass
+                        }
+                        case 1 -> {
+                            assertEquals(3, container.getHeight(), "Now child2 visible: 3");
+                            gate.open();
+                        }
+                    }
+                } catch (Throwable t) {
+                    gate.fail(t);
+                }
+            });
+
             rootPanel.addChild(container);
-
-            assertTrue(harness.waitForLayoutComplete(), "Initial layout");
-            assertEquals(3, container.getHeight(), "Only child1 visible: 3");
-
-            // Toggle: hide child1, unhide child2.
-            child1.hide();
-            child2.show();
-            assertTrue(harness.waitForLayoutComplete(), "After toggle");
-
-            assertEquals(3, container.getHeight(), "Now child2 visible: 3");
+            harness.triggerRender();
+            gate.awaitDone();
         }
 
         @Test
@@ -201,16 +274,31 @@ public class VisibilityContentSizeLayoutTest {
             child.addChild(label2);
 
             parent.addChild(child);
+
+            TestGate gate = new TestGate();
+            int[] step = {0};
+
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    switch (step[0]++) {
+                        case 0 -> {
+                            assertEquals(0, parent.getHeight(), "Parent height 0 with hidden child");
+                            child.show(); // → multi-pass
+                        }
+                        case 1 -> {
+                            assertEquals(4, child.getHeight(), "Child: 2 labels × 2 = 4");
+                            assertEquals(4, parent.getHeight(), "Parent re-measured: 4");
+                            gate.open();
+                        }
+                    }
+                } catch (Throwable t) {
+                    gate.fail(t);
+                }
+            });
+
             rootPanel.addChild(parent);
-            assertTrue(harness.waitForLayoutComplete(), "Initial layout");
-
-            assertEquals(0, parent.getHeight(), "Parent height 0 with hidden child");
-
-            child.show();
-            assertTrue(harness.waitForLayoutComplete(), "After unhide");
-
-            assertEquals(4, child.getHeight(), "Child: 2 labels × 2 = 4");
-            assertEquals(4, parent.getHeight(), "Parent re-measured: 4");
+            harness.triggerRender();
+            gate.awaitDone();
         }
     }
 
@@ -229,5 +317,31 @@ public class VisibilityContentSizeLayoutTest {
         label.setMinHeight(height);
         label.setHeightPreference(SizePreference.FIT_CONTENT);
         return label;
+    }
+
+    // ── TestGate ─────────────────────────────────────────────────────────
+    static final class TestGate {
+        private final CountDownLatch latch = new CountDownLatch(1);
+        private volatile Throwable failure;
+
+        void open() { latch.countDown(); }
+
+        void fail(Throwable t) {
+            failure = t;
+            latch.countDown();
+        }
+
+        void awaitDone() {
+            try {
+                if (!latch.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Test timed out: STATE_LAYOUT_IDLE never reached final step");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Test interrupted", e);
+            }
+            if (failure instanceof AssertionError a) throw a;
+            if (failure != null) throw new AssertionError("Test step failed", failure);
+        }
     }
 }

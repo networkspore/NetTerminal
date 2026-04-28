@@ -4,8 +4,6 @@ import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
-import io.netnotes.terminal.layout.TerminalSizeable;
-
 /**
  * TerminalGroupRegion — base class for any TerminalRegion that owns a
  * single layout group and wires every child it accepts into that group.
@@ -95,17 +93,7 @@ public abstract class TerminalGroupRegion extends TerminalRegion {
         onDetachedFromLayout();
     }
 
-     /**
-     * Returns true if the panel is allowed to manage this child's hidden state.
-     * A child with isHiddenManaged()=false controls its own visibility; the
-     * panel assigns coordinates but never forces hide/show on it.
-     */
-    protected boolean shouldManageHidden(TerminalRenderable child) {
-        if (child instanceof TerminalSizeable s) return s.isHiddenManaged();
-        return true;
-    }
-
-
+  
 
     /**
      * Extension point for subclasses that need to react to layout-manager

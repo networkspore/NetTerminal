@@ -258,8 +258,8 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
             // Unlimited: show every child by default.
             addToVisibleSet(child);
         } else {
-            // Capped or zero: new children wait until explicitly shown.
-            if (shouldManageHidden(child)) child.hide();
+ 
+           child.setVisible(false);
         }
 
         super.addChild(child, null);
@@ -326,8 +326,8 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
                 "Renderable must be in stack before showing");
         }
         addToVisibleSet(renderable);
-        if (shouldManageHidden(renderable) && renderable.isHidden()) {
-            renderable.show();
+        if (renderable.isHidden()) {
+            renderable.setVisible(true);
         }
         requestLayoutUpdate();
     }
@@ -346,7 +346,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
      */
     public void hideContent(TerminalRenderable renderable) {
         if (!visibleSet.remove(renderable)) return;
-        if (shouldManageHidden(renderable)) renderable.hide();
+        renderable.setVisible(false);
         requestLayoutUpdate();
     }
 
@@ -424,14 +424,12 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
                 continue;
             }
 
-            boolean managed   = shouldManageHidden(child);
+
             boolean inVisible = maxVisibleNodes != 0 && visibleSet.contains(child);
 
             if (!inVisible) {
-                if (managed) {
-                    dataInterfaces.get(child.getName())
-                        .setLayoutData(TerminalLayoutData.getBuilder().hidden(true).build());
-                }
+                dataInterfaces.get(child.getName())
+                    .setLayoutData(TerminalLayoutData.getBuilder().hidden(true).build());
                 continue;
             }
 
@@ -449,9 +447,9 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
                 .setWidth(Math.max(0, childWidth))
                 .setHeight(Math.max(0, childHeight));
 
-            if (managed) {
-                builder.hidden(outOfBounds);
-            }
+       
+            builder.hidden(outOfBounds);
+            
 
             dataInterfaces.get(child.getName()).setLayoutData(builder.build());
         }
@@ -617,7 +615,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         visibleSet.remove(renderable);
         if (maxVisibleNodes > 0 && visibleSet.size() >= maxVisibleNodes) {
             TerminalRenderable evicted = visibleSet.remove(0);
-            if (shouldManageHidden(evicted)) evicted.hide();
+            evicted.setVisible(false);
         }
         visibleSet.add(renderable);
     }
@@ -631,13 +629,13 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
         while (maxVisibleNodes == 0 || visibleSet.size() > maxVisibleNodes) {
             if (visibleSet.isEmpty()) break;
             TerminalRenderable evicted = visibleSet.remove(0);
-            if (shouldManageHidden(evicted)) evicted.hide();
+            evicted.setVisible(false);
         }
     }
 
     private void hideAllManaged() {
         for (TerminalRenderable r : new ArrayList<>(visibleSet)) {
-            if (shouldManageHidden(r)) r.hide();
+            r.setVisible(false);
         }
         visibleSet.clear();
     }

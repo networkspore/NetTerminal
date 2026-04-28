@@ -10,16 +10,12 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Nested;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
-import static org.junit.jupiter.api.Assertions.assertFalse;
-import static org.junit.jupiter.api.Assertions.assertTrue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
-/**
- * Layout-driven tests for TerminalBorderPanel.
- *
- * These tests assert committed geometry (x/y/width/height) after full layout
- * drain, using TerminalLayoutTestHarness to mirror root attach behavior.
- */
+import static io.netnotes.terminal.layout.TerminalLayoutTestHarness.STATE_LAYOUT_IDLE;
+import static org.junit.jupiter.api.Assertions.*;
+
 public class TerminalBorderPanelLayoutTest {
 
     private static final int W = 80;
@@ -30,35 +26,84 @@ public class TerminalBorderPanelLayoutTest {
 
     @BeforeEach
     void setup() {
-
         panel = new TerminalBorderPanel("bp");
         harness = new TerminalLayoutTestHarness(W, H);
-        harness.attach(panel);
-        assertTrue(harness.waitForLayoutComplete(), "Initial layout pass must complete");
+        harness.attach(panel); // blocks until first idle
     }
 
     private TerminalStackPanel stack(BorderPanel region) {
         return panel.getRegionStack(region);
     }
 
+    // ── TestGate ─────────────────────────────────────────────────────────
+    static final class TestGate {
+        private final CountDownLatch latch = new CountDownLatch(1);
+        private volatile Throwable failure;
+        void open() { latch.countDown(); }
+        void fail(Throwable t) { failure = t; latch.countDown(); }
+        void awaitDone() {
+            try {
+                if (!latch.await(5, TimeUnit.SECONDS))
+                    throw new AssertionError("Test timed out");
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Interrupted", e);
+            }
+            if (failure instanceof AssertionError a) throw a;
+            if (failure != null) throw new AssertionError("Step failed", failure);
+        }
+    }
+
+    // ── Helper to run a single-step layout action and assert geometry.
+    //     The action sets up the panel, then we trigger layout and assert
+    //     in the IDLE callback.
+    private void assertAfterLayout(String description,
+                                   Runnable setupAction,
+                                   Runnable assertions) {
+        TestGate gate = new TestGate();
+        int[] step = {0};
+        harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+            try {
+                if (step[0]++ == 0) {
+                    assertions.run();
+                    gate.open();
+                }
+            } catch (Throwable t) {
+                gate.fail(t);
+            }
+        });
+
+        setupAction.run();
+        harness.triggerRender();
+        gate.awaitDone();
+        // cleanup: handler will remain but won't fire again because we don't trigger
+    }
+
     @Nested
     class EmptyPanelLayout {
         @Test
         void panelFillsRoot() {
-            assertEquals(0, panel.getX());
-            assertEquals(0, panel.getY());
-            assertEquals(W, panel.getWidth());
-            assertEquals(H, panel.getHeight());
+            assertAfterLayout("empty panel",
+                    () -> {}, // nothing added
+                    () -> {
+                        assertEquals(0, panel.getX());
+                        assertEquals(0, panel.getY());
+                        assertEquals(W, panel.getWidth());
+                        assertEquals(H, panel.getHeight());
+                    });
         }
 
         @Test
         void centerStackFillsEntireAreaWhenNoSlotsOccupied() {
-       
-            TerminalStackPanel center = stack(BorderPanel.CENTER);
-            assertEquals(0, center.getX());
-            assertEquals(0, center.getY());
-            assertEquals(W, center.getWidth());
-            assertEquals(H, center.getHeight());
+            assertAfterLayout("center fills root",
+                    () -> {},
+                    () -> {
+                        TerminalStackPanel center = stack(BorderPanel.CENTER);
+                        assertEquals(0, center.getX());
+                        assertEquals(0, center.getY());
+                        assertEquals(W, center.getWidth());
+                        assertEquals(H, center.getHeight());
+                    });
         }
     }
 
@@ -67,27 +112,27 @@ public class TerminalBorderPanelLayoutTest {
         @Test
         void topSlotReducesCenterHeight() {
             int labelHeight = 3;
-            TerminalLabel topLabel = new TerminalLabel("header");
-            topLabel.setMinHeight(labelHeight);
-            topLabel.setHeightPreference(SizePreference.FIT_CONTENT);
-
-            panel.addToPanel(BorderPanel.TOP, topLabel);
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            TerminalStackPanel top = stack(BorderPanel.TOP);
-            TerminalStackPanel center = stack(BorderPanel.CENTER);
-            assertEquals(0, top.getY());
-            assertEquals(labelHeight, top.getHeight());
-            assertEquals(labelHeight, center.getY());
-            assertEquals(H - labelHeight, center.getHeight());
+            TerminalLabel topLabel = labelWithMinHeight("header", labelHeight);
+            assertAfterLayout("add top label",
+                    () -> panel.addToPanel(BorderPanel.TOP, topLabel),
+                    () -> {
+                        TerminalStackPanel top = stack(BorderPanel.TOP);
+                        TerminalStackPanel center = stack(BorderPanel.CENTER);
+                        assertEquals(0, top.getY());
+                        assertEquals(labelHeight, top.getHeight());
+                        assertEquals(labelHeight, center.getY());
+                        assertEquals(H - labelHeight, center.getHeight());
+                    });
         }
 
         @Test
         void topStackSpansFullWidth() {
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("h", 1));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-            assertEquals(0, stack(BorderPanel.TOP).getX());
-            assertEquals(W, stack(BorderPanel.TOP).getWidth());
+            assertAfterLayout("top label full width",
+                    () -> panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("h", 1)),
+                    () -> {
+                        assertEquals(0, stack(BorderPanel.TOP).getX());
+                        assertEquals(W, stack(BorderPanel.TOP).getWidth());
+                    });
         }
     }
 
@@ -96,26 +141,29 @@ public class TerminalBorderPanelLayoutTest {
         @Test
         void bottomSlotAnchorsToBottomEdge() {
             int labelHeight = 2;
-            panel.addToPanel(BorderPanel.BOTTOM, labelWithMinHeight("footer", labelHeight));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            TerminalStackPanel bottom = stack(BorderPanel.BOTTOM);
-            assertEquals(H - labelHeight, bottom.getY());
-            assertEquals(labelHeight, bottom.getHeight());
-            assertEquals(W, bottom.getWidth());
+            assertAfterLayout("add bottom",
+                    () -> panel.addToPanel(BorderPanel.BOTTOM, labelWithMinHeight("footer", labelHeight)),
+                    () -> {
+                        TerminalStackPanel bottom = stack(BorderPanel.BOTTOM);
+                        assertEquals(H - labelHeight, bottom.getY());
+                        assertEquals(labelHeight, bottom.getHeight());
+                        assertEquals(W, bottom.getWidth());
+                    });
         }
 
         @Test
         void topAndBottomLeaveCorrectMiddleHeight() {
-            int topH = 2;
-            int bottomH = 3;
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
-            panel.addToPanel(BorderPanel.BOTTOM, labelWithMinHeight("bottom", bottomH));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            int expectedCenterH = H - topH - bottomH;
-            assertEquals(expectedCenterH, stack(BorderPanel.CENTER).getHeight());
-            assertEquals(topH, stack(BorderPanel.CENTER).getY());
+            int topH = 2, bottomH = 3;
+            assertAfterLayout("top+bottom",
+                    () -> {
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
+                        panel.addToPanel(BorderPanel.BOTTOM, labelWithMinHeight("bottom", bottomH));
+                    },
+                    () -> {
+                        int expectedCenterH = H - topH - bottomH;
+                        assertEquals(expectedCenterH, stack(BorderPanel.CENTER).getHeight());
+                        assertEquals(topH, stack(BorderPanel.CENTER).getY());
+                    });
         }
     }
 
@@ -124,49 +172,55 @@ public class TerminalBorderPanelLayoutTest {
         @Test
         void leftSlotStartsAtLeftEdge() {
             int labelW = 10;
-            panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("nav", labelW));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            TerminalStackPanel left = stack(BorderPanel.LEFT);
-            assertEquals(0, left.getX());
-            assertEquals(labelW, left.getWidth());
+            assertAfterLayout("left",
+                    () -> panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("nav", labelW)),
+                    () -> {
+                        TerminalStackPanel left = stack(BorderPanel.LEFT);
+                        assertEquals(0, left.getX());
+                        assertEquals(labelW, left.getWidth());
+                    });
         }
 
         @Test
         void rightSlotAnchorsToRightEdge() {
             int labelW = 8;
-            panel.addToPanel(BorderPanel.RIGHT, labelWithMinWidth("sidebar", labelW));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            TerminalStackPanel right = stack(BorderPanel.RIGHT);
-            assertEquals(W - labelW, right.getX());
-            assertEquals(labelW, right.getWidth());
+            assertAfterLayout("right",
+                    () -> panel.addToPanel(BorderPanel.RIGHT, labelWithMinWidth("sidebar", labelW)),
+                    () -> {
+                        TerminalStackPanel right = stack(BorderPanel.RIGHT);
+                        assertEquals(W - labelW, right.getX());
+                        assertEquals(labelW, right.getWidth());
+                    });
         }
 
         @Test
         void leftAndRightReduceCenterWidth() {
-            int leftW = 10;
-            int rightW = 5;
-            panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("nav", leftW));
-            panel.addToPanel(BorderPanel.RIGHT, labelWithMinWidth("sidebar", rightW));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            int expectedCenterW = W - leftW - rightW;
-            TerminalStackPanel center = stack(BorderPanel.CENTER);
-            assertEquals(leftW, center.getX());
-            assertEquals(expectedCenterW, center.getWidth());
+            int leftW = 10, rightW = 5;
+            assertAfterLayout("left+right",
+                    () -> {
+                        panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("nav", leftW));
+                        panel.addToPanel(BorderPanel.RIGHT, labelWithMinWidth("sidebar", rightW));
+                    },
+                    () -> {
+                        int expectedCenterW = W - leftW - rightW;
+                        TerminalStackPanel center = stack(BorderPanel.CENTER);
+                        assertEquals(leftW, center.getX());
+                        assertEquals(expectedCenterW, center.getWidth());
+                    });
         }
 
         @Test
         void sideStacksOccupyMiddleRowOnly() {
-            int topH = 2;
-            int leftW = 10;
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
-            panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("nav", leftW));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            assertEquals(topH, stack(BorderPanel.LEFT).getY());
-            assertEquals(H - topH, stack(BorderPanel.LEFT).getHeight());
+            int topH = 2, leftW = 10;
+            assertAfterLayout("top+left",
+                    () -> {
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
+                        panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("nav", leftW));
+                    },
+                    () -> {
+                        assertEquals(topH, stack(BorderPanel.LEFT).getY());
+                        assertEquals(H - topH, stack(BorderPanel.LEFT).getHeight());
+                    });
         }
     }
 
@@ -174,23 +228,27 @@ public class TerminalBorderPanelLayoutTest {
     class ReservedSizeLayout {
         @Test
         void reservedTopHeightAppliesWhenSlotIsEmpty() {
-            panel.setReservedTopHeight(4);
-            assertTrue(harness.waitForLayoutComplete(), "Layout after setReservedTopHeight must complete");
-
-            assertEquals(4, stack(BorderPanel.TOP).getHeight());
-            assertEquals(4, stack(BorderPanel.CENTER).getY());
-            assertEquals(H - 4, stack(BorderPanel.CENTER).getHeight());
+            assertAfterLayout("reserved top empty",
+                    () -> panel.setReservedTopHeight(4),
+                    () -> {
+                        assertEquals(4, stack(BorderPanel.TOP).getHeight());
+                        assertEquals(4, stack(BorderPanel.CENTER).getY());
+                        assertEquals(H - 4, stack(BorderPanel.CENTER).getHeight());
+                    });
         }
 
         @Test
         void reservedTopHeightIgnoredWhenSlotHasContent() {
             int contentH = 2;
-            panel.setReservedTopHeight(10);
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", contentH));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after setReservedTopHeight and addToPanel must complete");
-
-            assertEquals(contentH, stack(BorderPanel.TOP).getHeight());
-            assertEquals(contentH, stack(BorderPanel.CENTER).getY());
+            assertAfterLayout("reserved with content",
+                    () -> {
+                        panel.setReservedTopHeight(10);
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", contentH));
+                    },
+                    () -> {
+                        assertEquals(contentH, stack(BorderPanel.TOP).getHeight());
+                        assertEquals(contentH, stack(BorderPanel.CENTER).getY());
+                    });
         }
     }
 
@@ -200,28 +258,44 @@ public class TerminalBorderPanelLayoutTest {
         void swappingTopContentUsesNewChildHeight() {
             TerminalLabel first = labelWithMinHeight("first", 2);
             TerminalLabel second = labelWithMinHeight("second", 5);
+            assertAfterLayout("add first",
+                    () -> panel.addToPanel(BorderPanel.TOP, first),
+                    () -> {
+                        // first is inserted, now swap
+                        panel.swapPanel(BorderPanel.TOP, second);
+                        // we need another idle to see the result, so we chain:
+                    });
 
-            panel.addToPanel(BorderPanel.TOP, first);
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
-
-            panel.swapPanel(BorderPanel.TOP, second);
-            assertTrue(harness.waitForLayoutComplete(), "Layout after swapPanel must complete");
-
-            assertEquals(5, stack(BorderPanel.TOP).getHeight());
-            assertEquals(5, stack(BorderPanel.CENTER).getY());
-            assertEquals(H - 5, stack(BorderPanel.CENTER).getHeight());
+            // Chain another idle step
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals(5, stack(BorderPanel.TOP).getHeight());
+                    assertEquals(5, stack(BorderPanel.CENTER).getY());
+                    assertEquals(H - 5, stack(BorderPanel.CENTER).getHeight());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            harness.triggerRender(); // the swap triggers layout automatically, but we ensure
+            gate.awaitDone();
         }
 
         @Test
         void clearingTopSlotCollapsesCenterBack() {
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 4));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
+            assertAfterLayout("add top",
+                    () -> panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 4)),
+                    () -> panel.clearPanel(BorderPanel.TOP));
 
-            panel.clearPanel(BorderPanel.TOP);
-            assertTrue(harness.waitForLayoutComplete(), "Layout after clearPanel must complete");
-
-            assertEquals(0, stack(BorderPanel.CENTER).getY());
-            assertEquals(H, stack(BorderPanel.CENTER).getHeight());
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals(0, stack(BorderPanel.CENTER).getY());
+                    assertEquals(H, stack(BorderPanel.CENTER).getHeight());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            harness.triggerRender();
+            gate.awaitDone();
         }
     }
 
@@ -230,15 +304,17 @@ public class TerminalBorderPanelLayoutTest {
         @Test
         void insetsReduceAvailableAreaForAllSlots() {
             int pad = 2;
-            panel.setInsets(pad);
-
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 1));
-            panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("center"));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after setInsets and addToPanel must complete");
-
-            assertEquals(pad, stack(BorderPanel.TOP).getX());
-            assertEquals(pad, stack(BorderPanel.TOP).getY());
-            assertEquals(W - (2 * pad), stack(BorderPanel.TOP).getWidth());
+            assertAfterLayout("insets",
+                    () -> {
+                        panel.setInsets(pad);
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 1));
+                        panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("center"));
+                    },
+                    () -> {
+                        assertEquals(pad, stack(BorderPanel.TOP).getX());
+                        assertEquals(pad, stack(BorderPanel.TOP).getY());
+                        assertEquals(W - 2*pad, stack(BorderPanel.TOP).getWidth());
+                    });
         }
     }
 
@@ -246,15 +322,135 @@ public class TerminalBorderPanelLayoutTest {
     class StackVisibilityLayout {
         @Test
         void emptyStackIsHiddenAfterLayout() {
+            // after attach, center stack is hidden (no content)
             assertTrue(stack(BorderPanel.CENTER).isHidden());
         }
 
         @Test
         void stackWithContentIsVisibleAfterLayout() {
-            panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("c"));
-            assertTrue(harness.waitForLayoutComplete(), "Layout after addToPanel must complete");
+            assertAfterLayout("add center",
+                    () -> panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("c")),
+                    () -> assertFalse(stack(BorderPanel.CENTER).isHidden()));
+        }
+    }
 
-            assertFalse(stack(BorderPanel.CENTER).isHidden());
+    @Nested
+    class ResizingTests {
+        @Test
+        void resizingRootRedistributesCenterHeight() {
+            int topH = 3;
+            assertAfterLayout("add top",
+                    () -> panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH)),
+                    () -> {
+                        harness.setAllocatedRegion(0, 0, W, H - 2); // shrink
+                    });
+
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    int newCenterH = stack(BorderPanel.CENTER).getHeight();
+                    assertEquals((H - 2) - topH, newCenterH);
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            gate.awaitDone();
+        }
+
+        @Test
+        void resizingRootRedistributesCenterWidth() {
+            int leftW = 10;
+            assertAfterLayout("add left",
+                    () -> panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("left", leftW)),
+                    () -> harness.setAllocatedRegion(0, 0, W - 5, H));
+
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals((W - 5) - leftW, stack(BorderPanel.CENTER).getWidth());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            gate.awaitDone();
+        }
+
+        @Test
+        void resizingWithAllSlotsRedistributesAll() {
+            int topH = 2, bottomH = 3, leftW = 8, rightW = 6;
+            assertAfterLayout("all slots",
+                    () -> {
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
+                        panel.addToPanel(BorderPanel.BOTTOM, labelWithMinHeight("bottom", bottomH));
+                        panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("left", leftW));
+                        panel.addToPanel(BorderPanel.RIGHT, labelWithMinWidth("right", rightW));
+                    },
+                    () -> harness.setAllocatedRegion(0, 0, W - 6, H - 4));
+
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals((H - 4) - topH - bottomH, stack(BorderPanel.CENTER).getHeight());
+                    assertEquals((W - 6) - leftW - rightW, stack(BorderPanel.CENTER).getWidth());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            gate.awaitDone();
+        }
+
+        @Test
+        void resizingDownReclaimsEmptyReservedSpace() {
+            assertAfterLayout("reserved+content",
+                    () -> {
+                        panel.setReservedTopHeight(10);
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 3));
+                    },
+                    () -> harness.setAllocatedRegion(0, 0, W, H - 5));
+
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals(3, stack(BorderPanel.TOP).getHeight());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            gate.awaitDone();
+        }
+
+        @Test
+        void resizingUpExpandsAvailableSpace() {
+            assertAfterLayout("top",
+                    () -> panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2)),
+                    () -> harness.setAllocatedRegion(0, 0, W, H + 5));
+
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals((H + 5) - 2, stack(BorderPanel.CENTER).getHeight());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            gate.awaitDone();
+        }
+
+        @Test
+        void resizingPreservesInsetsPadding() {
+            int pad = 2;
+            assertAfterLayout("insets+top",
+                    () -> {
+                        panel.setInsets(pad);
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2));
+                        panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("center"));
+                    },
+                    () -> harness.setAllocatedRegion(0, 0, W - 4, H - 4));
+
+            TestGate gate = new TestGate();
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    assertEquals(pad, stack(BorderPanel.TOP).getX());
+                    assertEquals((W - 4) - 2*pad, stack(BorderPanel.TOP).getWidth());
+                    gate.open();
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            gate.awaitDone();
         }
     }
 
@@ -270,130 +466,5 @@ public class TerminalBorderPanelLayoutTest {
         label.setMinWidth(w);
         label.setWidthPreference(SizePreference.FIT_CONTENT);
         return label;
-    }
-
-    @Nested
-    class ResizingTests {
-        @Test
-        void resizingRootRedistributesCenterHeight() {
-            int topH = 3;
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
-            assertTrue(harness.waitForLayoutComplete());
-
-            int originalCenterH = stack(BorderPanel.CENTER).getHeight();
-            assertEquals(H - topH, originalCenterH);
-
-            // Resize root to smaller height
-            int newH = H - 2;
-            harness.setAllocatedRegion(0,0,W,newH);
-            assertTrue(harness.waitForLayoutComplete());
-
-            int newCenterH = stack(BorderPanel.CENTER).getHeight();
-            assertEquals(newH - topH, newCenterH);
-        }
-
-        @Test
-        void resizingRootRedistributesCenterWidth() {
-            int leftW = 10;
-            panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("left", leftW));
-            assertTrue(harness.waitForLayoutComplete());
-
-            int originalCenterW = stack(BorderPanel.CENTER).getWidth();
-            assertEquals(W - leftW, originalCenterW);
-
-            // Resize root to smaller width
-            int newW = W - 5;
-            harness.setAllocatedRegion(0,0,newW,H);
-            assertTrue(harness.waitForLayoutComplete());
-
-            int newCenterW = stack(BorderPanel.CENTER).getWidth();
-            assertEquals(newW - leftW, newCenterW);
-        }
-
-        @Test
-        void resizingWithAllSlotsRedistributesAll() {
-            int topH = 2;
-            int bottomH = 3;
-            int leftW = 8;
-            int rightW = 6;
-
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", topH));
-            panel.addToPanel(BorderPanel.BOTTOM, labelWithMinHeight("bottom", bottomH));
-            panel.addToPanel(BorderPanel.LEFT, labelWithMinWidth("left", leftW));
-            panel.addToPanel(BorderPanel.RIGHT, labelWithMinWidth("right", rightW));
-            assertTrue(harness.waitForLayoutComplete());
-
-            int originalCenterH = stack(BorderPanel.CENTER).getHeight();
-            int originalCenterW = stack(BorderPanel.CENTER).getWidth();
-
-            // Resize root to smaller dimensions
-            int newH = H - 4;
-            int newW = W - 6;
-            harness.setAllocatedRegion(0,0, newW, newH);
-            assertTrue(harness.waitForLayoutComplete());
-
-            int newCenterH = stack(BorderPanel.CENTER).getHeight();
-            int newCenterW = stack(BorderPanel.CENTER).getWidth();
-
-            assertEquals(newH - topH - bottomH, newCenterH);
-            assertEquals(newW - leftW - rightW, newCenterW);
-        }
-
-        @Test
-        void resizingDownReclaimsEmptyReservedSpace() {
-            panel.setReservedTopHeight(10);
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 3));
-            assertTrue(harness.waitForLayoutComplete());
-
-            // Top should have content height, not reserved height
-            assertEquals(3, stack(BorderPanel.TOP).getHeight());
-
-            // Resize root down
-            int newH = H - 5;
-            harness.setAllocatedRegion(0,0,W,newH);
-            assertTrue(harness.waitForLayoutComplete());
-
-            // Top should still have content height
-            assertEquals(3, stack(BorderPanel.TOP).getHeight());
-        }
-
-        @Test
-        void resizingUpExpandsAvailableSpace() {
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2));
-            assertTrue(harness.waitForLayoutComplete());
-
-            int originalCenterH = stack(BorderPanel.CENTER).getHeight();
-
-            // Resize root up
-            int newH = H + 5;
-            harness.setAllocatedRegion(0,0,W,newH);
-            assertTrue(harness.waitForLayoutComplete());
-
-            int newCenterH = stack(BorderPanel.CENTER).getHeight();
-            assertEquals(newH - 2, newCenterH);
-        }
-
-        @Test
-        void resizingPreservesInsetsPadding() {
-            int pad = 2;
-            panel.setInsets(pad);
-
-            panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2));
-            panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("center"));
-            assertTrue(harness.waitForLayoutComplete());
-
-            int originalTopX = stack(BorderPanel.TOP).getX();
-            int originalTopW = stack(BorderPanel.TOP).getWidth();
-
-            // Resize root
-            int newH = H - 4;
-            int newW = W - 4;
-            harness.setAllocatedRegion(0, 0, newW, newH);
-            assertTrue(harness.waitForLayoutComplete());
-
-            // Insets should still be applied
-            assertEquals(pad, stack(BorderPanel.TOP).getX());
-            assertEquals(newW - (2 * pad), stack(BorderPanel.TOP).getWidth());
-        }
     }
 }

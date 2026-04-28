@@ -6,193 +6,94 @@ import io.netnotes.terminal.TerminalRectangle;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
 /**
  * TerminalDamageTestHarness
  *
- * Extends {@link TerminalLayoutTestHarness} to capture the damage rectangles
- * that are dispatched during each render cycle, making them available for
- * assertions in damage-propagation tests.
+ * Lightweight extension of {@link TerminalLayoutTestHarness} that captures
+ * the damage rectangles dispatched during each render cycle.
  *
- * HOW IT WORKS:
- * The base class calls {@code buildBatchCommand(batch, damage)} once per render
- * cycle, passing the list of damage regions that were accumulated for that frame.
- * Those regions are recycled into the pool immediately after the call returns.
- * This subclass snapshots them (by copying) before delegating to super, then
- * surfaces the snapshot through {@link #waitForRenderAndGetDamage()} /
- * {@link #beginDamageCapture()} + {@link #awaitDamageCapture()}.
- *
- * USAGE PATTERN:
- * <pre>
- *   // Setup - drain the initial layout+render pass so we start clean
- *   harness.attach(panel);
- *   harness.drainInitialRender();   // waits for layout + discards first render's damage
- *
- *   // Test - arm capture BEFORE triggering the action to avoid a race
- *   harness.beginDamageCapture();
- *   panel.invalidate();             // or addToPanel, clearPanel, hide, etc.
- *   List<TerminalRectangle> damage = harness.awaitDamageCapture();
- *   // assert on damage ...
- * </pre>
+ * Fully uses the state‑machine and latch‑based synchronisation; no
+ * {@code CompletableFuture} or {@code waitForLayoutComplete}.
  */
 public class TerminalDamageTestHarness extends TerminalLayoutTestHarness {
 
-    /** Snapshot from the most recently completed render cycle. */
     private volatile List<TerminalRectangle> lastCapturedDamage = List.of();
-
-    /**
-     * Set by {@link #beginDamageCapture()} before the triggering action,
-     * completed inside {@link #buildBatchCommand} when the render fires.
-     * Volatile so both threads see the reference update.
-     */
-    private volatile CompletableFuture<List<TerminalRectangle>> renderFuture;
+    private volatile CountDownLatch damageLatch;
+    private volatile List<TerminalRectangle> capturedDamage;
 
     public TerminalDamageTestHarness(int width, int height) {
         super(width, height);
     }
-
-    // -------------------------------------------------------------------------
-    // Core override — snapshot damage before super recycles the pool objects
-    // -------------------------------------------------------------------------
 
     @Override
     protected NoteBytesObject buildBatchCommand(
             TerminalBatchBuilder batch,
             List<TerminalRectangle> damage) {
 
-        // Copy before super() recycles via regionPool
         List<TerminalRectangle> snapshot = damage.stream()
                 .map(r -> new TerminalRectangle(r.getX(), r.getY(),
                                                 r.getWidth(), r.getHeight()))
                 .collect(Collectors.toList());
         lastCapturedDamage = snapshot;
 
-        NoteBytesObject result = super.buildBatchCommand(batch, damage);
-
-        // Signal any waiting test thread
-        CompletableFuture<List<TerminalRectangle>> f = renderFuture;
-        if (f != null && !f.isDone()) {
-            f.complete(new ArrayList<>(snapshot));
+        CountDownLatch latch = damageLatch;
+        if (latch != null) {
+            capturedDamage = new ArrayList<>(snapshot);
+            latch.countDown();
         }
 
-        return result;
+        return super.buildBatchCommand(batch, damage);
     }
 
-    // -------------------------------------------------------------------------
-    // Public API for tests
-    // -------------------------------------------------------------------------
+    // ── public API ───────────────────────────────────────────────────────
 
     /**
-     * Arms the damage capture latch.  Call this BEFORE the action that should
-     * produce a render (e.g. {@code invalidate()}, {@code addToPanel()}, …),
-     * then call {@link #awaitDamageCapture()} to block until the render fires
-     * and retrieve the damage.
-     *
-     * Pairing beginDamageCapture + awaitDamageCapture avoids a race between
-     * the triggering action scheduling a render on the UI executor and the test
-     * thread setting up the future: the future is in place before the action is
-     * dispatched.
+     * Arm the damage capture. Next render batch will release the latch.
      */
     public void beginDamageCapture() {
-        renderFuture = new CompletableFuture<>();
+        damageLatch = new CountDownLatch(1);
+        capturedDamage = null;
     }
 
     /**
-     * Blocks until the next render cycle completes and returns the damage
-     * regions that were submitted to the batch for that cycle.
-     *
-     * Must be preceded by a call to {@link #beginDamageCapture()}.
-     *
-     * @return snapshot of damage rectangles in absolute screen coordinates
-     * @throws AssertionError if no render fires within 1 second
+     * Block until the next render batch completes and return its damage.
      */
     public List<TerminalRectangle> awaitDamageCapture() {
-        CompletableFuture<List<TerminalRectangle>> f = renderFuture;
-        if (f == null) {
-            throw new IllegalStateException(
-                    "Call beginDamageCapture() before awaitDamageCapture()");
-        }
+        CountDownLatch latch = damageLatch;
+        if (latch == null) throw new IllegalStateException("Call beginDamageCapture() first");
         try {
-            return f.get(1, TimeUnit.SECONDS);
-        } catch (java.util.concurrent.TimeoutException e) {
-            throw new AssertionError(
-                    "No render was dispatched within the timeout. "
-                    + "Did the action actually produce damage?");
+            if (!latch.await(1, TimeUnit.SECONDS)) {
+                throw new AssertionError("No render dispatched within timeout");
+            }
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-            throw new AssertionError("Interrupted while waiting for render", e);
-        } catch (Exception e) {
-            throw new AssertionError("Failed while waiting for render", e);
+            throw new AssertionError("Interrupted", e);
         } finally {
-            renderFuture = null;
+            damageLatch = null;
         }
+        return capturedDamage == null ? List.of() : capturedDamage;
     }
 
-    /**
-     * Convenience shorthand: arm capture, trigger an action via the supplied
-     * runnable, then block until the render fires and return the damage.
-     *
-     * <pre>
-     *   List<TerminalRectangle> damage = harness.captureNextRender(
-     *       () -> panel.invalidate()
-     *   );
-     * </pre>
-     */
     public List<TerminalRectangle> captureNextRender(Runnable trigger) {
         beginDamageCapture();
         trigger.run();
         return awaitDamageCapture();
     }
 
-    /**
-     * Drains the initial layout-and-render pass that occurs immediately after
-     * {@link #attach}.  Call this in {@code @BeforeEach} after {@code attach()}
-     * so that subsequent test actions start from a clean (no-pending-damage) state.
-     *
-     * If the initial pass produces no render (e.g. an all-hidden panel), this
-     * returns quietly after layout completes.
-     */
-    public void drainInitialRender() {
-        // Arm the render future BEFORE waiting for layout, because the render
-        // is typically scheduled by the layout pass itself and may fire
-        // concurrently before waitForLayoutComplete() returns.
-        renderFuture = new CompletableFuture<>();
-        boolean ok = waitForLayoutComplete();
-        if (!ok) throw new AssertionError("Initial layout did not complete");
-        try {
-            // Short timeout — if no render fires the panel had nothing to draw
-            renderFuture.get(500, TimeUnit.MILLISECONDS);
-        } catch (java.util.concurrent.TimeoutException ignored) {
-            // All-hidden panel — nothing was rendered, that's fine
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new AssertionError("Interrupted during initial drain", e);
-        } catch (Exception e) {
-            throw new AssertionError("Error during initial drain", e);
-        } finally {
-            renderFuture = null;
-        }
-    }
-
-    /**
-     * Returns the damage snapshot from the most recently completed render cycle.
-     * Returns an empty list if no render has fired yet.
-     */
     public List<TerminalRectangle> getLastCapturedDamage() {
         return lastCapturedDamage;
     }
 
-    // -------------------------------------------------------------------------
-    // Geometry helpers for assertions
-    // -------------------------------------------------------------------------
+    // No drainInitialRender needed – attach() already waits for idle.
+    // If a test needs to discard the very first render, it can call
+    // captureNextRender(() -> {}) after attach.
 
-    /**
-     * Returns the union bounding box of all captured damage rectangles, or
-     * {@code null} if the list is empty.
-     */
+    // ── Geometry helpers ─────────────────────────────────────────────────
+
     public static TerminalRectangle unionOf(List<TerminalRectangle> regions) {
         if (regions.isEmpty()) return null;
         int x1 = Integer.MAX_VALUE, y1 = Integer.MAX_VALUE;
@@ -206,24 +107,15 @@ public class TerminalDamageTestHarness extends TerminalLayoutTestHarness {
         return new TerminalRectangle(x1, y1, x2 - x1, y2 - y1);
     }
 
-    /**
-     * Returns {@code true} if any damage rectangle in {@code regions} fully
-     * contains the given point (x, y).
-     */
     public static boolean anyContains(List<TerminalRectangle> regions, int x, int y) {
         for (TerminalRectangle r : regions) {
             if (x >= r.getX() && x < r.getX() + r.getWidth()
-                    && y >= r.getY() && y < r.getY() + r.getHeight()) {
+                    && y >= r.getY() && y < r.getY() + r.getHeight())
                 return true;
-            }
         }
         return false;
     }
 
-    /**
-     * Returns {@code true} if the union of all damage rectangles covers the
-     * entire supplied bounding box (left, top, right, bottom — exclusive).
-     */
     public static boolean unionCovers(List<TerminalRectangle> regions,
                                       int x, int y, int w, int h) {
         TerminalRectangle u = unionOf(regions);

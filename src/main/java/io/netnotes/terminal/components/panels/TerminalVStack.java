@@ -119,14 +119,7 @@ public class TerminalVStack extends TerminalAbstractStack {
         int[] layoutIndices = new int[contexts.length];
         int layoutCount = 0;
         for (int i = 0; i < contexts.length; i++) {
-            if (contexts[i].getRenderable().isHidden()) {
-                dataInterfaces.get(contexts[i].getRenderable().getName())
-                    .setLayoutData(TerminalLayoutData.getBuilder()
-                        .setX(0).setY(0).setWidth(0).setHeight(0)
-                        .build());
-            } else {
-                layoutIndices[layoutCount++] = i;
-            }
+            layoutIndices[layoutCount++] = i;
         }
 
         if (layoutCount == 0) {
@@ -319,6 +312,8 @@ public class TerminalVStack extends TerminalAbstractStack {
                         + "\n\tparentRegion=" + RenderDiagnostics.summarizeRegion(parentRegion)
                 );
                 b.hidden(true);
+            }else{
+                b.hidden(false);
             }
 
             dataInterfaces.get(r.getName()).setLayoutData(b.build());
@@ -413,7 +408,8 @@ public class TerminalVStack extends TerminalAbstractStack {
 
             // Children that are hidden (layout-controlled) need another pass
             // to become visible — skip their contribution this pass.
-            if (renderable.isHidden()) continue;
+            // this causes renderables that are becomming unhidden to fail, the pass does not seem to propagate into a second pass
+            if (renderable.isHiddenDesired()) continue;
 
             visibleCount++;
             TerminalRegion child = checkTerminalRegion(renderable);

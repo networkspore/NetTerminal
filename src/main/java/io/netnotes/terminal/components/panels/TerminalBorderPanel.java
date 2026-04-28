@@ -559,7 +559,7 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
 
         if (degenerate) {
             builder.hidden(true);
-        } else if (shouldManageHidden(stack)) {
+        } else {
             // Show the stack if it has visible content, hide it if empty
             boolean hasVisibleContent = visibleContent != null;
             builder.hidden(!hasVisibleContent);

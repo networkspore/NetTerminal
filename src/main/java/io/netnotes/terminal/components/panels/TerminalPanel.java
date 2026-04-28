@@ -118,7 +118,7 @@ public class TerminalPanel extends TerminalGroupRegion {
         int[] heights = new int[count];
         SizePreference[] widthPrefs = new SizePreference[count];
         SizePreference[] heightPrefs = new SizePreference[count];
-        boolean[] managedHidden = new boolean[count];
+
         boolean[] inFlow = new boolean[count];
 
         int visibleCount = 0;
@@ -127,7 +127,7 @@ public class TerminalPanel extends TerminalGroupRegion {
         for (int i = 0; i < count; i++) {
             TerminalLayoutContext childContext = contexts[i];
             TerminalRenderable child = childContext.getRenderable();
-            managedHidden[i] = shouldManageHidden(child);
+      
 
             if (!canUnhide(child)) {
                 widths[i] = 0;
@@ -423,10 +423,8 @@ public class TerminalPanel extends TerminalGroupRegion {
                 .setHeight(Math.max(0, allocatedHeight));
 
             if (!inBounds) {
-                if (managedHidden[i]) {
-                    builder.hidden(overflowStrategy != LayoutOverflowStrategy.OVERFLOW);
-                }
-            } else if (managedHidden[i]) {
+                builder.hidden(overflowStrategy != LayoutOverflowStrategy.OVERFLOW);
+            } else {
                 builder.hidden(false);
             }
 

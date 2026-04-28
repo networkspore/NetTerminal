@@ -9,11 +9,12 @@ import io.netnotes.terminal.components.text.TerminalLabel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
-import static org.junit.jupiter.api.Assertions.*;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
-/**
- * Debug test to trace measurement flow
- */
+import static io.netnotes.terminal.layout.TerminalLayoutTestHarness.STATE_LAYOUT_IDLE;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+
 public class TerminalBorderPanelDebugTest {
 
     private static final int W = 80;
@@ -26,8 +27,7 @@ public class TerminalBorderPanelDebugTest {
     void setup() {
         panel = new TerminalBorderPanel("bp");
         harness = new TerminalLayoutTestHarness(W, H);
-        harness.attach(panel);
-        assertTrue(harness.waitForLayoutComplete(), "Initial layout must complete");
+        harness.attach(panel); // blocks until first layout idle
     }
 
     @Test
@@ -37,19 +37,48 @@ public class TerminalBorderPanelDebugTest {
         label.setHeightPreference(SizePreference.FIT_CONTENT);
 
         panel.addToPanel(BorderPanel.TOP, label);
-        assertTrue(harness.waitForLayoutComplete(), "Layout after adding label must complete");
 
-        TerminalStackPanel topStack = panel.getRegionStack(BorderPanel.TOP);
+        TestGate gate = new TestGate();
+        int[] step = {0};
 
-        System.out.println("\n=== After layout ===");
-        System.out.println("topStack.getRegion() = " + topStack.getRegion());
-        System.out.println("topStack.getHeight() = " + topStack.getHeight());
-        System.out.println("topStack.getContent().getRegion() = " + topStack.getContent().getRegion());
-        System.out.println("topStack.getContent().getMinHeight() = " + ((TerminalLabel)topStack.getContent()).getMinHeight());
-        System.out.println("topStack.getContent().getHeightPreference() = " + ((TerminalLabel)topStack.getContent()).getHeightPreference());
+        harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+            try {
+                if (step[0]++ == 0) {
+                    TerminalStackPanel topStack = panel.getRegionStack(BorderPanel.TOP);
+                    assertEquals(3, topStack.getHeight(), "TOP should have height 3");
+                    gate.open();
+                }
+            } catch (Throwable t) {
+                gate.fail(t);
+            }
+        });
 
-        // The key insight: if the child has FIT_CONTENT and the stack has FIT_CONTENT,
-        // the stack should look at the child's LAYOUT CONTEXT measured bounds, not the child's region
-        assertEquals(3, topStack.getHeight(), "TOP should have height 3");
+        harness.triggerRender();
+        gate.awaitDone();
+    }
+
+    // ── TestGate (same as in previous refactors) ─────────────────────────
+    static final class TestGate {
+        private final CountDownLatch latch = new CountDownLatch(1);
+        private volatile Throwable failure;
+
+        void open() { latch.countDown(); }
+        void fail(Throwable t) {
+            failure = t;
+            latch.countDown();
+        }
+
+        void awaitDone() {
+            try {
+                if (!latch.await(5, TimeUnit.SECONDS)) {
+                    throw new AssertionError("Test timed out: STATE_LAYOUT_IDLE not reached");
+                }
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new AssertionError("Test interrupted", e);
+            }
+            if (failure instanceof AssertionError a) throw a;
+            if (failure != null) throw new AssertionError("Test step failed", failure);
+        }
     }
 }
