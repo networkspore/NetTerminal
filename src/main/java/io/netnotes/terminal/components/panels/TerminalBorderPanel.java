@@ -160,7 +160,11 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
      */
     public void setPanel(BorderPanel region, TerminalRegion child) {
         if (!getUIExecutor().isCurrentThread()) {
-            getUIExecutor().runLater(() -> setPanel(region, child));
+            if (!isAttachedToLayoutManager()) {
+                getUIExecutor().submit(() -> setPanel(region, child), null).join();
+            } else {
+                getUIExecutor().runLater(() -> setPanel(region, child));
+            }
             return;
         }
         if (region == null) {
@@ -185,7 +189,11 @@ public class TerminalBorderPanel extends TerminalGroupRegion {
      */
     public void swapPanel(BorderPanel region, TerminalRegion newChild) {
         if (!getUIExecutor().isCurrentThread()) {
-            getUIExecutor().runLater(() -> swapPanel(region, newChild));
+            if (!isAttachedToLayoutManager()) {
+                getUIExecutor().submit(() -> swapPanel(region, newChild), null).join();
+            } else {
+                getUIExecutor().runLater(() -> swapPanel(region, newChild));
+            }
             return;
         }
         if (region == null) {

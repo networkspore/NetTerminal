@@ -68,6 +68,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
 
     public TerminalStackPanel(String name) {
         super(name, "stackpanel");
+        syncOverflowClipPolicy();
     }
 
     @Override
@@ -113,8 +114,17 @@ public class TerminalStackPanel extends TerminalGroupRegion {
     public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
         if (strategy != null && this.overflowStrategy != strategy) {
             this.overflowStrategy = strategy;
+            syncOverflowClipPolicy();
             requestLayoutUpdate();
         }
+    }
+
+    private void syncOverflowClipPolicy() {
+        setOverflowClipPolicy(
+            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+                ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
+                : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
+        );
     }
 
     // =========================================================================
@@ -170,7 +180,11 @@ public class TerminalStackPanel extends TerminalGroupRegion {
 
      public void addToStack(TerminalRenderable renderable) {
          if (!getUIExecutor().isCurrentThread()) {
-            getUIExecutor().runLater(() -> addToStack(renderable));
+            if (!isAttachedToLayoutManager()) {
+                getUIExecutor().submit(() -> addToStack(renderable), null).join();
+            } else {
+                getUIExecutor().runLater(() -> addToStack(renderable));
+            }
             return;
         }
 
@@ -218,7 +232,11 @@ public class TerminalStackPanel extends TerminalGroupRegion {
 
     public void removeFromStack(TerminalRegion child) {
         if (!getUIExecutor().isCurrentThread()) {
-            getUIExecutor().runLater(() -> removeFromStack(child));
+            if (!isAttachedToLayoutManager()) {
+                getUIExecutor().submit(() -> removeFromStack(child), null).join();
+            } else {
+                getUIExecutor().runLater(() -> removeFromStack(child));
+            }
             return;
         }
 
@@ -249,7 +267,11 @@ public class TerminalStackPanel extends TerminalGroupRegion {
 
     public void clearStack() {
         if (!getUIExecutor().isCurrentThread()) {
-            getUIExecutor().runLater(this::clearStack);
+            if (!isAttachedToLayoutManager()) {
+                getUIExecutor().submit(this::clearStack, null).join();
+            } else {
+                getUIExecutor().runLater(this::clearStack);
+            }
             return;
         }
 

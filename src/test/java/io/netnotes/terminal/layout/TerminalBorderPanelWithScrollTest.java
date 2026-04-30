@@ -57,13 +57,18 @@ public class TerminalBorderPanelWithScrollTest {
         int[] step = {0};
         harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
             try {
-                if (step[0]++ == 0) {
-                    assertions.run();
-                    gate.open();
+                switch (step[0]++) {
+                    case 0 -> {
+                        action.run();
+                        harness.triggerRender();
+                    }
+                    case 1 -> {
+                        assertions.run();
+                        gate.open();
+                    }
                 }
             } catch (Throwable t) { gate.fail(t); }
         });
-        action.run();
         harness.triggerRender();
         gate.awaitDone();
     }
@@ -174,6 +179,8 @@ public class TerminalBorderPanelWithScrollTest {
             TerminalScrollPanel topScroll = new TerminalScrollPanel("top-scroll");
             topScroll.setWidthPreference(SizePreference.FILL);
             topScroll.setHeightPreference(SizePreference.FIT_CONTENT);
+            topScroll.setScrollMode(TerminalScrollPanel.ScrollMode.FIXED_SIZE);
+            topScroll.setVerticalScrollEnabled(false);
             topScroll.addContent(fitContentViewer("top-text", "H1", "H2"));
 
             TerminalScrollPanel centerScroll = new TerminalScrollPanel("center-scroll");
@@ -184,6 +191,8 @@ public class TerminalBorderPanelWithScrollTest {
             TerminalScrollPanel bottomScroll = new TerminalScrollPanel("bottom-scroll");
             bottomScroll.setWidthPreference(SizePreference.FILL);
             bottomScroll.setHeightPreference(SizePreference.FIT_CONTENT);
+            bottomScroll.setScrollMode(TerminalScrollPanel.ScrollMode.FIXED_SIZE);
+            bottomScroll.setVerticalScrollEnabled(false);
             bottomScroll.addContent(fitContentViewer("bottom", "F1", "F2"));
 
             step(() -> {

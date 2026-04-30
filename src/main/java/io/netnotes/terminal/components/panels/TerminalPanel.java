@@ -81,6 +81,7 @@ public class TerminalPanel extends TerminalGroupRegion {
             requestLayoutUpdate();
         });
         updateBorderInsets();
+        syncOverflowClipPolicy();
     }
 
     protected TerminalLayoutGroupCallback createLayoutCallback() {
@@ -647,8 +648,17 @@ public class TerminalPanel extends TerminalGroupRegion {
     public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
         if (strategy != null && this.overflowStrategy != strategy) {
             this.overflowStrategy = strategy;
+            syncOverflowClipPolicy();
             requestLayoutUpdate();
         }
+    }
+
+    private void syncOverflowClipPolicy() {
+        setOverflowClipPolicy(
+            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+                ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
+                : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
+        );
     }
 
     public int getMaxWidth() { return maxWidth; }

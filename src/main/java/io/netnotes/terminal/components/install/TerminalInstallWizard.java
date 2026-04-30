@@ -6,7 +6,6 @@ import java.util.List;
 import java.util.Objects;
 
 import io.netnotes.debug.RenderDiagnostics;
-import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
@@ -18,60 +17,40 @@ import io.netnotes.terminal.components.display.TerminalBitmapView;
 import io.netnotes.terminal.components.install.InstallStep.Status;
 import io.netnotes.terminal.components.panels.TerminalDivider;
 import io.netnotes.terminal.components.panels.TerminalVStack;
-import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
 
 /**
- * TerminalInstallWizard - Component-based installation progress wizard
+ * TerminalInstallWizard - Component-based installation progress wizard.
  *
- * <p>Provides a self-contained installation wizard UI built from smaller
- * terminal components. It composes:
- * <ul>
- *   <li>An optional <b>brand panel</b> (full-width {@link TerminalBitmapView} for logos / art)
- *   <li>A <b>brand divider</b> (shown only when a brand bitmap is present)
- *   <li>A <b>header row</b> showing the wizard title and overall progress bar
- *   <li>A <b>header divider</b> ({@link TerminalDivider}) separating header from step list
- *   <li>A <b>step list</b> ({@link TerminalInstallStepRow} per step inside a {@link TerminalVStack})
- *   <li>A <b>footer divider</b> and status line
- * </ul>
- *
- * LAYOUT OVERVIEW (80 cols, 24 rows, with brand):
+ * <h3>Layout</h3>
  * <pre>
- * ╔══════════════════════════════════════════════════════════════════════════════╗
- * ║  ▄▄▄▄▄  ▄  ▄▄▄▄▄  ▄▄▄▄▄  ▄  ▄  ▄▄▄▄▄  ▄▄▄▄▄  ▄▄▄▄▄  ▄▄▄▄▄               ║
- * ║  █   █  █  █      █      █  █  █   █  ▄▄  █  ▄▄  █  █               ║
- * ║  █   █  █  █▄▄▄   ▀▄▄    █▀▀█  █   █  █   █  █   █  █▄▄▄            ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  NetNotes Installer v1.0                        Overall:  52% [██████░░░░░] ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  ✓  1. Verify System Requirements                                      DONE ║
- * ║  ◉  2. Configure Database…                              67% [███████░░░░░]  ║
- * ╠══════════════════════════════════════════════════════════════════════════════╣
- * ║  Step 2 of 4  ·  Elapsed: 00:12  ·  Press Ctrl+C to cancel                 ║
- * ╚══════════════════════════════════════════════════════════════════════════════╝
+ *   ╔══════════════════════════════════════════════════════╗
+ *   ║  Netnotes Installer v1.0          Overall: 52% [██] ║  ← TerminalWizardHeader (HStack)
+ *   ╠══════════════════════════════════════════════════════╣
+ *   ║  ✓  1. Download Dependencies              COMPLETE  ║
+ *   ║  ◉  2. Configure Database…      47% [████░░░░]      ║
+ *   ║     │  Applying schema migrations…                  ║
+ *   ╠══════════════════════════════════════════════════════╣
+ *   ║  Step 2 of 4  ·  Elapsed: 00:12  ·  Migrating…     ║  ← TerminalWizardFooter (HStack)
+ *   ╚══════════════════════════════════════════════════════╝
  * </pre>
  *
- * BRAND USAGE:
- * <pre>
- *   wizard.setBrandAsciiArt(new String[]{
- *       " ███╗   ██╗███████╗████████╗",
- *       " ████╗  ██║██╔════╝╚══██╔══╝",
- *       " ██╔██╗ ██║█████╗     ██║   ",
- *   }, '█', 4);
- *
- *   // or with a TerminalBitmap
- *   TerminalBitmap logo = new TerminalBitmap(120, 24);
- *   logo.drawRect(0, 0, 120, 24, true);
- *   wizard.setBrandBitmap(logo, RenderMode.SEXTANT, 4);
- * </pre>
- *
- * THREAD SAFETY:
+ * <h3>Thread safety</h3>
  * All public mutating methods end with {@link #invalidate()} so they are safe
- * to call from non-render threads.  Do <em>not</em> call them from inside a
+ * to call from non-render threads. Do <em>not</em> call them from inside a
  * render callback.
  */
 public class TerminalInstallWizard extends TerminalVStack {
+
+    /**
+     * Set to {@code true} locally when diagnosing layout issues.
+     * Kept {@code false} in production to avoid string allocations on every
+     * layout pass.  When false, {@code requestLayoutUpdate()} is a no-op
+     * override and the snapshot helper is never called.
+     */
+    private static final boolean DEBUG_LAYOUT = false;
+
     private static final long LAYOUT_LOG_SUPPRESS_NS = 150_000_000L;
 
 
@@ -102,9 +81,7 @@ public class TerminalInstallWizard extends TerminalVStack {
         void onStepStateChanged(InstallStep step, Status oldStatus, Status newStatus);
     }
 
-    // ===== DEFAULT STYLES =====
-
-
+    // ===== STATE =====
 
     // Step registry (ordered)
     private final List<InstallStep>            steps    = new ArrayList<>();
@@ -126,26 +103,18 @@ public class TerminalInstallWizard extends TerminalVStack {
     private StepStateListener stepStateListener = null;
     private boolean wizardComplete = false;
 
-    // Footer state tracking for efficient updates
-    private int completedStepsCount = -1;
-    private long displayedElapsedMs = -1;
-    private String displayedDetail = null;
-    private boolean hadError = false;
+    // Footer state cache — avoids redundant invalidate() when nothing changed
+    private int    completedStepsCount = -1;
+    private long   displayedElapsedMs  = -1;
+    private String displayedDetail     = null;
+    private boolean hadError           = false;
 
-    // Additional measurement cache state tracking
-    private boolean brandViewVisible = false;
-    private boolean footerVisible = false;
-
-    // Measurement caching for FIT_CONTENT mode
-    private boolean measurementCacheValid = false;
-    private TerminalRectangle cachedMeasuredBounds = null;
+    // ── Child components ─────────────────────────────────────────────────────
 
     private final TerminalWizardHeader headerComponent;
     private final TerminalWizardFooter footerComponent;
-
-    // ── Child components
-    private final TerminalDivider      brandDivider;    // shown only when brand is present
-    private final TerminalBitmapView   brandView;       // null when no brand configured
+    private final TerminalDivider      brandDivider;
+    private final TerminalBitmapView   brandView;
     private final TerminalDivider      headerDivider;
     private final TerminalDivider      footerDivider;
     private final TerminalVStack       stepListStack;
@@ -159,15 +128,15 @@ public class TerminalInstallWizard extends TerminalVStack {
 
         headerComponent = new TerminalWizardHeader(name + "-termWizardHeader");
         footerComponent = new TerminalWizardFooter(name + "-termWizardFooter");
-        brandView = new TerminalBitmapView(name + "-term-install-wizard-brand");
-        brandDivider = new TerminalDivider(name + "-term-install-wizard-bdiv", Orientation.HORIZONTAL);
-        headerDivider = new TerminalDivider(name + "-term-install-wizard-hdiv", Orientation.HORIZONTAL);
-        footerDivider = new TerminalDivider(name + "-fdiv", Orientation.HORIZONTAL);
-        contentSpacer = new TerminalRegion(name + "-term-install-wizard-spacer");
-        stepListStack = new TerminalVStack(name + "-term-install-wizard-steps");
+        brandView       = new TerminalBitmapView(name + "-term-install-wizard-brand");
+        brandDivider    = new TerminalDivider(name + "-term-install-wizard-bdiv", Orientation.HORIZONTAL);
+        headerDivider   = new TerminalDivider(name + "-term-install-wizard-hdiv", Orientation.HORIZONTAL);
+        footerDivider   = new TerminalDivider(name + "-fdiv", Orientation.HORIZONTAL);
+        contentSpacer   = new TerminalRegion(name + "-term-install-wizard-spacer");
+        stepListStack   = new TerminalVStack(name + "-term-install-wizard-steps");
 
         this.autoOverallProgress = builder.autoOverallProgress;
-        this.completionListener = builder.completionListener;
+        this.completionListener  = builder.completionListener;
 
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FILL);
@@ -175,8 +144,6 @@ public class TerminalInstallWizard extends TerminalVStack {
         setBorderStyle(builder.borderLineStyle);
         setBorderTextStyle(builder.borderTextStyle);
         setDrawSeparators(builder.borderSeparators);
-
-
 
         buildLayout(builder);
     }
@@ -186,8 +153,7 @@ public class TerminalInstallWizard extends TerminalVStack {
 
     private void buildLayout(Builder builder) {
 
-        // ── brand panel ───────────────────────────────────────────────────────────
-
+        // ── brand panel ───────────────────────────────────────────────────────
         brandView.setWidthPreference(SizePreference.FILL);
         brandView.setHeightPreference(SizePreference.FIT_CONTENT);
         brandView.setRenderMode(RenderMode.SEXTANT);
@@ -195,12 +161,11 @@ public class TerminalInstallWizard extends TerminalVStack {
         brandView.setBilinear(true);
         brandView.hide();
 
-
         brandDivider.setLineStyle(builder.borderLineStyle);
         brandDivider.setLineTextStyle(builder.borderTextStyle);
         brandDivider.hide();
 
-        // ── header row
+        // ── header ────────────────────────────────────────────────────────────
         headerComponent.setTitle(builder.title);
         headerComponent.setSubtitle(builder.subtitle);
         headerComponent.setStyleTitle(builder.styleTitle);
@@ -214,18 +179,17 @@ public class TerminalInstallWizard extends TerminalVStack {
         headerDivider.setLineStyle(builder.borderLineStyle);
         headerDivider.setLineTextStyle(builder.borderTextStyle);
 
-        // ── step list
-
+        // ── step list ─────────────────────────────────────────────────────────
         stepListStack.setSpacing(0);
         stepListStack.setVAlignment(VAlignment.TOP);
         stepListStack.setWidthPreference(SizePreference.FILL);
         stepListStack.setHeightPreference(SizePreference.FIT_CONTENT);
 
-        // ── content spacer pushes footer to bottom
+        // ── content spacer — pushes footer to the bottom ─────────────────────
         contentSpacer.setWidthPreference(SizePreference.FILL);
         contentSpacer.setHeightPreference(SizePreference.FILL);
 
-        // ── footer ────────────────────────────────────────────────────────────────
+        // ── footer ────────────────────────────────────────────────────────────
         footerDivider.setLineStyle(builder.borderLineStyle);
         footerDivider.setLineTextStyle(builder.borderTextStyle);
 
@@ -233,12 +197,13 @@ public class TerminalInstallWizard extends TerminalVStack {
         footerComponent.setStyleNormal(builder.styleFooter);
         footerComponent.setStyleSuccess(builder.styleSuccess);
         footerComponent.setStyleError(builder.styleError);
-        if(!builder.showFooter){
+
+        if (!builder.showFooter) {
             footerDivider.hide();
             footerComponent.hide();
         }
 
-        // ── wire up (directly to self — no rootStack) ─────────────────────────────
+        // ── wire up (directly to self — no rootStack) ─────────────────────────
         addChild(brandView);
         addChild(brandDivider);
         addChild(headerComponent);
@@ -247,7 +212,6 @@ public class TerminalInstallWizard extends TerminalVStack {
         addChild(contentSpacer);
         addChild(footerDivider);
         addChild(footerComponent);
-        logWizardLayoutSnapshot("buildLayout");
     }
 
     // ===== BRAND PANEL =====
@@ -270,7 +234,6 @@ public class TerminalInstallWizard extends TerminalVStack {
         if (heightRows > 0) {
             brandView.setHeightPreference(SizePreference.FIT_CONTENT);
             brandView.setMinHeight(heightRows);
-            // Override preferred height to the fixed value
             brandView.setFixedAspectRatio(0f);  // disable aspect lock
         } else {
             brandView.setAspectRatioFromBitmap();
@@ -345,10 +308,27 @@ public class TerminalInstallWizard extends TerminalVStack {
         if (step == null) return;
         step.setStepNumber(steps.size() + 1);
         steps.add(step);
-        appendStepRow(step);
+        appendStepRow(step);   // no layout request inside
         updateOverallProgress();
         syncFooter();
-        requestLayoutUpdate();
+        requestLayoutUpdate(); // single layout request
+        invalidate();
+    }
+
+    /**
+     * Add multiple steps at once, then rebuild layout in one pass.
+     * Prefer this over repeated {@link #addStep} calls when pre-loading a step list.
+     */
+    public void addSteps(List<InstallStep> newSteps) {
+        if (newSteps == null || newSteps.isEmpty()) return;
+        for (InstallStep s : newSteps) {
+            s.setStepNumber(steps.size() + 1);
+            steps.add(s);
+            appendStepRow(s);  // no layout request inside
+        }
+        updateOverallProgress();
+        syncFooter();
+        requestLayoutUpdate(); // single layout request for the whole batch
         invalidate();
     }
 
@@ -370,23 +350,12 @@ public class TerminalInstallWizard extends TerminalVStack {
             stepStateListener.onStepStateChanged(step, oldStatus, newStatus);
         }
 
-        // Invalidate measurement cache when step state changes
-        invalidateMeasurementCache();
-        return true;
-    }
-
-    /** Invalidate the measurement cache when any structural change occurs. */
-    private void invalidateMeasurementCache() {
-        measurementCacheValid = false;
-        if (cachedMeasuredBounds != null) {
-            getRegionPool().recycle(cachedMeasuredBounds);
-            cachedMeasuredBounds = null;
-        }
-        // Also reset footer cache
+        // Reset footer cache whenever step state changes
         completedStepsCount = -1;
-        displayedElapsedMs = -1;
-        displayedDetail = null;
-        hadError = false;
+        displayedElapsedMs  = -1;
+        displayedDetail     = null;
+        hadError            = false;
+        return true;
     }
 
     /** Update visual-only progress during animation without invalidating layout. */
@@ -394,11 +363,10 @@ public class TerminalInstallWizard extends TerminalVStack {
         InstallStep step = findStep(stepId);
         if (step == null) return;
 
-        // Only update if step is running and progress actually changed
         if (step.getStatus() == Status.RUNNING && step.getProgress() != progress) {
             step.setProgress(progress);
 
-            // Update overall progress bar header without layout
+            // Push the new value straight to the header bar — no layout needed
             if (headerComponent != null) {
                 headerComponent.setOverallProgress(overallProgress);
                 headerComponent.invalidate();
@@ -406,12 +374,12 @@ public class TerminalInstallWizard extends TerminalVStack {
         }
     }
 
-    /** Update overall progress only if force or actual progress change occurred. */
+    /** Update overall progress only if actual change occurred. */
     private void updateProgress(String stepId, float progress, String detail, boolean force) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
 
-        boolean detailChanged = detail != null && !Objects.equals(step.getDetail(), detail);
+        boolean detailChanged   = detail != null && !Objects.equals(step.getDetail(), detail);
         boolean progressChanged = step.getProgress() != progress;
 
         step.setProgress(progress);
@@ -422,20 +390,6 @@ public class TerminalInstallWizard extends TerminalVStack {
             updateOverallProgress();
             invalidate();
         }
-    }
-
-    /** Add multiple steps at once, then rebuild layout in one pass. */
-    public void addSteps(List<InstallStep> newSteps) {
-        if (newSteps == null || newSteps.isEmpty()) return;
-        for (InstallStep s : newSteps) {
-            s.setStepNumber(steps.size() + 1);
-            steps.add(s);
-        }
-        rebuildStepRowsInternal();
-        updateOverallProgress();
-        syncFooter();
-        requestLayoutUpdate();
-        invalidate();
     }
 
     /** Remove all steps and reset the wizard to empty. */
@@ -452,7 +406,6 @@ public class TerminalInstallWizard extends TerminalVStack {
         syncFooter();
         requestLayoutUpdate();
         invalidate();
-        invalidateMeasurementCache();
     }
 
     /** Rebuild step-row components from the current step list. */
@@ -470,6 +423,11 @@ public class TerminalInstallWizard extends TerminalVStack {
         }
     }
 
+    /**
+     * Appends a single row for {@code step} to the step list stack.
+     * Does NOT call {@code requestLayoutUpdate()} — the caller is responsible
+     * for issuing exactly one layout request after all structural changes are done.
+     */
     private void appendStepRow(InstallStep step) {
         TerminalInstallStepRow row = new TerminalInstallStepRow(
             getName() + "-step-" + step.getId(), step);
@@ -511,6 +469,12 @@ public class TerminalInstallWizard extends TerminalVStack {
         updateProgress(stepId, progress, detail, false);
     }
 
+    /** Force a full redraw of the given step's row. */
+    public void forceRefreshStep(String stepId) {
+        updateProgress(stepId, findStep(stepId) != null ? findStep(stepId).getProgress() : 0f,
+                       null, true);
+    }
+
     /** Append a log line to a step (shown when that row is expanded). */
     public void logLine(String stepId, String line) {
         InstallStep step = findStep(stepId);
@@ -541,7 +505,8 @@ public class TerminalInstallWizard extends TerminalVStack {
     public void failStep(String stepId, String errorMessage) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
-        boolean detailChanged = errorMessage != null && !java.util.Objects.equals(step.getDetail(), errorMessage);
+        boolean detailChanged = errorMessage != null
+                && !java.util.Objects.equals(step.getDetail(), errorMessage);
         updateStepStatus(step, Status.ERROR);
         step.setErrorMessage(errorMessage);
         if (errorMessage != null) step.setDetail(errorMessage);
@@ -578,13 +543,13 @@ public class TerminalInstallWizard extends TerminalVStack {
 
         // Clear footer state cache
         completedStepsCount = -1;
-        displayedElapsedMs = -1;
-        displayedDetail = null;
-        hadError = false;
+        displayedElapsedMs  = -1;
+        displayedDetail     = null;
+        hadError            = false;
 
         for (TerminalInstallStepRow row : stepRows) {
-            row.setExpanded(false);
-            row.refresh();   // pushes reset state (PENDING icon/text) into child labels
+            row.setExpandedQuiet(false);  // quiet — we issue one layout update below
+            row.refresh();               // pushes reset state (PENDING icon/text) into labels
         }
         syncFooter();
         requestLayoutUpdate();
@@ -619,13 +584,12 @@ public class TerminalInstallWizard extends TerminalVStack {
                 rowsWithSpinners++;
             }
         }
-        needsInvalidate |= (rowsWithSpinners > 0); // If any spinners were advanced
+        needsInvalidate |= (rowsWithSpinners > 0);
 
         // Update footer if needed
         boolean footerChanged = syncFooter();
         needsInvalidate |= footerChanged;
 
-        // Only invalidate if something actually changed
         if (needsInvalidate) {
             invalidate();
         }
@@ -644,43 +608,62 @@ public class TerminalInstallWizard extends TerminalVStack {
             if (status == Status.ERROR) hasErr = true;
         }
 
-        // Store previous state to check if anything changed
-        final int prevDone = completedStepsCount;
-        final long prevElapsed = displayedElapsedMs;
-        final String prevDetail = displayedDetail;
-        final boolean prevHasError = hadError;
-
-        boolean changed = (prevDone != done ||
-                          prevElapsed != elapsedMs ||
-                          !Objects.equals(prevDetail, detail) ||
-                          prevHasError != hasErr);
+        // Check cache — skip update if nothing changed
+        boolean changed = (completedStepsCount != done
+                        || displayedElapsedMs  != elapsedMs
+                        || !Objects.equals(displayedDetail, detail)
+                        || hadError            != hasErr);
 
         completedStepsCount = done;
-        displayedElapsedMs = elapsedMs;
-        displayedDetail = detail;
-        hadError = hasErr;
+        displayedElapsedMs  = elapsedMs;
+        displayedDetail     = detail;
+        hadError            = hasErr;
 
         footerComponent.update(done, steps.size(), elapsedMs, detail, wizardComplete, hasErr);
         return changed;
     }
 
-    // ===== EXPAND/COLLAPSE =====
+    // ===== EXPAND / COLLAPSE =====
 
+    /** Expand or collapse the detail area for a single step row. */
     public void setStepExpanded(String stepId, boolean expanded) {
         InstallStep step = findStep(stepId);
         if (step == null) return;
         TerminalInstallStepRow row = findRow(step);
-        if (row != null) row.setExpanded(expanded);
+        if (row != null) row.setExpanded(expanded); // single row → one layout request is fine
     }
 
+    /**
+     * Collapse all step rows in a single layout pass.
+     * Uses {@link TerminalInstallStepRow#setExpandedQuiet} so only one
+     * {@code requestLayoutUpdate()} is issued for the entire batch.
+     */
     public void collapseAll() {
-        for (TerminalInstallStepRow row : stepRows) row.setExpanded(false);
+        boolean changed = false;
+        for (TerminalInstallStepRow row : stepRows) {
+            if (row.isExpanded()) {
+                row.setExpandedQuiet(false);
+                changed = true;
+            }
+        }
+        if (changed) requestLayoutUpdate();
     }
 
+    /**
+     * Expand only the currently running rows, collapse the rest — single layout pass.
+     * Uses {@link TerminalInstallStepRow#setExpandedQuiet} so only one
+     * {@code requestLayoutUpdate()} is issued for the entire batch.
+     */
     public void expandActive() {
+        boolean changed = false;
         for (TerminalInstallStepRow row : stepRows) {
-            row.setExpanded(row.getStep().getStatus() == Status.RUNNING);
+            boolean shouldExpand = row.getStep().getStatus() == Status.RUNNING;
+            if (row.isExpanded() != shouldExpand) {
+                row.setExpandedQuiet(shouldExpand);
+                changed = true;
+            }
         }
+        if (changed) requestLayoutUpdate();
     }
 
     // ===== CONFIGURATION =====
@@ -693,11 +676,11 @@ public class TerminalInstallWizard extends TerminalVStack {
         return this;
     }
 
-    public String getTitle(){
+    public String getTitle() {
         return headerComponent.getTitle();
     }
 
-    public TerminalWizardHeader getTerminalWizardHeader(){
+    public TerminalWizardHeader getTerminalWizardHeader() {
         return headerComponent;
     }
 
@@ -712,14 +695,13 @@ public class TerminalInstallWizard extends TerminalVStack {
     }
 
     public TerminalInstallWizard withShowFooter(boolean show) {
-        if (footerDivider  != null) { if (show) footerDivider.show();  else footerDivider.hide(); }
-        if (footerComponent!= null) { if (show) footerComponent.show(); else footerComponent.hide(); }
+        if (footerDivider   != null) { if (show) footerDivider.show();   else footerDivider.hide(); }
+        if (footerComponent != null) { if (show) footerComponent.show(); else footerComponent.hide(); }
         requestLayoutUpdate();
-        logWizardLayoutSnapshot("withShowFooter(" + show + ")");
         return this;
     }
 
-    public boolean isShowFooter(){
+    public boolean isShowFooter() {
         return !footerDivider.isHidden();
     }
 
@@ -729,9 +711,7 @@ public class TerminalInstallWizard extends TerminalVStack {
     }
 
     public TerminalInstallWizard withBorderStyle(LineStyle style) {
-        if (style != null) {
-            setBorderStyle(style);
-        }
+        if (style != null) setBorderStyle(style);
         return this;
     }
 
@@ -779,16 +759,29 @@ public class TerminalInstallWizard extends TerminalVStack {
         super.setBorderTextStyle(s);
     }
 
-    public void setStyleTitle(TextStyle s)        { headerComponent.setStyleTitle(s);}
+    public void setStyleTitle(TextStyle s)        { headerComponent.setStyleTitle(s); }
     public void setStyleOverallFill(TextStyle s)  { headerComponent.setStyleBarFill(s); }
     public void setStyleOverallEmpty(TextStyle s) { headerComponent.setStyleBarEmpty(s); }
-    public void setStyleFooter(TextStyle s)       { footerComponent.setStyleNormal(s); }
-    public void setStyleSuccess(TextStyle s)      { footerComponent.setStyleSuccess(s); }
-    public void setStyleError(TextStyle s)        { footerComponent.setStyleError(s); }
-    public void setOverallFillChar(char c)        { headerComponent.setFillChar(c); }
-    public void setOverallEmptyChar(char c)       { headerComponent.setEmptyChar(c); }
+    public void setStyleFooter(TextStyle s)        { footerComponent.setStyleNormal(s); }
+    public void setStyleSuccess(TextStyle s)       { footerComponent.setStyleSuccess(s); }
+    public void setStyleError(TextStyle s)         { footerComponent.setStyleError(s); }
+    public void setOverallFillChar(char c)         { headerComponent.setFillChar(c); }
+    public void setOverallEmptyChar(char c)        { headerComponent.setEmptyChar(c); }
 
+    // ===== LAYOUT UPDATE OVERRIDE =====
 
+    /**
+     * Overridden to gate debug logging. When {@link #DEBUG_LAYOUT} is false
+     * this is a transparent pass-through to the super implementation with no
+     * extra overhead.
+     */
+    @Override
+    public void requestLayoutUpdate() {
+        if (DEBUG_LAYOUT) {
+            logWizardLayoutSnapshot("requestLayoutUpdate");
+        }
+        super.requestLayoutUpdate();
+    }
 
     // ===== INTERNAL HELPERS =====
 
@@ -827,12 +820,10 @@ public class TerminalInstallWizard extends TerminalVStack {
     private void refreshRow(InstallStep step, boolean layoutMayHaveChanged) {
         TerminalInstallStepRow row = findRow(step);
         if (row != null) {
-            // Always push the latest step state into the row's child labels first,
-            // then decide whether the outer (wizard) layout also needs recomputing.
             row.syncFromStep();
             if (layoutMayHaveChanged && row.isExpanded()) {
-                row.requestLayoutUpdate();   // row height may have changed (detail/log lines)
-                requestLayoutUpdate();       // wizard layout may have changed too
+                row.requestLayoutUpdate();
+                requestLayoutUpdate();
             }
             row.invalidate();
         }
@@ -853,13 +844,8 @@ public class TerminalInstallWizard extends TerminalVStack {
         return null;
     }
 
-    @Override
-    public void requestLayoutUpdate() {
-        if (headerComponent != null && stepListStack != null && footerComponent != null) {
-            logWizardLayoutSnapshot("requestLayoutUpdate");
-        }
-        super.requestLayoutUpdate();
-    }
+    // ===== DEBUG LOGGING =====
+    // All methods in this section are gated on DEBUG_LAYOUT.
 
     private void logWizardLayoutSnapshot(String stage) {
         RenderDiagnostics.logImportant(
@@ -883,256 +869,17 @@ public class TerminalInstallWizard extends TerminalVStack {
     }
 
     private int countExpandedRows() {
-        int expandedCount = 0;
+        int count = 0;
         for (TerminalInstallStepRow row : stepRows) {
-            if (row.isExpanded()) {
-                expandedCount++;
-            }
+            if (row.isExpanded()) count++;
         }
-        return expandedCount;
+        return count;
     }
 
     private String summarizeWizardComponent(TerminalRenderable renderable) {
         return RenderDiagnostics.summarizeRenderable(renderable)
             + ", "
             + RenderDiagnostics.summarizeSizing(renderable);
-    }
-
-    public int getPreferredWidth() {
-        return resolveMeasuredWidth(null);
-    }
-
-    public int getPreferredHeight() {
-        int measuredWidth = resolveMeasuredWidth(null);
-        int innerWidth = Math.max(1, measuredWidth - getInsets().getHorizontal());
-        return resolveMeasuredHeight(null, innerWidth);
-    }
-
-    @Override
-    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        TerminalRectangle measured = getRegionPool().obtain();
-        int measuredWidth = resolveMeasuredWidth(childContexts);
-        int innerWidth = Math.max(1, measuredWidth - getInsets().getHorizontal());
-        int measuredHeight = resolveMeasuredHeight(childContexts, innerWidth);
-
-        measured.set(0, 0, measuredWidth, measuredHeight);
-        return measured;
-    }
-
-    private int resolveMeasuredWidth(TerminalLayoutContext[] childContexts) {
-        return switch (getWidthPreference()) {
-            case STATIC -> getRegion().getWidth();
-            case FIT_CONTENT -> Math.max(
-                getMinWidth(),
-                calculateFitContentWidth(childContexts) + getInsets().getHorizontal()
-            );
-            default -> getMinWidth();
-        };
-    }
-
-    private int resolveMeasuredHeight(TerminalLayoutContext[] childContexts, int innerWidth) {
-        return switch (getHeightPreference()) {
-            case STATIC -> getRegion().getHeight();
-            case FIT_CONTENT -> calculateFitContentHeight(innerWidth, childContexts);
-            default -> getMinHeight();
-        };
-    }
-
-    // Retained for optional FIT_CONTENT wizard sizing. The default constructor
-    // config sets the wizard to FILL x FILL, so this path is dormant unless a
-    // caller explicitly switches the width preference to FIT_CONTENT.
-    private int calculateFitContentWidth(TerminalLayoutContext[] childContexts) {
-        // Check if we have a valid cache
-        if (measurementCacheValid && cachedMeasuredBounds != null) {
-            return cachedMeasuredBounds.getWidth();
-        }
-
-        int innerWidth = 0;
-
-        if (isMeasuredVisible(brandView)) {
-            SizePreference brandWidthPreference = brandView.getWidthPreference();
-            if (brandWidthPreference == SizePreference.FIT_CONTENT
-                || brandWidthPreference == SizePreference.STATIC) {
-                innerWidth = Math.max(
-                    innerWidth,
-                    measureRenderableWidth(brandView, findChildContext(brandView, childContexts))
-                );
-            }
-        }
-
-        innerWidth = Math.max(
-            innerWidth,
-            headerComponent.getIntrinsicContentWidth() + headerComponent.getInsets().getHorizontal()
-        );
-
-        if (isMeasuredVisible(footerComponent)) {
-            innerWidth = Math.max(
-                innerWidth,
-                footerComponent.getIntrinsicContentWidth() + footerComponent.getInsets().getHorizontal()
-            );
-        }
-
-        for (TerminalInstallStepRow row : stepRows) {
-            if (!isMeasuredVisible(row)) {
-                continue;
-            }
-            innerWidth = Math.max(
-                innerWidth,
-                row.getIntrinsicContentWidth() + row.getInsets().getHorizontal()
-            );
-        }
-
-        return innerWidth;
-    }
-
-    // Retained for optional FIT_CONTENT wizard sizing. The default constructor
-    // config sets the wizard to FILL x FILL, so this path is dormant unless a
-    // caller explicitly switches the height preference to FIT_CONTENT.
-    private int calculateFitContentHeight(int innerWidth, TerminalLayoutContext[] childContexts) {
-        int totalHeight = 0;
-        int sectionCount = 0;
-
-        int[] sectionHeights = {
-            isMeasuredVisible(brandView) ? brandView.getPreferredHeightForWidth(innerWidth) : 0,
-            addMeasuredHeight(brandDivider, childContexts),
-            addMeasuredHeight(headerComponent, childContexts),
-            addMeasuredHeight(headerDivider, childContexts),
-            measureStepListHeight(childContexts),
-            // Spacer is only for distributing extra height in FILL mode; omit it
-            // from FIT_CONTENT measurement so it cannot create a phantom gap.
-            addMeasuredHeight(footerDivider, childContexts),
-            addMeasuredHeight(footerComponent, childContexts)
-        };
-
-        for (int sectionHeight : sectionHeights) {
-            if (sectionHeight <= 0) {
-                continue;
-            }
-            totalHeight += sectionHeight;
-            sectionCount++;
-        }
-
-        if (sectionCount > 1) {
-            totalHeight += (sectionCount - 1) * getSpacing();
-        }
-
-        return Math.max(getMinHeight(), totalHeight + getInsets().getVertical());
-    }
-
-    private boolean isMeasuredVisible(TerminalRenderable renderable) {
-        return renderable != null
-            && renderable != contentSpacer && !renderable.isHidden();
-    }
-
-    private int addMeasuredHeight(
-        TerminalRegion child,
-        TerminalLayoutContext[] childContexts
-    ) {
-        if (!isMeasuredVisible(child)) {
-            return 0;
-        }
-        return measureRenderableHeight(child, findChildContext(child, childContexts));
-    }
-
-    private int measureStepListHeight(TerminalLayoutContext[] childContexts) {
-        if (!isMeasuredVisible(stepListStack)) {
-            return 0;
-        }
-
-        TerminalLayoutContext stepListContext = findChildContext(stepListStack, childContexts);
-        if (stepListContext != null) {
-            return measureRenderableHeight(stepListStack, stepListContext);
-        }
-
-        int totalHeight = 0;
-        int visibleCount = 0;
-        for (TerminalInstallStepRow row : stepRows) {
-            if (!isMeasuredVisible(row)) {
-                continue;
-            }
-            visibleCount++;
-            totalHeight += row.measureCurrentContentHeight();
-        }
-
-        if (visibleCount > 1) {
-            totalHeight += (visibleCount - 1) * stepListStack.getSpacing();
-        }
-
-        return Math.max(
-            stepListStack.getMinHeight(),
-            totalHeight + stepListStack.getInsets().getVertical()
-        );
-    }
-
-    private int measureRenderableWidth(
-        TerminalRegion child,
-        TerminalLayoutContext ctx
-    ) {
-        if (child == null) {
-            return 0;
-        }
-        if (ctx != null) {
-            return readContentDimension(child, ctx, true);
-        }
-
-        TerminalRectangle requested = child.getRequestedRegion();
-        if (requested != null) {
-            return requested.getWidth();
-        }
-
-        if (child instanceof TerminalRegion terminalRegion) {
-            TerminalRectangle measured = terminalRegion.measureContent(null);
-            int measuredWidth = measured.getWidth();
-            terminalRegion.getRegionPool().recycle(measured);
-            if (measuredWidth > 0) {
-                return measuredWidth;
-            }
-        }
-
-        return child.getRegion().getWidth();
-    }
-
-    private int measureRenderableHeight(
-        TerminalRegion child,
-        TerminalLayoutContext ctx
-    ) {
-        if (child == null) {
-            return 0;
-        }
-        if (ctx != null) {
-            return readContentDimension(child, ctx, false);
-        }
-
-        TerminalRectangle requested = child.getRequestedRegion();
-        if (requested != null) {
-            return requested.getHeight();
-        }
-
-      
-        TerminalRectangle measured = child.measureContent(null);
-        int measuredHeight = measured.getHeight();
-        child.getRegionPool().recycle(measured);
-        if (measuredHeight > 0) {
-            return measuredHeight;
-        }
-      
-
-        return child.getRegion().getHeight();
-    }
-
-    private TerminalLayoutContext findChildContext(
-        TerminalRenderable child,
-        TerminalLayoutContext[] childContexts
-    ) {
-        if (child == null || childContexts == null) {
-            return null;
-        }
-        for (TerminalLayoutContext ctx : childContexts) {
-            if (ctx != null && ctx.getRenderable() == child) {
-                return ctx;
-            }
-        }
-        return null;
     }
 
     // ===== BUILDER =====
@@ -1147,21 +894,19 @@ public class TerminalInstallWizard extends TerminalVStack {
         private final String name;
 
         // content (mutable post-construction, but sensible defaults here)
-        private String  title    = "Installation Wizard";
-        private String  subtitle = null;
+        private String title    = "Installation Wizard";
+        private String subtitle = null;
 
         // structural — effectively final after construction
-        private boolean   showBorder         = true;
-        private boolean   showFooter         = true;
-        private boolean   showElapsed        = true;
-        // The wizard already inserts explicit divider children; defaulting
-        // automatic separators on top of them wastes vertical space.
-        private boolean   borderSeparators   = false;
-        private boolean   autoOverallProgress = true;
-        private int       overallBarWidth    = 20;
-        private char      overallFillChar    = '█';
-        private char      overallEmptyChar   = '░';
-        private LineStyle borderLineStyle        = LineStyle.DOUBLE;
+        private boolean showBorder          = true;
+        private boolean showFooter          = true;
+        private boolean showElapsed         = true;
+        private boolean borderSeparators    = false;
+        private boolean autoOverallProgress = true;
+        private int     overallBarWidth     = 20;
+        private char    overallFillChar     = '█';
+        private char    overallEmptyChar    = '░';
+        private LineStyle borderLineStyle   = LineStyle.DOUBLE;
 
         // styles — effectively final after construction
         private TextStyle borderTextStyle   = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
@@ -1179,7 +924,7 @@ public class TerminalInstallWizard extends TerminalVStack {
             this.name = Objects.requireNonNull(name, "name must not be null");
         }
 
-        // ── structural ────────────────────────────────────────────────────────────
+        // ── structural ────────────────────────────────────────────────────────
 
         public Builder title(String title) {
             this.title = title != null ? title : "";
@@ -1236,7 +981,7 @@ public class TerminalInstallWizard extends TerminalVStack {
             return this;
         }
 
-        // ── styles ────────────────────────────────────────────────────────────────
+        // ── styles ────────────────────────────────────────────────────────────
 
         public Builder styleBorder(TextStyle s) {
             this.borderTextStyle = Objects.requireNonNull(s);
@@ -1273,9 +1018,15 @@ public class TerminalInstallWizard extends TerminalVStack {
             return this;
         }
 
-        /** Convenience: apply one style to all TextStyle fields simultaneously. */
+        /**
+         * Convenience: apply one {@code base} and one {@code accent} style
+         * to all text-style fields simultaneously.
+         * <p>
+         * Equivalent to calling all eight individual style setters; useful for
+         * quickly switching between light/dark or monochrome themes.
+         */
         public Builder uniformStyle(TextStyle base, TextStyle accent) {
-            this.borderTextStyle       = base;
+            this.borderTextStyle   = base;
             this.styleTitle        = accent;
             this.styleOverallFill  = accent;
             this.styleOverallEmpty = base;
@@ -1285,14 +1036,33 @@ public class TerminalInstallWizard extends TerminalVStack {
             return this;
         }
 
-        // ── callback ─────────────────────────────────────────────────────────────
+        /**
+         * Convenience factory: apply a two-tone theme to a builder instance.
+         * Useful when the builder is constructed elsewhere and passed in.
+         *
+         * <pre>
+         *   Builder.styleFrom(wizard.toBuilder(), TextStyle.NORMAL, TextStyle.BOLD)
+         *          .build();
+         * </pre>
+         */
+        public static Builder styleFrom(Builder b, TextStyle normal, TextStyle accent) {
+            return b.styleBorder(normal)
+                    .styleTitle(accent)
+                    .styleOverallFill(accent)
+                    .styleOverallEmpty(normal)
+                    .styleFooter(normal)
+                    .styleSuccess(accent)
+                    .styleError(accent);
+        }
+
+        // ── callback ─────────────────────────────────────────────────────────
 
         public Builder onComplete(CompletionListener listener) {
             this.completionListener = listener;
             return this;
         }
 
-        // ── terminal ─────────────────────────────────────────────────────────────
+        // ── terminal ─────────────────────────────────────────────────────────
 
         public TerminalInstallWizard build() {
             return new TerminalInstallWizard(this);

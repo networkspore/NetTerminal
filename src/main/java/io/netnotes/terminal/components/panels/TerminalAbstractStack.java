@@ -99,6 +99,7 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
         // Wire the padding callback so any mutation triggers inset recalc + layout.
         this.padding.setOnChanged(this::onPaddingChanged);
+        syncOverflowClipPolicy();
     }
 
     // =========================================================================
@@ -231,11 +232,20 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
     public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
         if (strategy != null && this.overflowStrategy != strategy) {
             this.overflowStrategy = strategy;
+            syncOverflowClipPolicy();
             requestLayoutUpdate();
         }
     }
 
     public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy; }
+
+    protected void syncOverflowClipPolicy() {
+        setOverflowClipPolicy(
+            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+                ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
+                : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
+        );
+    }
 
     // ── alignment ─────────────────────────────────────────────────────────────
 

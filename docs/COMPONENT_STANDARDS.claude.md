@@ -13,12 +13,12 @@ This document serves as an API reference for the Netnotes rendering system, expl
 ```
 Renderable (Base)
 ├── TerminalRenderable (Terminal-specific)
-│   ├── TerminalRegion (Base region component)
-│   │   ├── TerminalPanel (Single-axis container)
-│   │   ├── TerminalHStack (Horizontal stack)
-│   │   ├── TerminalVStack (Vertical stack)
-│   │   ├── TerminalOverlayPanel (Multi-visible Z-axis stacking)
+│   ├── TerminalRegion (Base region component — empty by nature)
 │   │   └── TerminalGroupRegion (Base group-owner)
+│   │       ├── TerminalPanel (Single-axis container)
+│   │       ├── TerminalHStack (Horizontal stack)
+│   │       ├── TerminalVStack (Vertical stack)
+│   │       ├── TerminalOverlayPanel (Multi-visible Z-axis stacking)
 │   │       └── [Panel implementations]
 ```
 
@@ -303,6 +303,39 @@ All rendering methods automatically:
 ### Purpose
 Base region component defining size preferences, insets, and dimensionality for terminal components.
 
+### Empty-by-Nature Semantic
+
+TerminalRegion is intentionally designed to be **empty by nature**. It has no built-in layout capability and does not own a layout group. The class is provided for:
+
+1. **Simple components** that only need size preferences and positioning (e.g., spacers)
+2. **Layout utilities** that operate on child dimensions without owning children
+
+Components that need to own children and orchestrate their layout should extend `TerminalGroupRegion` instead.
+
+### Enforced Restrictions
+
+TerminalRegion enforces two critical restrictions to prevent misuse:
+
+1. **No children allowed** — `addChild()` throws `IllegalStateException` if called directly on TerminalRegion. Child management is handled by `TerminalGroupRegion` subclasses.
+
+2. **FIT_CONTENT not supported** — `setWidthPreference()` and `setHeightPreference()` throw `IllegalStateException` if FIT_CONTENT is set on TerminalRegion. Only `TerminalGroupRegion` subclasses support content-dependent sizing.
+
+### Usage Guidelines
+
+**DO extend TerminalRegion when:**
+- Building simple layout components with no children (e.g., spacers, flexible-size boxes)
+- Implementing utility methods that work with child dimensions
+
+**DO NOT extend TerminalRegion when:**
+- You need to own and manage children
+- You need content-dependent sizing (FIT_CONTENT)
+- You need to implement `measureContent()` to contribute to parent sizing
+
+**Instead extend TerminalGroupRegion when:**
+- You need to own children and wire them to a layout group
+- You need FIT_CONTENT on the growing axis
+- You need to implement `measureContent()` for custom sizing logic
+
 ### Dimensionality Model
 
 **Four Axes:**
@@ -373,6 +406,8 @@ TerminalRectangle measureContent(TerminalLayoutContext[] childContexts)
 
 ### Purpose
 Base class for components that own a layout group and automatically wire children into that group.
+
+**Note:** Extends `TerminalRegion` but adds child ownership and layout group management. `TerminalRegion` itself is empty-by-nature and does not support these features.
 
 ### Lifecycle Contract
 
@@ -500,6 +535,23 @@ private void layoutChildren(
 }
 ```
 
+**Pass 1 - Visibility Filtering:**
+```java
+// Force-hidden children are NOT in contexts[] array at all
+// (the layout manager excludes them upstream).
+// Hidden-but-not-force-hidden children ARE in contexts[]
+// — they get a zero-size allocation and are skipped for placement.
+
+int[] layoutIndices = new int[contexts.length];
+int layoutCount = 0;
+for (int i = 0; i < contexts.length; i++) {
+    if (!contexts[i].getRenderable().isHiddenForced()) {
+        layoutIndices[layoutCount++] = i;
+    }
+}
+// Only layoutIndices[0..layoutCount-1] participate in placement.
+```
+
 **Pass 2 - Raw Size Resolution:**
 ```java
 // Width preference resolution
@@ -522,7 +574,7 @@ switch (overflowStrategy) {
 }
 ```
 
-**Pass 4 - Placement:**
+**Pass 4 - Placement (visibility-aware ordering flow):**
 ```java
 // Cross-axis alignment
 if (crossAlignment == STRETCH) {
@@ -531,6 +583,16 @@ if (crossAlignment == STRETCH) {
     // CENTER or START alignment
     // Adjust position by remaining space
 }
+
+// Only place children that are NOT hidden
+// (hidden children receive zero-size, no placement)
+if (child.isHidden()) {
+    // skip placement; data already has zero-size allocation
+    continue;
+}
+
+// Hidden children that are NOT force-hidden still get a valid
+// measuredContentBounds for future unhide — they just aren't placed.
 ```
 
 ### Measure Content
@@ -629,6 +691,9 @@ private void layoutStack(
     for (TerminalLayoutContext context : contexts) {
         TerminalRenderable child = context.getRenderable();
 
+        // Force-hidden children are excluded from contexts[] entirely.
+        // Only non-force-hidden children reach this loop.
+
         if (!child.isVisible()) {
             // Set hidden=true, no coordinates
             continue;
@@ -670,22 +735,95 @@ private void layoutStack(
 
 ```java
 TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-    // Footprint = intersection of all visible children's bounds
-    int intersectW = Integer.MAX_VALUE;
-    int intersectH = Integer.MAX_VALUE;
+    SizePreference ownWidthPref  = getWidthPreference();
+    SizePreference ownHeightPref = getHeightPreference();
 
-    for (TerminalRenderable visible : visibleSet) {
-        TerminalLayoutContext ctx = findContext(childContexts, visible);
-        if (ownWP == SizePreference.FIT_CONTENT) {
-            intersectW = Math.min(intersectW, readDimension(ctx, true));
+    int maxWidth    = 0;
+    int totalHeight = 0;
+    int visibleCount = 0;
+
+    for (TerminalLayoutContext childContext : childContexts) {
+        TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
+
+        // VISIBILITY RULE: if the axis is intended to grow with content
+        // (FIT_CONTENT) or allows overflow (OVERFLOW strategy),
+        // ALL non-force-hidden children must be measured.
+        // A hidden child may become visible later — the parent must
+        // have an accurate content footprint ready.
+        if (ownHeightPref == SizePreference.FIT_CONTENT
+                || overflowStrategy == OVERFLOW) {
+            visibleCount++;
+        } else if (!child.isHidden()) {
+            visibleCount++;
         }
-        if (ownHP == SizePreference.FIT_CONTENT) {
-            intersectH = Math.min(intersectH, readDimension(ctx, false));
-        }
+
+        SizePreference childWidthPref = child.getWidthPreference() == INHERIT
+            ? ownWidthPref : child.getWidthPreference();
+        SizePreference childHeightPref = child.getHeightPreference() == INHERIT
+            ? ownHeightPref : child.getHeightPreference();
+
+        int minWidth  = child.getMinWidth();
+        int minHeight = child.getMinHeight();
+
+        // Width contribution — use readContentDimension for FIT_CONTENT
+        maxWidth = Math.max(maxWidth, switch (childWidthPref) {
+            case FIT_CONTENT -> Math.max(minWidth,
+                readContentDimension(child, childContext, true));
+            case PERCENT, FILL -> minWidth;
+            default -> Math.max(minWidth,
+                childContext.getRequestedRegion() != null
+                    ? childContext.getRequestedRegion().getWidth()
+                    : childContext.getCurrentRegion().getWidth());
+        });
+
+        // Height contribution
+        totalHeight += switch (childHeightPref) {
+            case FIT_CONTENT -> Math.max(minHeight,
+                readContentDimension(child, childContext, false));
+            case PERCENT, FILL -> minHeight;
+            default -> Math.max(minHeight,
+                childContext.getRequestedRegion() != null
+                    ? childContext.getRequestedRegion().getHeight()
+                    : childContext.getCurrentRegion().getHeight());
+        };
     }
 
-    return Math.max(getMinWidth(),  intersectW + ins.getHorizontal());
-    return Math.max(getMinHeight(), intersectH + ins.getVertical());
+    // Account for spacing between visible children
+    if (visibleCount > 1) {
+        totalHeight += (visibleCount - 1) * (drawSeparators ? 1 : spacing);
+    }
+
+    // Resolve own dimensions based on own size preferences
+    int w = switch (ownWidthPref) { ... };
+    int h = switch (ownHeightPref) { ... };
+
+    TerminalRectangle measured = getRegionPool().obtain();
+    measured.set(0, 0, w, h);
+    return measured;
+}
+```
+
+**`readContentDimension` Usage:**
+```java
+// Reads the child's dimension according to its size preference:
+// 1. In-flight measuredContentBounds (freshest)
+// 2. Child's requestedRegion (user-staged)
+// 3. Child's committed region (last known)
+protected int readContentDimension(TerminalRegion child,
+                                   TerminalLayoutContext ctx,
+                                   boolean isWidth) {
+    TerminalRectangle bounds = ctx.getMeasuredContentBounds();
+    int min = isWidth ? child.getMinWidth() : child.getMinHeight();
+    if (bounds != null) {
+        return Math.max(min, isWidth ? bounds.getWidth() : bounds.getHeight());
+    }
+    TerminalRectangle requested = child.getRequestedRegion();
+    if (requested != null) {
+        return Math.max(min, isWidth ? requested.getWidth() : requested.getHeight());
+    }
+    return Math.max(min, isWidth
+        ? ctx.getCurrentRegion().getWidth()
+        : ctx.getCurrentRegion().getHeight());
 }
 ```
 
@@ -695,6 +833,27 @@ TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
 
 ### Purpose
 Shared base for TerminalHStack and TerminalVStack with axis-independent features.
+
+### Visibility Handling Philosophy
+
+Components that can grow with content (FIT_CONTENT on the growing axis) or allow overflow (OVERFLOW strategy) must measure ALL children in `measureContent` — including those currently hidden. A hidden child may become visible later, and the parent must have an accurate content footprint ready.
+
+Conversely, components with a fixed/growing axis (FILL/PERCENT/STATIC + CLIP strategy) only need to account for currently-visible children, because the parent will not grow to accommodate new ones.
+
+**Key methods:**
+```java
+// Check if a child can ever become unhidden (not force-hidden by a parent)
+protected boolean canUnhide(TerminalRenderable child) {
+    return child != null && !child.isHiddenForced();
+}
+
+// Check if the child is force-hidden (excluded from layout contexts entirely)
+child.isHiddenForced()  // true → child not in contexts[]
+
+// Whether this container clips children that overflow
+boolean clipsChildren = ownAxisPreference != FIT_CONTENT
+                    && overflowStrategy != OVERFLOW;
+```
 
 ### Shared Features
 
@@ -742,9 +901,6 @@ private void layoutAllChildren(...)
 // Constructor (called at end to register group)
 initLayoutCallback()
 
-// Preferred sizing
-int getPreferredWidth()   // Axis-aware
-int getPreferredHeight()  // Axis-aware
 
 // Rendering
 protected void renderSelf(TerminalBatchBuilder batch)
@@ -1886,6 +2042,71 @@ private void layoutChildren(...) {
 
 ---
 
+## Visibility Handling Standards
+
+This section summarizes the correct visibility-handling rules for stack-based components (`TerminalVStack`, `TerminalHStack`, and similar container layouts).
+
+### Two Kinds of Hidden
+
+| State | Meaning | In `contexts[]`? | Measured? | Placed? |
+|---|---|---|---|---|
+| `isHiddenForced()` | Parent or ancestor forced hide (excluded from layout) | **No** | No | No |
+| `isHidden()` but not forced | Self-hidden or policy-hidden, may unhide later | **Yes** | **Yes** (if axis grows) | No |
+
+### measureContent Visibility Rules
+
+1. **Axis grows with content (FIT_CONTENT) or allows overflow (OVERFLOW strategy):**
+   - Measure ALL non-force-hidden children, even hidden ones.
+   - A hidden child may become visible later — the parent must have an accurate content footprint.
+   - Use `canUnhide(child)` / `!child.isHiddenForced()` to include these children.
+
+2. **Axis is fixed/growing (FILL/PERCENT/STATIC) with CLIP strategy:**
+   - Only measure currently-visible children.
+   - The parent will not grow to accommodate new children, so hidden ones don't matter.
+
+3. **Child dimension access** — always use `readContentDimension()`:
+   - Prefers `measuredContentBounds` (freshest, in-flight measurement)
+   - Falls back to `requestedRegion` (user-staged)
+   - Falls back to `currentRegion` (last committed)
+
+### layoutChildren Visibility Rules
+
+1. **Filtering** — force-hidden children are already absent from `contexts[]`.
+   - Hidden-but-not-forced children ARE present and must be handled.
+
+2. **Allocation** — all children in `contexts[]` get a size allocation (including hidden ones) so `measuredContentBounds` is populated for future unhiding.
+
+3. **Placement** — only non-hidden children are placed at a position.
+   - Hidden children receive zero-size allocation or are skipped in the placement loop.
+   - Use `layoutIndices[]` to track which children participate in placement:
+     ```java
+     int layoutCount = 0;
+     for (int i = 0; i < contexts.length; i++) {
+         if (!contexts[i].getRenderable().isHiddenForced()) {
+             layoutIndices[layoutCount++] = i;
+         }
+     }
+     // Only place layoutIndices[0..layoutCount-1]
+     ```
+
+### Ordering Flow Summary
+
+```
+measureContent:
+  for each child in contexts[]:
+    if (axis grows with content || overflow == OVERFLOW):
+        measure ALL non-force-hidden  ← includes hidden
+    else:
+        measure only visible children
+
+layoutChildren:
+  filter: contexts[] already excludes force-hidden
+  allocate sizes: ALL children in contexts[] get size
+  place: only non-hidden children get x,y coordinates
+```
+
+---
+
 ## Summary
 
 This document provides a comprehensive reference for the Netnotes-Engine and NetTerminal component system. Key takeaways:
@@ -1900,12 +2121,13 @@ This document provides a comprehensive reference for the Netnotes-Engine and Net
 8. **Layer system** controls render order (normal → floating → modal → notification)
 9. **Animation** is done via layout updates with interpolation
 10. **State machine** manages transitions with callbacks
+11. **Visibility handling** — see "Visibility Handling Standards" section for `measureContent` and `layoutChildren` rules
 
 For implementing new components:
 1. Extend `TerminalGroupRegion` (or `TerminalRegion` for simple components)
 2. Implement `createLayoutCallback()` for positioning
-3. Implement `measureContent()` for sizing
+3. Implement `measureContent()` for sizing — follow visibility rules for axis growth
 4. Implement `renderSelf()` for rendering
 5. Use object pooling to minimize allocations
 6. Request layout updates when state changes
-7. Handle visibility and hidden state properly
+7. Handle visibility and hidden state properly — see Visibility Handling Standards

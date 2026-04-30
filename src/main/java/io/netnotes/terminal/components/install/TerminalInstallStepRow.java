@@ -37,6 +37,14 @@ import io.netnotes.terminal.layout.TerminalLayoutContext;
  *   rows 2-N: log TerminalLabel pool  (hidden when slots unused)
  */
 public class TerminalInstallStepRow extends TerminalVStack {
+
+    /**
+     * Set to {@code true} locally when diagnosing layout issues.
+     * Kept {@code false} in production to avoid string allocations on every
+     * layout pass.
+     */
+    private static final boolean DEBUG_LAYOUT = false;
+
     private static final long LAYOUT_LOG_SUPPRESS_NS = 100_000_000L;
 
     // ===== STYLE DEFAULTS =====
@@ -115,13 +123,12 @@ public class TerminalInstallStepRow extends TerminalVStack {
         progressBar.setMinHeight(1);
         progressBar.hide();
 
-        // Status tag: FILL, shown when not RUNNING (mutually exclusive with progressBar,
-        // which is also FILL — exactly one of the two is in the layout at a time).
+        // Status tag: FIT_CONTENT, shown when not RUNNING (mutually exclusive with
+        // progressBar — exactly one of the two is in the layout at a time).
         statusTagLabel = new TerminalLabel(name + "-trm-install-tag");
         statusTagLabel.setWidthPreference(SizePreference.FIT_CONTENT);
         statusTagLabel.setMinWidth(8);
         statusTagLabel.setMinHeight(1);
-
         statusTagLabel.setTextAlignment(TextAlignment.RIGHT);
 
         mainRow.addChild(iconLabel);
@@ -262,11 +269,31 @@ public class TerminalInstallStepRow extends TerminalVStack {
         requestLayoutUpdate();
     }
 
+    /**
+     * Expand or collapse the detail/log area for this row.
+     * Triggers a layout update because the row height changes.
+     */
     public void setExpanded(boolean expanded) {
         if (this.expanded != expanded) {
             this.expanded = expanded;
             syncFromStep();
             requestLayoutUpdate();
+        }
+    }
+
+    /**
+     * Expand or collapse without requesting a layout update.
+     * <p>
+     * Package-private — intended for batch operations in
+     * {@link TerminalInstallWizard} (e.g. {@code collapseAll},
+     * {@code expandActive}) where the wizard issues a single
+     * {@code requestLayoutUpdate()} after all rows have been updated.
+     */
+    void setExpandedQuiet(boolean expanded) {
+        if (this.expanded != expanded) {
+            this.expanded = expanded;
+            syncFromStep();
+            // No requestLayoutUpdate() here — caller is responsible
         }
     }
 
@@ -309,7 +336,7 @@ public class TerminalInstallStepRow extends TerminalVStack {
 
     @Override
     public void requestLayoutUpdate() {
-        if (mainRow != null && detailLabel != null) {
+        if (DEBUG_LAYOUT && mainRow != null && detailLabel != null) {
             logRowLayoutSnapshot("requestLayoutUpdate");
         }
         super.requestLayoutUpdate();
@@ -492,6 +519,9 @@ public class TerminalInstallStepRow extends TerminalVStack {
         return child.getRegion().getHeight();
     }
 
+    // ===== DEBUG LOGGING =====
+    // Gated on DEBUG_LAYOUT — no allocations in production.
+
     private void logRowLayoutSnapshot(String stage) {
         boolean hasDetail = step.getDetail() != null && !step.getDetail().isBlank();
         boolean suspicious = expanded
@@ -539,6 +569,4 @@ public class TerminalInstallStepRow extends TerminalVStack {
             + ", "
             + RenderDiagnostics.summarizeSizing(renderable);
     }
-
-
 }

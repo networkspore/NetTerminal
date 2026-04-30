@@ -1,186 +1,185 @@
 package io.netnotes.terminal.components.install;
 
-
+import io.netnotes.engine.ui.LabelTruncation;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TextStyle;
-import io.netnotes.terminal.components.TerminalRegion;
-import io.netnotes.terminal.layout.TerminalLayoutContext;
+import io.netnotes.terminal.components.TerminalProgressBar;
+import io.netnotes.terminal.components.panels.TerminalHStack;
+import io.netnotes.terminal.components.text.TerminalLabel;
 
 /**
- * TerminalWizardHeader - Single-row title + overall progress bar.
+ * TerminalWizardHeader – single-row title + overall progress bar.
  *
- * Renders:
+ * Renders (example):
  *   "  Netnotes Installer v1.0          Overall:  52% [██████░░░░░]"
  *
- * Height is always 1 (FIT_CONTENT). Width is FILL.
- * All display state is set via setters; call invalidate() after any change.
+ * Layout is fully delegated to {@link TerminalHStack} + children:
+ * <pre>
+ *   titleLabel (FILL, truncates at end)
+ *   barLabel   (FIT_CONTENT, " Overall: ")
+ *   overallBar (FIT_CONTENT, min 20 cols)
+ * </pre>
+ *
+ * No custom {@code renderSelf} or {@code measureContent} — sizing and
+ * rendering are inherited from {@code TerminalHStack} and its children.
+ * On narrow terminals the title truncates before the bar is pushed off-screen;
+ * if the bar itself no longer fits, the HStack simply clips it.
  */
-public class TerminalWizardHeader extends TerminalRegion {
+public class TerminalWizardHeader extends TerminalHStack {
+
+    // Stored separately so setSubtitle() can compose without re-parsing the label
+    private String title    = "";
+    private String subtitle = null;
+
+    // Cached values whose getters callers may need (avoids reaching into ProgressBar)
+    private float overallProgress = 0f;
 
 
-    private static final int TITLE_PADDING     = 2;
+    private final TerminalLabel       titleLabel;
+    private final TerminalLabel       barLabel;
+    private final TerminalProgressBar overallBar;
 
-    private String    title            = "Installation Wizard";
-    private String    subtitle         = null;
-    private float     overallProgress  = 0f;
-    private char      fillChar         = '█';
-    private char      emptyChar        = '░';
-    private int       overallBarWidth  = 20;
-
-    private TextStyle styleTitle       = TextStyle.BOLD;
-    private TextStyle styleBarLabel    = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
-    private TextStyle styleBarFill     = TextStyle.BOLD.withForeground(TextStyle.Color.CYAN);
-    private TextStyle styleBarEmpty    = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
+    // ===== CONSTRUCTION =====
 
     public TerminalWizardHeader(String name) {
         super(name);
+        setSpacing(0);
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FIT_CONTENT);
         setMinHeight(1);
+
+        // Title — consumes all remaining width; end-truncates when too narrow
+        titleLabel = new TerminalLabel(name + "-title");
+        titleLabel.setWidthPreference(SizePreference.FILL);
+        titleLabel.setTextTruncation(LabelTruncation.END);
+        addChild(titleLabel);
+
+        // Fixed " Overall: " separator
+        barLabel = new TerminalLabel(name + "-bar-label");
+        barLabel.setText(" Overall: ");
+        barLabel.setWidthPreference(SizePreference.FIT_CONTENT);
+        addChild(barLabel);
+
+        // Overall progress bar — percentage shown inline by the bar itself
+        overallBar = new TerminalProgressBar(name + "-bar");
+        overallBar.setWidthPreference(SizePreference.FIT_CONTENT);
+        overallBar.setHeightPreference(SizePreference.FIT_CONTENT);
+        overallBar.setMinWidth(20);
+        overallBar.setShowPercentage(true);
+        addChild(overallBar);
     }
 
-    // ===== SETTERS =====
+    // ===== CONTENT SETTERS =====
 
-    public void setTitle(String title)           { this.title = title != null ? title : ""; requestLayoutUpdate(); }
-    public void setSubtitle(String subtitle)     { this.subtitle = subtitle;                 requestLayoutUpdate(); }
-    public void setOverallProgress(float p)      { this.overallProgress = Math.max(0f, Math.min(1f, p)); invalidate(); }
-    public void setFillChar(char c)              { this.fillChar  = c; invalidate(); }
-    public void setEmptyChar(char c)             { this.emptyChar = c; invalidate(); }
-    public void setStyleTitle(TextStyle s)       { this.styleTitle    = s; invalidate(); }
-    public void setStyleBarLabel(TextStyle s)    { this.styleBarLabel = s; invalidate(); }
-    public void setStyleBarFill(TextStyle s)     { this.styleBarFill  = s; invalidate(); }
-    public void setStyleBarEmpty(TextStyle s)    { this.styleBarEmpty = s; invalidate(); }
-    public void setOverallBarWidth(int i)        { this.overallBarWidth = i; requestLayoutUpdate(); }
-    
-
-    public String getTitle() {return title; }
-    public String getSubtitle() { return subtitle;}
-    public float getOverallProgress() { return overallProgress; }
-    public char getFillChar() { return fillChar; }
-    public char getEmptyChar() { return emptyChar; }
-    public TextStyle getStyleTitle() { return styleTitle; }
-    public TextStyle getStyleBarLabel() { return styleBarLabel; }
-    public TextStyle getStyleBarFill() { return styleBarFill; }
-    public TextStyle getStyleBarEmpty() { return styleBarEmpty; }
-
-    // ===== SIZING =====
-
-    public int getPreferredHeight() {
-        return resolveMeasuredHeight();
+    /** Sets the primary title text. Triggers a label update (layout-aware). */
+    public void setTitle(String text) {
+        this.title = text != null ? text : "";
+        refreshTitleLabel();
     }
 
-    public int getPreferredWidth() {
-        return resolveMeasuredWidth();
+    /**
+     * Sets an optional subtitle appended to the title: "  Title  Subtitle".
+     * Pass {@code null} or blank to clear.
+     */
+    public void setSubtitle(String subtitle) {
+        this.subtitle = subtitle;
+        refreshTitleLabel();
     }
 
-    @Override
-    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        TerminalRectangle measured = getRegionPool().obtain();
-        measured.set(0, 0, resolveMeasuredWidth(), resolveMeasuredHeight());
-        return measured;
+    /** Sets overall progress in the range [0, 1]. */
+    public void setOverallProgress(float p) {
+        overallProgress = Math.max(0f, Math.min(1f, p));
+        overallBar.setProgress(overallProgress);
     }
 
-    int getIntrinsicContentWidth() {
-        return buildTitleText().length() + 2 + buildRightBlockPreview().length();
+    /**
+     * Sets the width of the progress bar in character columns.
+     * Clamped to a minimum of 4.
+     */
+    public void setOverallBarWidth(int cols) {
+        overallBar.setMinWidth(Math.max(4, cols));
     }
 
-    private int resolveMeasuredWidth() {
-        return switch (getWidthPreference()) {
-            case STATIC -> getRegion().getWidth();
-            case FIT_CONTENT -> Math.max(
-                getMinWidth(),
-                getIntrinsicContentWidth() + getInsets().getHorizontal()
-            );
-            default -> getMinWidth();
-        };
+    /**
+     * Sets the fill character for the progress bar (e.g. {@code '█'}).
+     * Delegates to {@link TerminalProgressBar#setFillChar(char)} — adapt if
+     * the ProgressBar API differs in your build.
+     */
+    public void setFillChar(char c) {
+        overallBar.setFillChar(c);
     }
 
-    private int resolveMeasuredHeight() {
-        return switch (getHeightPreference()) {
-            case STATIC -> getRegion().getHeight();
-            case FIT_CONTENT -> Math.max(getMinHeight(), 1 + getInsets().getVertical());
-            default -> getMinHeight();
-        };
+    /**
+     * Sets the empty character for the progress bar (e.g. {@code '░'}).
+     * Delegates to {@link TerminalProgressBar#setEmptyChar(char)} — adapt if
+     * the ProgressBar API differs in your build.
+     */
+    public void setEmptyChar(char c) {
+        overallBar.setEmptyChar(c);
     }
 
+    // ===== STYLE DELEGATES =====
 
-
-    // ===== RENDERING =====
-
-    @Override
-    protected void renderSelf(TerminalBatchBuilder batch) {
-        int w = getWidth();
-        if (w <= 0) return;
-
-        String titleText = buildTitleText();
-
-        int    filled    = Math.max(0, Math.round(overallProgress * overallBarWidth));
-        String pctStr    = String.format("%3d%%", (int)(overallProgress * 100f));
-        String barLabel  = "Overall: " + pctStr + " [";
-        String fillPart  = repeat(fillChar,  filled);
-        String emptyPart = repeat(emptyChar, overallBarWidth - filled) + "]";
-        String rightBlock = barLabel + fillPart + emptyPart;
-
-        // Full layout: title + complete overall progress block.
-        if (w >= rightBlock.length() + 6) {
-            int maxTitleW = w - rightBlock.length() - 2;
-            String displayedTitle = maxTitleW > 0 ? truncate(titleText, maxTitleW) : "";
-            if (!displayedTitle.isEmpty()) {
-                printAt(batch, 0, 0, displayedTitle, styleTitle);
-            }
-
-            int barX = w - rightBlock.length();
-            if (barX >= 0 && barX + rightBlock.length() <= w) {
-                printAt(batch, barX, 0, barLabel, styleBarLabel);
-                int bx = barX + barLabel.length();
-                if (!fillPart.isEmpty()) { printAt(batch, bx, 0, fillPart, styleBarFill); bx += fillPart.length(); }
-                printAt(batch, bx, 0, emptyPart, styleBarEmpty);
-            }
-            return;
-        }
-
-        // Compact layout for narrow widths: title + right-aligned percentage only.
-        if (w >= pctStr.length() + 4) {
-            int compactX = w - pctStr.length();
-            int maxTitleW = Math.max(0, compactX - 1);
-            String displayedTitle = maxTitleW > 0 ? truncate(titleText, maxTitleW) : "";
-            if (!displayedTitle.isEmpty()) {
-                printAt(batch, 0, 0, displayedTitle, styleTitle);
-            }
-            printAt(batch, compactX, 0, pctStr, styleBarLabel);
-            return;
-        }
-
-        // Ultra-narrow fallback: prefer title, otherwise show clipped percentage.
-        String titleFallback = truncate(titleText, w);
-        if (!titleFallback.isEmpty()) {
-            printAt(batch, 0, 0, titleFallback, styleTitle);
-        } else {
-            String pctFallback = pctStr.substring(Math.max(0, pctStr.length() - w));
-            printAt(batch, 0, 0, pctFallback, styleBarLabel);
-        }
+    /** Applies a text style to the title label. */
+    public void setStyleTitle(TextStyle s) {
+        if (s != null) titleLabel.setTextStyle(s);
     }
 
-    private String buildTitleText() {
-        String text = " ".repeat(TITLE_PADDING) + title;
+    /** Applies a text style to the " Overall: " separator label. */
+    public void setStyleBarLabel(TextStyle s) {
+        if (s != null) barLabel.setTextStyle(s);
+    }
+
+    /** Applies a text style to the filled portion of the progress bar. */
+    public void setStyleBarFill(TextStyle s) {
+        if (s != null) overallBar.setFilledStyle(s);
+    }
+
+    /** Applies a text style to the empty portion of the progress bar. */
+    public void setStyleBarEmpty(TextStyle s) {
+        if (s != null) overallBar.setEmptyStyle(s);
+    }
+
+    // ===== GETTERS =====
+
+    /** Returns the primary title (without subtitle). */
+    public String getTitle()    { return title; }
+
+    /** Returns the subtitle, or {@code null} if none is set. */
+    public String getSubtitle() { return subtitle; }
+
+    /** Returns the last progress value passed to {@link #setOverallProgress(float)}. */
+    public float  getOverallProgress() { return overallProgress; }
+
+    /** Returns the current fill character. */
+    public char   getFillChar()  { return overallBar.getFillChar(); }
+
+    /** Returns the current empty character. */
+    public char   getEmptyChar() { return overallBar.getEmptyChar(); }
+
+    /** Returns the current text style of the title label. */
+    public TextStyle getStyleTitle()    { return titleLabel.getStyle(); }
+
+    /** Returns the current text style of the bar separator label. */
+    public TextStyle getStyleBarLabel() { return barLabel.getStyle(); }
+
+    /** Returns the filled-portion style from the underlying progress bar. */
+    public TextStyle getStyleBarFill()  { return overallBar.getFilledStyle(); }
+
+    /** Returns the empty-portion style from the underlying progress bar. */
+    public TextStyle getStyleBarEmpty() { return overallBar.getEmptyStyle(); }
+
+    // ===== INTERNAL =====
+
+    /**
+     * Rebuilds the title label text from the stored title + subtitle fields.
+     * A 2-space left pad is preserved to match the original header's inset.
+     */
+    private void refreshTitleLabel() {
+        StringBuilder sb = new StringBuilder("  ").append(title);
         if (subtitle != null && !subtitle.isBlank()) {
-            text += "  " + subtitle;
+            sb.append("  ").append(subtitle);
         }
-        return text;
-    }
-
-    private String buildRightBlockPreview() {
-        return "Overall: 100% [" + repeat(fillChar, overallBarWidth) + "]";
-    }
-
-    private static String truncate(String s, int max) {
-        if (s == null || max <= 0) return "";
-        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
-    }
-    private static String repeat(char c, int n) {
-        if (n <= 0) return "";
-        char[] buf = new char[n]; java.util.Arrays.fill(buf, c); return new String(buf);
+        titleLabel.setText(sb.toString());
     }
 }

@@ -269,15 +269,9 @@ public class TerminalLayoutTestHarness {
         this.layoutManager.registerRenderable(rootRenderable, (ctx) -> {
             TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder();
             TerminalRectangle regionUpdate = ctx.getRequestedRegion();
-            System.out.println("[HARNESS] root layout callback fired");
-            System.out.println("[HARNESS]   requestedRegion = " + regionUpdate);
-            System.out.println("[HARNESS]   currentRegion   = " + ctx.getCurrentRegion());
-            System.out.println("[HARNESS]   allocatedRegion = " + allocatedRegion);
             if (regionUpdate == null) regionUpdate = ctx.getCurrentRegion();
             builder.setHeight(regionUpdate.getHeight());
             builder.setWidth(regionUpdate.getWidth());
-            System.out.println("[HARNESS]   -> built h=" + regionUpdate.getHeight()
-                + " w=" + regionUpdate.getWidth());
             return builder.build();
         });
 
@@ -325,6 +319,21 @@ public class TerminalLayoutTestHarness {
                 rootRenderable.requestLayoutUpdate();
             }
         });
+    }
+
+    /**
+     * Execute a mutation on the UI executor and block until it completes.
+     * Useful in tests to avoid races caused by queued runLater tree mutations.
+     */
+    public void runOnUiThreadAndWait(Runnable action) {
+        if (action == null) {
+            return;
+        }
+        if (uiExecutor.isCurrentThread()) {
+            action.run();
+            return;
+        }
+        uiExecutor.submit(action, null).join();
     }
 
     // ── State inspection ─────────────────────────────────────────────────────

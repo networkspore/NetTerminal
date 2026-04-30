@@ -15,7 +15,7 @@ import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SpatialRegionPool;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.renderer.Renderable;
-
+import org.jline.utils.WCWidth;
 /**
  * TerminalRenderable - Abstract base class for terminal renderables
  * 
@@ -57,8 +57,14 @@ public abstract class TerminalRenderable extends Renderable<
     TerminalLayoutGroup,
     TerminalRenderable
 > {
+
+    public enum OverflowClipPolicy {
+        CLIP_TO_SELF_BOUNDS,
+        INHERIT_PARENT_CLIP
+    }
     
     private boolean clampCursor = true;          // Default to clamping cursor
+    private OverflowClipPolicy overflowClipPolicy = OverflowClipPolicy.CLIP_TO_SELF_BOUNDS;
     
     /**
      * Constructor
@@ -92,9 +98,44 @@ public abstract class TerminalRenderable extends Renderable<
     public boolean isClampCursor() {
         return clampCursor;
     }
+
+    public OverflowClipPolicy getOverflowClipPolicy() {
+        return overflowClipPolicy;
+    }
+
+    public void setOverflowClipPolicy(OverflowClipPolicy policy) {
+        OverflowClipPolicy next = policy != null ? policy : OverflowClipPolicy.CLIP_TO_SELF_BOUNDS;
+        if (this.overflowClipPolicy != next) {
+            this.overflowClipPolicy = next;
+            requestLayoutUpdate();
+        }
+    }
+
+    @Override
+    protected TerminalRectangle getChildClipRegion(TerminalRectangle incomingClip, TerminalRectangle visibleClip) {
+        if (overflowClipPolicy == OverflowClipPolicy.INHERIT_PARENT_CLIP) {
+            return incomingClip;
+        }
+        return visibleClip;
+    }
     
     // ===== TERMINAL-SPECIFIC HELPERS (x,y convention) =====
-  
+    public static int displayWidth(int codepoint) {
+        if (codepoint <= 0) return 1;
+        int w = WCWidth.wcwidth(codepoint);
+        return (w >= 1) ? w : 1;
+    }
+
+    public static int displayWidth(String text) {
+        if (text == null || text.isEmpty()) return 0;
+        int width = 0;
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            width += displayWidth(cp);
+            i += Character.charCount(cp);
+        }
+        return width;
+    }
     /**
      * Get x coordinate (left edge) - local to this renderable
      */
@@ -130,7 +171,8 @@ public abstract class TerminalRenderable extends Renderable<
      * @return X position for centered text
      */
     protected int centerTextHorizontal(String text) {
-        return Math.max(0, (region.getWidth() - text.length()) / 2);
+        int w = displayWidth(text);
+        return Math.max(0, (getWidth() - w) / 2);
     }
     
     /**
@@ -425,7 +467,23 @@ public abstract class TerminalRenderable extends Renderable<
 
 
     // ===== RENDERING COMMANDS WITH BOUNDARY ENFORCEMENT =====
-    
+    private String extractVisibleSubstring(String text, int startCol, int endCol) {
+        if (startCol >= endCol) return "";
+        StringBuilder sb = new StringBuilder();
+        int col = 0;
+        for (int i = 0; i < text.length(); ) {
+            int cp = text.codePointAt(i);
+            int w = displayWidth(cp);
+            int nextCol = col + w;
+            if (nextCol > startCol && col < endCol) {
+                sb.appendCodePoint(cp);
+            }
+            col = nextCol;
+            i += Character.charCount(cp);
+            if (col >= endCol) break;
+        }
+        return sb.toString();
+    }
     /**
      * Print text at position (local coordinates)
      * Automatically enforces boundaries based on clip mode
@@ -435,92 +493,28 @@ public abstract class TerminalRenderable extends Renderable<
     }
     
     protected void printAt(TerminalBatchBuilder batch, int x, int y, String text, TextStyle style) {
-        if (text.isEmpty()) {
-            return;
-        }
-        if (isEffectivelyHidden()) {
-            RenderDiagnostics.logRenderDrop(
-                "printAt-hidden:" + getName(),
-                "TerminalRenderable.printAt",
-                "effectively-hidden",
-                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
-            );
-            return;
-        }
-        if (y < 0 || y >= getHeight()) {
-            RenderDiagnostics.logRenderDrop(
-                "printAt-y-oob:" + getName(),
-                "TerminalRenderable.printAt",
-                "y-out-of-bounds",
-                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
-                    + "\n\tlocalY=" + y
-                    + "\n\theight=" + getHeight()
-            );
-            return;
-        }
-        
+        if (text.isEmpty()) return;
+        if (isEffectivelyHidden()) return;
+        if (y < 0 || y >= getHeight()) return;
+
         int absY = toAbsoluteY(y);
-        int absX = toAbsoluteX(x);
-        int left = toAbsoluteX(Math.max(0, x));
-        int right = toAbsoluteX(Math.min(getWidth(), x + text.length()));
+        int textWidth = displayWidth(text);
+        int leftX = toAbsoluteX(x);
+        int rightX = toAbsoluteX(x + textWidth);
 
-        if (right <= left) {
-            RenderDiagnostics.logRenderDrop(
-                "printAt-x-oob:" + getName(),
-                "TerminalRenderable.printAt",
-                "x-outside-renderable-bounds",
-                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
-                    + "\n\tlocalX=" + x
-                    + "\n\twidth=" + getWidth()
-                    + "\n\tabsRange=[" + left + "," + right + ")"
-            );
-            return;
-        }
-        
         TerminalRectangle clip = batch.getCurrentClipRegion();
-        final int clippedLeft;
-        final int clippedRight;
         if (clip != null) {
-            if (absY < clip.getY() || absY >= clip.getY() + clip.getHeight()) {
-                RenderDiagnostics.logRenderDrop(
-                    "printAt-clip-y:" + getName(),
-                    "TerminalRenderable.printAt",
-                    "clip-excluded-y",
-                    () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
-                        + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
-                        + "\n\tabsY=" + absY
-                        + "\n\tclip=" + RenderDiagnostics.summarizeRegion(clip)
-                );
-                return;
-            }
-            clippedLeft = Math.max(left, clip.getX());
-            clippedRight = Math.min(right, clip.getX() + clip.getWidth());
-        } else {
-            clippedLeft = left;
-            clippedRight = right;
+            if (absY < clip.getY() || absY >= clip.getY() + clip.getHeight()) return;
+            leftX = Math.max(leftX, clip.getX());
+            rightX = Math.min(rightX, clip.getX() + clip.getWidth());
         }
-        
-        if (clippedRight <= clippedLeft) {
-            RenderDiagnostics.logRenderDrop(
-                "printAt-clipped-away:" + getName(),
-                "TerminalRenderable.printAt",
-                "clip-excluded-x",
-                () -> "renderable=" + RenderDiagnostics.summarizeRenderable(this)
-                    + "\n\ttext=" + RenderDiagnostics.summarizeText(text, 48)
-                    + "\n\tabsRange=[" + left + "," + right + ")"
-                    + "\n\tclippedRange=[" + clippedLeft + "," + clippedRight + ")"
-                    + "\n\tclip=" + RenderDiagnostics.summarizeRegion(clip)
-            );
-            return;
-        }
-        
-        int startIdx = clippedLeft - absX;
-        int endIdx = clippedRight - absX;
+        if (rightX <= leftX) return;
 
-        batch.printAt(clippedLeft, absY, text.substring(Math.max(0, startIdx), Math.min(text.length(), endIdx)), style);
+        // Find visible substring based on display columns
+        String visible = extractVisibleSubstring(text, leftX - toAbsoluteX(x), rightX - toAbsoluteX(x));
+        if (!visible.isEmpty()) {
+            batch.printAt(leftX, absY, visible, style);
+        }
     }
 
     @Override
@@ -1594,32 +1588,18 @@ public abstract class TerminalRenderable extends Renderable<
     }
 
     public int[] calculateLocalPosition(String text, Position pos) {
-        int textLen = text.length();
-        int x = 0;
-        int y = 0;
-        int width = getWidth();
-        int height = getHeight();
-        
-        // Horizontal
-        switch (pos) {
-            case TOP_CENTER, CENTER, BOTTOM_CENTER -> 
-                x = ((width / 2) - (textLen / 2));
-            case TOP_RIGHT, CENTER_RIGHT, BOTTOM_RIGHT -> 
-                x = width - textLen;
-            case TOP_LEFT, CENTER_LEFT, BOTTOM_LEFT -> 
-                x = 0;
-        }
-        
-        // Vertical
-        switch (pos) {
-            case CENTER_LEFT, CENTER, CENTER_RIGHT -> 
-                y = (height / 2);
-            case BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT -> 
-                y = height - 1;
-            case TOP_CENTER, TOP_LEFT, TOP_RIGHT-> 
-                y = 0;
-        }
-        
+        int textWidth = displayWidth(text);
+        int x = switch (pos) {
+            case TOP_CENTER, CENTER, BOTTOM_CENTER -> (getWidth() - textWidth) / 2;
+            case TOP_RIGHT, CENTER_RIGHT, BOTTOM_RIGHT -> getWidth() - textWidth;
+            default -> 0;
+        };
+        // vertical calculation unchanged (always 1 row per line, height is rows)
+        int y = switch (pos) {
+            case CENTER_LEFT, CENTER, CENTER_RIGHT -> getHeight() / 2;
+            case BOTTOM_LEFT, BOTTOM_CENTER, BOTTOM_RIGHT -> getHeight() - 1;
+            default -> 0;
+        };
         return new int[] { Math.max(0, x), Math.max(0, y) };
     }
    

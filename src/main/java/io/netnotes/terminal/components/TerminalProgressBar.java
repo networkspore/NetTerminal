@@ -15,9 +15,11 @@ public class TerminalProgressBar extends TerminalRegion {
         BLOCKS,     // [█████░░░░░] 25%
         SHADED,     // ▓▓▓▓▓░░░░░ 25%
         ARROWS,     // >>>>>----- 25%
-        SMOOTH      // Uses drawProgressBar command (sub-character resolution)
+        SMOOTH,      // Uses drawProgressBar command (sub-character resolution)
+        CUSTOM
     }
-    
+    private Character customFillChar = null;   // override for filled part
+    private Character customEmptyChar = null;  // override for empty part
     
     private final TerminalInsets insets = new TerminalInsets();
     
@@ -73,6 +75,9 @@ public class TerminalProgressBar extends TerminalRegion {
             invalidate();
         }
     }
+
+    public TextStyle getFilledStyle(){ return filledStyle; }
+    public TextStyle getEmptyStyle() { return emptyStyle; }
     
     public void setFilledStyle(TextStyle style) {
         this.filledStyle = style;
@@ -163,19 +168,8 @@ public class TerminalProgressBar extends TerminalRegion {
         int barWidth = Math.max(1, width - percentText.length() - 2);
         int filled = (int) (pct * barWidth);
 
-        String fillChar = switch (style) {
-            case BLOCKS -> "█";
-            case SHADED -> "▓";
-            case ARROWS -> ">";
-            default -> "=";
-        };
-        
-        String emptyChar = switch (style) {
-            case BLOCKS -> "░";
-            case SHADED -> "░";
-            case ARROWS -> "-";
-            default -> "-";
-        };
+        String fillChar = getFillCharForStyle();
+        String emptyChar = getEmptyCharForStyle();
 
         String leftCap = style == Style.CLASSIC ? "|" : "[";
         String rightCap = style == Style.CLASSIC ? "|" : "]";
@@ -247,12 +241,51 @@ public class TerminalProgressBar extends TerminalRegion {
     public Orientation getOrientation() { return orientation; }
     public boolean isComplete() { return currentPercent >= 100; }
 
-    
+    // Setters
+    public void setFillChar(char c) {
+        this.customFillChar = c;
+        invalidate();
+    }
+
+    public void setFillChar(Character c) {
+        this.customFillChar = c;
+        invalidate();
+    }
+
+    public void setEmptyChar(char c) {
+        this.customEmptyChar = c;
+        invalidate();
+    }
+
+    public void setEmptyChar(Character c) {
+        this.customEmptyChar = c;
+        invalidate();
+    }
+
+    // Getters
+    public Character getFillChar() {
+        return customFillChar;
+    }
+
+    public Character getEmptyChar() {
+        return customEmptyChar;
+    }
+
+    // Resets
+    public void clearFillChar() {
+        setFillChar((Character) null);
+    }
+
+    public void clearEmptyChar() {
+        setEmptyChar((Character) null);
+    }
 
     public void setProgressStyle(Style style){
         this.style = style;
         invalidate();
     }
+
+   
 
     
     @Override
@@ -281,6 +314,29 @@ public class TerminalProgressBar extends TerminalRegion {
         this.isHiddenManaged = ishiddenManaged;
     }
 
+    private String getFillCharForStyle() {
+        if (style == Style.CUSTOM && customFillChar != null) {
+            return String.valueOf(customFillChar);
+        }
+        return switch (style) {
+            case BLOCKS  -> "█";
+            case SHADED  -> "▓";
+            case ARROWS  -> ">";
+            default      -> "=";   // CLASSIC, SMOOTH (though SMOOTH uses drawProgressBar)
+        };
+    }
+
+    private String getEmptyCharForStyle() {
+        if (style == Style.CUSTOM && customEmptyChar != null) {
+            return String.valueOf(customEmptyChar);
+        }
+        return switch (style) {
+            case BLOCKS  -> "░";
+            case SHADED  -> "░";
+            case ARROWS  -> "-";
+            default      -> "-";
+        };
+    }
 
 
     // ===== BUILDER =====

@@ -11,7 +11,7 @@ This document serves as the definitive technical reference for TerminalScrollPan
 ```
 Renderable (base)
 └── TerminalRenderable (2D coordinates)
-    └── TerminalRegion (size preferences, insets)
+    └── TerminalRegion (size preferences, insets — empty by nature)
         └── TerminalGroupRegion (group ownership)
             └── TerminalPanel (single-axis layout)
                 └── TerminalAbstractStack (shared stack features)
@@ -22,6 +22,8 @@ Renderable (base)
                     └── TerminalScrollPanel ← THIS COMPONENT
                         └── TerminalStackPanel (CENTER content holder)
 ```
+
+**Note:** `TerminalRegion` is intentionally empty-by-nature and does not own children or support FIT_CONTENT. Components that need child ownership should extend `TerminalGroupRegion`.
 
 ### Dependency Chain
 

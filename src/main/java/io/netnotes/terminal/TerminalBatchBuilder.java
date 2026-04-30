@@ -83,29 +83,12 @@ public class TerminalBatchBuilder extends BatchBuilder<TerminalRectangle>{
     
     public void printAt(int x, int y, String text, TextStyle style) {
         TerminalRectangle clip = getCurrentClipRegion();
-
         if (clip != null) {
-            // Skip if position is completely outside clip region
-            if (y < clip.getY() || y >= clip.getY() + clip.getHeight()) {
-                BatchTraceAspect.onPrintCommand(this, text, x, y, "REJECTED_Y_OUT_OF_CLIP:" + clip);
-                return;
-            }
-
-            if (x >= clip.getX() + clip.getWidth()) {
-                BatchTraceAspect.onPrintCommand(this, text, x, y, "REJECTED_X_OUT_OF_CLIP:" + clip);
-                return;
-            }
-
-            // Check if any part of the text would be visible
-            int endX = x + text.length();
-            if (endX <= clip.getX()) {
-                BatchTraceAspect.onPrintCommand(this, text, x, y, "REJECTED_TEXT_BEFORE_CLIP:" + clip);
-                return;  // Text ends before clip region starts
-            }
+            if (y < clip.getY() || y >= clip.getY() + clip.getHeight()) return;
+            int textWidth = TerminalRenderable.displayWidth(text);
+            int endX = x + textWidth;
+            if (endX <= clip.getX() || x >= clip.getX() + clip.getWidth()) return;
         }
-
-        // Add command - TerminalRenderable will handle boundary enforcement
-        BatchTraceAspect.onPrintCommand(this, text, x, y, style);
         addCommand(TerminalCommands.printAt(x, y, text, style));
     }
 

@@ -1,133 +1,164 @@
 package io.netnotes.terminal.components.install;
 
+import io.netnotes.engine.ui.LabelTruncation;
 import io.netnotes.engine.ui.SizePreference;
-import io.netnotes.terminal.TerminalBatchBuilder;
-import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.components.TerminalRegion;
-import io.netnotes.terminal.layout.TerminalLayoutContext;
+import io.netnotes.terminal.components.panels.TerminalHStack;
+import io.netnotes.terminal.components.text.TerminalLabel;
 
 /**
- * TerminalWizardFooter - Single-row installation status line.
+ * TerminalWizardFooter – single-row installation status line.
  *
- * Renders:
- *   "  Step 2 of 4  ·  Elapsed: 00:12  ·  Press Ctrl+C to cancel"
+ * Renders (example):
+ *   "  Step 2 of 4  ·  Elapsed: 00:12  ·  Applying schema migrations…"
  *
- * Height is always 1 (FIT_CONTENT). Width is FILL.
+ * Layout is fully delegated to {@link TerminalHStack} + children:
+ * <pre>
+ *   stepLabel    (FIT_CONTENT)  "  Step 2 of 4"
+ *   spacer       (FILL)          flexible gap
+ *   elapsedLabel (FIT_CONTENT)  "  ·  Elapsed: 00:12"  [hidden when elapsed ≤ 0]
+ *   detailLabel  (FILL, END-truncates)  "  ·  Detail or status"
+ * </pre>
+ *
+ * No custom {@code renderSelf} or {@code measureContent} — sizing and
+ * rendering are inherited from the HStack and its children.
  */
-public class TerminalWizardFooter extends TerminalRegion {
+public class TerminalWizardFooter extends TerminalHStack {
 
-    private int     stepsDone   = 0;
-    private int     stepsTotal  = 0;
-    private boolean showElapsed = true;
-    private long    elapsedMs   = 0L;
-    private String  activeDetail = null;
-    private boolean complete    = false;
-    private boolean hasError    = false;
-
+    // Cached style values; applied on every update() call
+    private boolean   showElapsed  = true;
     private TextStyle styleNormal  = TextStyle.NORMAL.withForeground(TextStyle.Color.BRIGHT_BLACK);
     private TextStyle styleSuccess = TextStyle.BOLD.withForeground(TextStyle.Color.GREEN);
     private TextStyle styleError   = TextStyle.BOLD.withForeground(TextStyle.Color.RED);
 
+    private final TerminalLabel stepLabel;
+    private final TerminalLabel elapsedLabel;
+    private final TerminalLabel detailLabel;
+
+    // ===== CONSTRUCTION =====
+
     public TerminalWizardFooter(String name) {
         super(name);
+        setSpacing(0);
         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FIT_CONTENT);
         setMinHeight(1);
+
+        // Left: step counter — "  Step 2 of 4"
+        stepLabel = new TerminalLabel(name + "-steps");
+        stepLabel.setWidthPreference(SizePreference.FIT_CONTENT);
+        addChild(stepLabel);
+
+        // Flexible spacer: pushes elapsed + detail toward the right
+        TerminalRegion spacer = new TerminalRegion(name + "-spcr");
+        spacer.setWidthPreference(SizePreference.FILL);
+        spacer.setHeightPreference(SizePreference.FIT_CONTENT);
+        spacer.setMinHeight(1);
+        addChild(spacer);
+
+        // Right: elapsed time — "  ·  Elapsed: 00:12"
+        elapsedLabel = new TerminalLabel(name + "-time");
+        elapsedLabel.setWidthPreference(SizePreference.FIT_CONTENT);
+        addChild(elapsedLabel);
+
+        // Far right: active detail or completion status; truncates when narrow
+        detailLabel = new TerminalLabel(name + "-detail");
+        detailLabel.setWidthPreference(SizePreference.FILL);
+        detailLabel.setTextTruncation(LabelTruncation.END);
+        addChild(detailLabel);
     }
 
-    // ===== SETTERS =====
+    // ===== STATE UPDATE =====
 
-    public void update(int stepsDone, int stepsTotal, long elapsedMs,
+    /**
+     * Pushes all wizard state into the child labels and re-applies styles.
+     * Call from the wizard's {@code syncFooter()} — the wizard handles its own
+     * change-detection cache so this method unconditionally updates.
+     *
+     * @param done         number of steps that have reached a terminal state
+     * @param total        total number of registered steps
+     * @param elapsedMs    milliseconds elapsed since the wizard started
+     * @param activeDetail detail text from the currently running step (may be null)
+     * @param complete     true when all steps have finished
+     * @param hasError     true when at least one step failed with an error
+     */
+    public void update(int done, int total, long elapsedMs,
                        String activeDetail, boolean complete, boolean hasError) {
-        this.stepsDone    = stepsDone;
-        this.stepsTotal   = stepsTotal;
-        this.elapsedMs    = elapsedMs;
-        this.activeDetail = activeDetail;
-        this.complete     = complete;
-        this.hasError     = hasError;
+
+        // ── step counter ─────────────────────────────────────────────────────
+        if (total <= 0) {
+            stepLabel.setText("  Ready");
+        } else {
+            int displayStep = complete ? total : Math.min(total, Math.max(1, done + 1));
+            stepLabel.setText("  Step " + displayStep + " of " + total);
+        }
+
+        // ── elapsed time ─────────────────────────────────────────────────────
+        if (showElapsed && elapsedMs > 0) {
+            long secs = elapsedMs / 1000L;
+            elapsedLabel.setText(String.format("  ·  Elapsed: %02d:%02d", secs / 60, secs % 60));
+            elapsedLabel.show();
+        } else {
+            elapsedLabel.setText("");
+            elapsedLabel.hide();
+        }
+
+        // ── detail / completion status ────────────────────────────────────────
+        detailLabel.setText(buildDetailText(activeDetail, done, total, complete, hasError));
+
+        // ── styles ────────────────────────────────────────────────────────────
+        // Base style shifts to success/error on completion.
+        TextStyle base = complete ? (hasError ? styleError : styleSuccess) : styleNormal;
+        stepLabel.setTextStyle(base);
+        elapsedLabel.setTextStyle(base);
+        // Error style is applied directly to the detail label for clear visibility,
+        // even when the step counter is rendered in the neutral base style.
+        detailLabel.setTextStyle(hasError ? styleError : base);
+
         invalidate();
     }
 
-    public void setShowElapsed(boolean show)     {
+    // ===== CONFIGURATION =====
+
+    /**
+     * Shows or hides the elapsed-time segment.
+     * Takes effect on the next {@link #update} call.
+     */
+    public void setShowElapsed(boolean show) {
         if (this.showElapsed != show) {
             this.showElapsed = show;
             invalidate();
         }
     }
-    public void setStyleNormal(TextStyle s)      { this.styleNormal  = s;  invalidate(); }
-    public void setStyleSuccess(TextStyle s)     { this.styleSuccess = s;  invalidate(); }
-    public void setStyleError(TextStyle s)       { this.styleError   = s;  invalidate(); }
 
-    // ===== SIZING =====
+    // ===== STYLE SETTERS =====
+    // Styles are applied on each update() call; setters here just cache the value.
 
-    public int getPreferredHeight() {
-        return resolveMeasuredHeight();
-    }
+    /** Normal style — used while the wizard is in progress. */
+    public void setStyleNormal(TextStyle s)  { if (s != null) this.styleNormal  = s; }
 
-    public int getPreferredWidth()  {
-        return resolveMeasuredWidth();
-    }
+    /** Success style — used when all steps complete without error. */
+    public void setStyleSuccess(TextStyle s) { if (s != null) this.styleSuccess = s; }
 
-    @Override
-    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        TerminalRectangle measured = getRegionPool().obtain();
-        measured.set(0, 0, resolveMeasuredWidth(), resolveMeasuredHeight());
-        return measured;
-    }
+    /** Error style — used when any step fails; applied to the detail label as well. */
+    public void setStyleError(TextStyle s)   { if (s != null) this.styleError   = s; }
 
-    int getIntrinsicContentWidth() {
-        return buildText().length();
-    }
+    // ===== HELPERS =====
 
-    private int resolveMeasuredWidth() {
-        return switch (getWidthPreference()) {
-            case STATIC -> getRegion().getWidth();
-            case FIT_CONTENT -> Math.max(
-                getMinWidth(),
-                getIntrinsicContentWidth() + getInsets().getHorizontal()
-            );
-            default -> getMinWidth();
-        };
-    }
-
-    private int resolveMeasuredHeight() {
-        return switch (getHeightPreference()) {
-            case STATIC -> getRegion().getHeight();
-            case FIT_CONTENT -> Math.max(getMinHeight(), 1 + getInsets().getVertical());
-            default -> getMinHeight();
-        };
-    }
-
-
-    // ===== RENDERING =====
-
-    @Override
-    protected void renderSelf(TerminalBatchBuilder batch) {
-        int w = getWidth();
-        if (w <= 0) return;
-
-        String text = buildText();
-        TextStyle style = complete ? (hasError ? styleError : styleSuccess) : styleNormal;
-        printAt(batch, 0, 0, text.length() <= w ? text : text.substring(0, w), style);
-    }
-
-    private String buildText() {
-        StringBuilder sb = new StringBuilder("  ");
-        if (stepsTotal <= 0) {
-            sb.append("Ready");
-            return sb.toString();
-        }
-
-        int displayStep = complete
-            ? stepsTotal
-            : Math.min(stepsTotal, Math.max(1, stepsDone + 1));
-        sb.append("Step ").append(displayStep).append(" of ").append(stepsTotal);
-
-        if (showElapsed && elapsedMs > 0) {
-            long secs = elapsedMs / 1000L;
-            sb.append("  ·  Elapsed: ").append(String.format("%02d:%02d", secs / 60, secs % 60));
-        }
+    /**
+     * Composes the detail label text from the active step's detail and the
+     * overall completion/in-progress status.
+     *
+     * <ul>
+     *   <li>While running with detail:  "  ·  &lt;detail&gt;"</li>
+     *   <li>While running, no detail:   "  ·  Press Ctrl+C to cancel"</li>
+     *   <li>On completion:              "  ·  &lt;detail&gt;  ·  COMPLETE" (or FAILED)</li>
+     * </ul>
+     */
+    private String buildDetailText(String activeDetail, int done, int total,
+                                   boolean complete, boolean hasError) {
+        StringBuilder sb = new StringBuilder();
 
         if (activeDetail != null && !activeDetail.isBlank()) {
             sb.append("  ·  ").append(activeDetail);
@@ -135,7 +166,7 @@ public class TerminalWizardFooter extends TerminalRegion {
 
         if (complete) {
             sb.append("  ·  ").append(hasError ? "FAILED" : "COMPLETE");
-        } else if (stepsDone < stepsTotal) {
+        } else if (sb.isEmpty() && done < total) {
             sb.append("  ·  Press Ctrl+C to cancel");
         }
 
