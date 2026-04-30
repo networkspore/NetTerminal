@@ -3,6 +3,7 @@ package io.netnotes.terminal.components;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.components.panels.TerminalGroupRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -137,18 +138,12 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
 
     public void setWidthPreference(SizePreference widthPreference) {
         SizePreference next = widthPreference != null ? widthPreference : SizePreference.STATIC;
-        if (this.getClass() == TerminalRegion.class && next == SizePreference.FIT_CONTENT) {
-            throw new IllegalStateException("Fit content not supported for terminal region");
-        }
         this.widthPreference = next;
         requestLayoutUpdate();
     }
 
     public void setHeightPreference(SizePreference heightPreference) {
         SizePreference next = heightPreference != null ? heightPreference : SizePreference.STATIC;
-        if (this.getClass() == TerminalRegion.class && next == SizePreference.FIT_CONTENT) {
-            throw new IllegalStateException("Fit content not supported for terminal region");
-        }
         this.heightPreference = next;
         requestLayoutUpdate();
     }
@@ -204,6 +199,11 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         requestLayoutUpdate();
     }
 
+    public double getPercent(int axis) {
+        // We only have getPercentWidth/Height, so we map axis
+        return axis == TerminalRegion.AXIS_W ? getPercentWidth() : getPercentHeight();
+    }
+
     // ── Spatial-axis classification ───────────────────────────────────────────
     //
     // Do NOT override isSizedByContent() or isSizedByParent() here — the base
@@ -236,55 +236,35 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     // childContexts[i] corresponds to getChildren().get(i). A null slot means
     // the child is not content-sized or not dirty this pass — fall back to its
     // committed geometry.
-
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        int w = resolveContentDimension(true, childContexts);
-        int h = resolveContentDimension(false, childContexts);
-
-        TerminalRectangle measured = getRegionPool().obtain();
-        measured.set(0, 0, clampDimension(w, true), clampDimension(h, false));
-        return measured;
+        //Because a terminalRegion should never have children we ignore the child contexts and just measure based on our own preferences and geometry.
+        return new TerminalRectangle(0, 0, 
+            this.widthPreference.isParentDependent() 
+                ? getMinWidth() 
+                : ( clampDimension(this, getRequestedRegion() != null
+                    ? getRequestedRegion().getWidth()
+                    : getWidth(), true)),
+            this.heightPreference.isParentDependent()
+                ? getMinHeight() 
+                : (clampDimension(this, getRequestedRegion() != null
+                    ? getRequestedRegion().getHeight()
+                    : getHeight(), true)));
     }
 
-    private int resolveContentDimension(boolean isWidth, TerminalLayoutContext[] childContexts) {
-        SizePreference pref = isWidth ? widthPreference : heightPreference;
+   
 
-        if (pref.isFixed()) {
-            return isWidth ? region.getWidth() : region.getHeight();
-        }
-        if (pref.isParentDependent()) {
-            return isWidth ? getMinWidth() : getMinHeight();
-        }
-
-        int maxChildSize = 0;
-        java.util.List<TerminalRenderable> children = getChildren();
-
-        for (int i = 0; i < children.size(); i++) {
-            TerminalRegion child = checkTerminalRegion(children.get(i));
-            if (!canUnhide(child)) continue;
-
-            TerminalLayoutContext childContext =
-                (childContexts != null && i < childContexts.length) ? childContexts[i] : null;
-            int childSize = readContentDimension(child, childContext, isWidth);
-            maxChildSize = Math.max(maxChildSize, childSize);
-        }
-
-        int insetPad = isWidth ? insets.getHorizontal() : insets.getVertical();
-        return Math.max(isWidth ? getMinWidth() : getMinHeight(), maxChildSize + insetPad);
-    }
-
-    protected int clampDimension(int value, boolean isWidth){
+    public static int clampDimension( TerminalRegion region, int value, boolean isWidth){
         return Math.min(
             Math.max(
                 value, 
                 isWidth 
-                    ? getMinWidth() 
-                    : getMinHeight()
+                    ? region.getMinWidth() 
+                    : region.getMinHeight()
             ), 
             isWidth 
-                ? getMaxWidth() 
-                : getMaxHeight()
+                ? region.getMaxWidth() 
+                : region.getMaxHeight()
         );
     }
 
@@ -307,26 +287,22 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
      * @param isWidth true to read width, false to read height
      * @return The region dimension to allocate to the child
      */
-    protected int readContentDimension(TerminalRegion child, TerminalLayoutContext ctx, boolean isWidth) {
+    protected static int readContentDimension(TerminalRegion child, TerminalLayoutContext ctx, boolean isWidth) {
         TerminalRectangle bounds = ctx != null ? ctx.getMeasuredContentBounds() : null;
-        int minDimension = isWidth ? child.getMinWidth() : child.getMinHeight();
 
         if (bounds != null) {
-            return Math.max(minDimension, isWidth ? bounds.getWidth() : bounds.getHeight());
+            return clampDimension(child, isWidth ? bounds.getWidth() : bounds.getHeight(), isWidth);
         }
 
         TerminalRectangle requested = child.getRequestedRegion();
         if (requested != null) {
-            return Math.max(minDimension, isWidth ? requested.getWidth() : requested.getHeight());
+            return clampDimension(child, isWidth ? requested.getWidth() : requested.getHeight(), isWidth);
         }
 
         TerminalRectangle region = child.getRegion();
-        return Math.max(minDimension, isWidth ? region.getWidth() : region.getHeight());
+        return clampDimension(child, isWidth ? region.getWidth() : region.getHeight(), isWidth);
     }
 
-    protected boolean shouldSkipChildInMeasurement(TerminalRenderable child) {
-        return child == null || child.isHidden();
-    }
 
     public static TerminalRegion checkTerminalRegion(TerminalRenderable  renderable){
         return checkTerminalRegion(renderable, "Component child must inherits form TerminalRegion");

@@ -441,6 +441,8 @@ public class TerminalStackPanel extends TerminalGroupRegion {
     /**
      * Pre-pass sizing: only the current visible child contributes to this
      * panel's footprint.
+     * parent calculated fields are set as min size and must be calculated
+     * in the parents layout callback not here.
      */
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
@@ -460,25 +462,22 @@ public class TerminalStackPanel extends TerminalGroupRegion {
             SizePreference childWidthPref = currentContent.getWidthPreference() == SizePreference.INHERIT
                 ? ownWP
                 : currentContent.getWidthPreference();
-            int minWidth = currentContent.getMinWidth();
 
             // Calculate width based on child's preference
             switch (childWidthPref) {
+                case PERCENT:
                 case FILL:
-                    contentW = Math.max(minWidth, readContentDimension(currentContent, ctx, true));
+                    contentW = currentContent.getMinWidth();
                     break;
                 case FIT_CONTENT:
-                    contentW = Math.max(minWidth, readContentDimension(currentContent, ctx, true));
-                    break;
-                case PERCENT:
-                    contentW = Math.max(minWidth, (int) (readContentDimension(currentContent, ctx, true) * currentContent.getPercentWidth()));
+                    contentW = clampDimension(currentContent, readContentDimension(currentContent, ctx, true), true);
                     break;
                 case STATIC:
                 default:
                     int width = ctx != null && ctx.getRequestedRegion() != null
                         ? ctx.getRequestedRegion().getWidth()
                         : currentContent.getRegion().getWidth();
-                    contentW = Math.max(minWidth, width);
+                    contentW = clampDimension(currentContent, width, true);
                     break;
             }
 
@@ -486,37 +485,35 @@ public class TerminalStackPanel extends TerminalGroupRegion {
             SizePreference childHeightPref = currentContent.getHeightPreference() == SizePreference.INHERIT
                 ? ownHP
                 : currentContent.getHeightPreference();
-            int minHeight = currentContent.getMinHeight();
-
-            // Calculate height based on child's preference
+    
+            // Calculate height based on child's preference  
             switch (childHeightPref) {
-                case FILL:
-                    contentH = Math.max(minHeight, readContentDimension(currentContent, ctx, false));
-                    break;
+
                 case FIT_CONTENT:
-                    contentH = Math.max(minHeight, readContentDimension(currentContent, ctx, false));
+                    contentH = clampDimension(currentContent, readContentDimension(currentContent, ctx, false), false);
                     break;
+                case FILL:
                 case PERCENT:
-                    contentH = Math.max(minHeight, (int) (readContentDimension(currentContent, ctx, false) * currentContent.getPercentHeight()));
+                    contentH = currentContent.getMinHeight();
                     break;
                 case STATIC:
                 default:
                     int height = ctx != null && ctx.getRequestedRegion() != null
                         ? ctx.getRequestedRegion().getHeight()
                         : currentContent.getRegion().getHeight();
-                    contentH = Math.max(minHeight, height);
+                    contentH = clampDimension(currentContent, height, false);
                     break;
             }
         }
 
         int w = switch (ownWP) {
             case STATIC      -> region.getWidth();
-            case FIT_CONTENT -> Math.max(getMinWidth(),  contentW + ins.getHorizontal());
+            case FIT_CONTENT -> clampDimension(this, contentW + ins.getHorizontal(), true);
             default          -> getMinWidth();
         };
         int h = switch (ownHP) {
             case STATIC      -> region.getHeight();
-            case FIT_CONTENT -> Math.max(getMinHeight(), contentH + ins.getVertical());
+            case FIT_CONTENT -> clampDimension(this, contentH + ins.getVertical(), false);
             default          -> getMinHeight();
         };
 

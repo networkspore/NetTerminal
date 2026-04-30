@@ -15,7 +15,6 @@ import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
-import io.netnotes.terminal.layout.TerminalSizeable;
 
 /**
  * TerminalVStack — vertical stack layout container.
@@ -168,21 +167,21 @@ public class TerminalVStack extends TerminalAbstractStack {
             heightPrefs[i] = child.getHeightPreference() == SizePreference.INHERIT ? getHeightPreference() : child.getHeightPreference();
 
             widths[i] = switch (widthPrefs[i]) {
-                case FILL        -> availableWidth;
+                case FILL        -> clampDimension(child, availableWidth, true);
                 case FIT_CONTENT -> readContentDimension(child, ctx, true);
-                case PERCENT     -> Math.max(child.getMinWidth(), (int)(availableWidth * child.getPercentWidth()));
-                default          -> Math.max(child.getMinWidth(), ctx.getRequestedRegion() != null
+                case PERCENT     -> clampDimension(child, (int)(availableWidth * child.getPercentWidth()), true);
+                default          -> clampDimension(child, ctx.getRequestedRegion() != null
                                         ? ctx.getRequestedRegion().getWidth()
-                                        : ctx.getCurrentRegion().getWidth());
+                                        : ctx.getCurrentRegion().getWidth(), true);
             };
 
             heights[i] = switch (heightPrefs[i]) {
                 case FILL        -> { fillHeightCount++; yield -1; } // resolved after fixed pass
                 case FIT_CONTENT -> readContentDimension(child, ctx, false);
-                case PERCENT     -> Math.max(child.getMinHeight(), (int)(availableForChildren * child.getPercentHeight()));
-                default          -> Math.max(child.getMinHeight(), ctx.getRequestedRegion() != null
+                case PERCENT     -> clampDimension(child, (int)(availableForChildren * child.getPercentHeight()), false);
+                default          -> clampDimension(child, ctx.getRequestedRegion() != null
                                         ? ctx.getRequestedRegion().getHeight()
-                                        : ctx.getCurrentRegion().getHeight());
+                                        : ctx.getCurrentRegion().getHeight(), false);
             };
 
             if (heights[i] >= 0) totalResolvedHeight += heights[i];
@@ -205,7 +204,10 @@ public class TerminalVStack extends TerminalAbstractStack {
             case SHRINK_FILL -> {
                 // FILL children get exactly the available share, no minHeight inflation.
                 for (int i = 0; i < layoutCount; i++) {
-                    if (heights[i] == -1) heights[i] = Math.max(0, fillHeight);
+                    if (heights[i] == -1) {
+                        TerminalRegion child = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
+                        heights[i] = clampDimension(child, fillHeight, false);
+                    }
                     totalHeight += heights[i];
                 }
             }
@@ -215,9 +217,8 @@ public class TerminalVStack extends TerminalAbstractStack {
                 // everyone proportionally if the total exceeds the available space.
                 for (int i = 0; i < layoutCount; i++) {
                     if (heights[i] == -1) {
-                        TerminalRegion r = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
-                        heights[i] = Math.max(r.getMinHeight(),
-                            readContentDimension(r, contexts[layoutIndices[i]], false));
+                        TerminalRegion child = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
+                        heights[i] = readContentDimension(child, contexts[layoutIndices[i]], false);
                     }
                     totalHeight += heights[i];
                 }
@@ -226,9 +227,8 @@ public class TerminalVStack extends TerminalAbstractStack {
                     float scale = (float) availableForChildren / totalContent;
                     totalHeight = totalGapHeight;
                     for (int i = 0; i < layoutCount; i++) {
-                        TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
-                        int min = (r instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
-                        heights[i] = Math.max(min, (int)(heights[i] * scale));
+                        TerminalRegion child = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
+                        heights[i] = clampDimension(child, (int)(heights[i] * scale), false);
                         totalHeight += heights[i];
                     }
                 }
@@ -238,9 +238,8 @@ public class TerminalVStack extends TerminalAbstractStack {
                 // Every child gets an equal share of the available height.
                 int share = Math.max(0, availableForChildren / layoutCount);
                 for (int i = 0; i < layoutCount; i++) {
-                    TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
-                    int min = (r instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
-                    heights[i] = Math.max(min, share);
+                    TerminalRegion child = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
+                    heights[i] = clampDimension(child, share, false);
                     totalHeight += heights[i];
                 }
             }
@@ -250,9 +249,8 @@ public class TerminalVStack extends TerminalAbstractStack {
                 // FILL children get fillHeight (0 for non-clipping stacks → minHeight).
                 for (int i = 0; i < layoutCount; i++) {
                     if (heights[i] == -1) {
-                        TerminalRenderable r = contexts[layoutIndices[i]].getRenderable();
-                        int min = (r instanceof TerminalSizeable s) ? s.getMinHeight() : 0;
-                        heights[i] = Math.max(min, fillHeight);
+                        TerminalRegion child = checkTerminalRegion(contexts[layoutIndices[i]].getRenderable());
+                        heights[i] = clampDimension(child, fillHeight, false);
                     }
                     totalHeight += heights[i];
                 }
@@ -426,21 +424,21 @@ public class TerminalVStack extends TerminalAbstractStack {
 
             // width contribution
             maxWidth = Math.max(maxWidth, switch (childWidthPref) {
-                case FIT_CONTENT -> Math.max(minWidth, readContentDimension(child, childContext, true));
+                case FIT_CONTENT -> clampDimension(child, readContentDimension(child, childContext, true), true);
                 case PERCENT, FILL -> minWidth;
-                default -> Math.max(minWidth, childContext.getRequestedRegion() != null
+                default -> clampDimension(child, childContext.getRequestedRegion() != null
                     ? childContext.getRequestedRegion().getWidth()
-                    : childContext.getCurrentRegion().getWidth());
+                    : childContext.getCurrentRegion().getWidth(), true);
             });
 
 
             // height contribution
             totalHeight += switch (childHeightPref) {
-                case FIT_CONTENT -> Math.max(minHeight, readContentDimension(child, childContext, false));
+                case FIT_CONTENT -> clampDimension(child, readContentDimension(child, childContext, false), false);
                 case FILL, PERCENT -> minHeight;
-                default -> Math.max(minHeight, childContext.getRequestedRegion() != null
+                default -> clampDimension(child, childContext.getRequestedRegion() != null
                     ? childContext.getRequestedRegion().getHeight()
-                    : childContext.getCurrentRegion().getHeight());
+                    : childContext.getCurrentRegion().getHeight(), false);
             };
         }
 

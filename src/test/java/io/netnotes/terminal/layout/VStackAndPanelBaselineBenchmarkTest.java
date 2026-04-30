@@ -3,6 +3,8 @@ package io.netnotes.terminal.layout;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.terminal.components.panels.TerminalPanel;
+import io.netnotes.terminal.components.panels.TerminalPanel.AlignItems;
+import io.netnotes.terminal.components.panels.TerminalPanel.FlexDirection;
 import io.netnotes.terminal.components.panels.TerminalVStack;
 import io.netnotes.terminal.components.text.TerminalLabel;
 
@@ -239,7 +241,7 @@ public class VStackAndPanelBaselineBenchmarkTest {
     @Test
     void panelVerticalAxisStacksChildrenWithSpacing() {
         TerminalPanel panel = new TerminalPanel("panel");
-        panel.setAxis(TerminalPanel.Axis.VERTICAL);
+        panel.setDirection(FlexDirection.ROW);
         panel.setWidthPreference(SizePreference.FIT_CONTENT);
         panel.setHeightPreference(SizePreference.FIT_CONTENT);
         panel.setSpacing(1);
@@ -276,7 +278,7 @@ public class VStackAndPanelBaselineBenchmarkTest {
         TerminalPanel panel = new TerminalPanel("panel");
         panel.setWidthPreference(SizePreference.FIT_CONTENT);
         panel.setHeightPreference(SizePreference.STATIC);
-        panel.setCrossAlignment(TerminalPanel.Alignment.END);
+        panel.setAlignItems(AlignItems.END);
         panel.setRegion(0, 0, 0, 5);
 
         TerminalLabel child = new TerminalLabel("child", "abc");
@@ -307,7 +309,7 @@ public class VStackAndPanelBaselineBenchmarkTest {
         TerminalPanel panel = new TerminalPanel("panel");
         panel.setWidthPreference(SizePreference.FIT_CONTENT);
         panel.setHeightPreference(SizePreference.STATIC);
-        panel.setCrossAlignment(TerminalPanel.Alignment.STRETCH);
+        panel.setAlignItems(AlignItems.STRETCH);
         panel.setRegion(0, 0, 0, 5);
 
         TerminalLabel child = new TerminalLabel("child", "abc");

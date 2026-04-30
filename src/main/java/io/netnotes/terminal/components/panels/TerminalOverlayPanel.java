@@ -506,8 +506,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
             // Calculate width based on child's preference
             switch (childWidthPref) {
                 case FIT_CONTENT:
-                    int childWidth = Math.max(minWidth, readContentDimension(child, ctx, true));
-                    intersectW = Math.min(intersectW, childWidth);
+                    intersectW = clampDimension(child, readContentDimension(child, ctx, true), true);
                     break;
                 case FILL:
                     intersectW = Math.min(intersectW, minWidth);
@@ -520,7 +519,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
                     int width = childContexts != null && ctx != null && ctx.getRequestedRegion() != null
                         ? ctx.getRequestedRegion().getWidth()
                         : child.getRegion().getWidth();
-                    intersectW = Math.min(intersectW, Math.max(minWidth, width));
+                    intersectW = Math.min(intersectW, clampDimension(child, width, true));
                     break;
             }
 
@@ -533,7 +532,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
             // Calculate height based on child's preference
             switch (childHeightPref) {
                 case FIT_CONTENT:
-                    int childHeight = Math.max(minHeight, readContentDimension(child, ctx, false));
+                    int childHeight = clampDimension(child, readContentDimension(child, ctx, false), false);
                     intersectH = Math.min(intersectH, childHeight);
                     break;
                 case FILL:
@@ -547,7 +546,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
                     int height = childContexts != null && ctx != null && ctx.getRequestedRegion() != null
                         ? ctx.getRequestedRegion().getHeight()
                         : child.getRegion().getHeight();
-                    intersectH = Math.min(intersectH, Math.max(minHeight, height));
+                    intersectH = Math.min(intersectH, clampDimension(child, height, false));
                     break;
             }
         }
@@ -557,12 +556,12 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
 
         int w = switch (ownWP) {
             case STATIC      -> region.getWidth();
-            case FIT_CONTENT -> Math.max(getMinWidth(),  contentW + ins.getHorizontal());
+            case FIT_CONTENT -> clampDimension(this, contentW + ins.getHorizontal(), true);
             default          -> getMinWidth();
         };
         int h = switch (ownHP) {
             case STATIC      -> region.getHeight();
-            case FIT_CONTENT -> Math.max(getMinHeight(), contentH + ins.getVertical());
+            case FIT_CONTENT -> clampDimension(this, contentH + ins.getVertical(), false);
             default          -> getMinHeight();
         };
 

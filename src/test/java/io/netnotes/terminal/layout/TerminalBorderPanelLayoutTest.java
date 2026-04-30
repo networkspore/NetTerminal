@@ -228,27 +228,47 @@ public class TerminalBorderPanelLayoutTest {
     class ReservedSizeLayout {
         @Test
         void reservedTopHeightAppliesWhenSlotIsEmpty() {
-            assertAfterLayout("reserved top empty",
-                    () -> panel.setReservedTopHeight(4),
-                    () -> {
+            TestGate gate = new TestGate();
+            int[] step = {0};
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    if (step[0]++ == 0) {
+                        // After first layout, set reserved height (runs on UI thread)
+                        panel.setReservedTopHeight(4);
+                    } else {
+                        // After second layout (triggered by setReservedTopHeight)
                         assertEquals(4, stack(BorderPanel.TOP).getHeight());
                         assertEquals(4, stack(BorderPanel.CENTER).getY());
                         assertEquals(H - 4, stack(BorderPanel.CENTER).getHeight());
-                    });
+                        gate.open();
+                    }
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            harness.triggerRender(); // initial layout
+            gate.awaitDone();
         }
 
         @Test
         void reservedTopHeightIgnoredWhenSlotHasContent() {
             int contentH = 2;
-            assertAfterLayout("reserved with content",
-                    () -> {
-                        panel.setReservedTopHeight(10);
+            TestGate gate = new TestGate();
+            int[] step = {0};
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    if (step[0]++ == 0) {
+                        // After first layout, add content and set reserved height
                         panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", contentH));
-                    },
-                    () -> {
+                        panel.setReservedTopHeight(10);
+                    } else {
+                        // After second layout
                         assertEquals(contentH, stack(BorderPanel.TOP).getHeight());
                         assertEquals(contentH, stack(BorderPanel.CENTER).getY());
-                    });
+                        gate.open();
+                    }
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            harness.triggerRender(); // initial layout
+            gate.awaitDone();
         }
     }
 
@@ -304,17 +324,26 @@ public class TerminalBorderPanelLayoutTest {
         @Test
         void insetsReduceAvailableAreaForAllSlots() {
             int pad = 2;
-            assertAfterLayout("insets",
-                    () -> {
+            TestGate gate = new TestGate();
+            int[] step = {0};
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    if (step[0]++ == 0) {
+                        // After first layout, set insets (on UI thread)
                         panel.setInsets(pad);
                         panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 1));
                         panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("center"));
-                    },
-                    () -> {
+                    } else {
+                        // After second layout
                         assertEquals(pad, stack(BorderPanel.TOP).getX());
                         assertEquals(pad, stack(BorderPanel.TOP).getY());
                         assertEquals(W - 2*pad, stack(BorderPanel.TOP).getWidth());
-                    });
+                        gate.open();
+                    }
+                } catch (Throwable t) { gate.fail(t); }
+            });
+            harness.triggerRender(); // initial layout
+            gate.awaitDone();
         }
     }
 
@@ -398,58 +427,75 @@ public class TerminalBorderPanelLayoutTest {
 
         @Test
         void resizingDownReclaimsEmptyReservedSpace() {
-            assertAfterLayout("reserved+content",
-                    () -> {
-                        panel.setReservedTopHeight(10);
-                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 3));
-                    },
-                    () -> harness.setAllocatedRegion(0, 0, W, H - 5));
-
             TestGate gate = new TestGate();
+            int[] step = {0};
             harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
                 try {
-                    assertEquals(3, stack(BorderPanel.TOP).getHeight());
-                    gate.open();
+                    if (step[0]++ == 0) {
+                        // After first layout, set reserved height and add content
+                        panel.setReservedTopHeight(10);
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 3));
+                    } else if (step[0] == 2) {
+                        // After second layout, resize
+                        harness.setAllocatedRegion(0, 0, W, H - 5);
+                    } else {
+                        // After third layout
+                        assertEquals(3, stack(BorderPanel.TOP).getHeight());
+                        gate.open();
+                    }
                 } catch (Throwable t) { gate.fail(t); }
             });
+            harness.triggerRender(); // initial layout
             gate.awaitDone();
         }
 
         @Test
         void resizingUpExpandsAvailableSpace() {
-            assertAfterLayout("top",
-                    () -> panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2)),
-                    () -> harness.setAllocatedRegion(0, 0, W, H + 5));
-
             TestGate gate = new TestGate();
+            int[] step = {0};
             harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
                 try {
-                    assertEquals((H + 5) - 2, stack(BorderPanel.CENTER).getHeight());
-                    gate.open();
+                    if (step[0]++ == 0) {
+                        // After first layout, add content
+                        panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2));
+                    } else if (step[0] == 2) {
+                        // After second layout, resize
+                        harness.setAllocatedRegion(0, 0, W, H + 5);
+                    } else {
+                        // After third layout
+                        assertEquals((H + 5) - 2, stack(BorderPanel.CENTER).getHeight());
+                        gate.open();
+                    }
                 } catch (Throwable t) { gate.fail(t); }
             });
+            harness.triggerRender(); // initial layout
             gate.awaitDone();
         }
 
         @Test
         void resizingPreservesInsetsPadding() {
             int pad = 2;
-            assertAfterLayout("insets+top",
-                    () -> {
+            TestGate gate = new TestGate();
+            int[] step = {0};
+            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
+                try {
+                    if (step[0]++ == 0) {
+                        // After first layout, set insets and add content
                         panel.setInsets(pad);
                         panel.addToPanel(BorderPanel.TOP, labelWithMinHeight("top", 2));
                         panel.addToPanel(BorderPanel.CENTER, new TerminalLabel("center"));
-                    },
-                    () -> harness.setAllocatedRegion(0, 0, W - 4, H - 4));
-
-            TestGate gate = new TestGate();
-            harness.getStateMachine().onStateAdded(STATE_LAYOUT_IDLE, (old, now, bit) -> {
-                try {
-                    assertEquals(pad, stack(BorderPanel.TOP).getX());
-                    assertEquals((W - 4) - 2*pad, stack(BorderPanel.TOP).getWidth());
-                    gate.open();
+                    } else if (step[0] == 2) {
+                        // After second layout, resize
+                        harness.setAllocatedRegion(0, 0, W - 4, H - 4);
+                    } else {
+                        // After third layout
+                        assertEquals(pad, stack(BorderPanel.TOP).getX());
+                        assertEquals((W - 4) - 2*pad, stack(BorderPanel.TOP).getWidth());
+                        gate.open();
+                    }
                 } catch (Throwable t) { gate.fail(t); }
             });
+            harness.triggerRender(); // initial layout
             gate.awaitDone();
         }
     }
