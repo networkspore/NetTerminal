@@ -5,6 +5,8 @@ import java.util.Map;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.FlexBasis;
+import io.netnotes.engine.ui.layout2d.FlexGrow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
@@ -117,18 +119,21 @@ public class TerminalPanel extends TerminalGroupRegion {
         int count = contexts.length;
         int[] widths = new int[count];
         int[] heights = new int[count];
-        SizePreference[] widthPrefs = new SizePreference[count];
-        SizePreference[] heightPrefs = new SizePreference[count];
+        FlexGrow[] widthGrow = new FlexGrow[count];
+        FlexBasis[] widthBasis = new FlexBasis[count];
+        FlexGrow[] heightGrow = new FlexGrow[count];
+        FlexBasis[] heightBasis = new FlexBasis[count];
 
         boolean[] inFlow = new boolean[count];
 
         int visibleCount = 0;
 
-        // ── Pass 1: collect metadata + inclusion rules ───────────────────────
+        // ── Pass 1: collect Layout2D metadata + inclusion rules ──────────────
+        // TIER1 NOT SUPPORTED: flex-shrink (FlexShrink enum not wired)
         for (int i = 0; i < count; i++) {
             TerminalLayoutContext childContext = contexts[i];
-            TerminalRenderable child = childContext.getRenderable();
-      
+            TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
+
 
             if (!canUnhide(child)) {
                 widths[i] = 0;
@@ -141,18 +146,15 @@ public class TerminalPanel extends TerminalGroupRegion {
             inFlow[i] = true;
             visibleCount++;
 
-            if (child instanceof TerminalSizeable sizeable) {
-                widthPrefs[i] = sizeable.getWidthPreference() == SizePreference.INHERIT
-                    ? getWidthPreference()
-                    : sizeable.getWidthPreference();
-                heightPrefs[i] = sizeable.getHeightPreference() == SizePreference.INHERIT
-                    ? getHeightPreference()
-                    : sizeable.getHeightPreference();
-            } else {
-                widthPrefs[i] = SizePreference.STATIC;
-                heightPrefs[i] = SizePreference.STATIC;
-            }
-        }
+         
+            SizePreference childWidthPref = child.getWidthPreference();
+            SizePreference childHeightPref = child.getHeightPreference();
+            widthGrow[i]  = growFor(childWidthPref, this);
+            widthBasis[i] = basisFor(childWidthPref, child.getPercentWidth(), child.getMinWidth());
+            heightGrow[i] = growFor(childHeightPref, this);
+            heightBasis[i] = basisFor(childHeightPref, child.getPercentHeight(), child.getMinHeight());
+        
+    }
 
         if (visibleCount == 0) {
             return;
@@ -172,36 +174,8 @@ public class TerminalPanel extends TerminalGroupRegion {
             TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
        
 
-            int minWidth = child.getMinWidth();
-            int minHeight = child.getMinHeight();
-
-            switch (widthPrefs[i]) {
-                case FILL -> widths[i] = axis == Axis.HORIZONTAL
-                    ? -1
-                    : clampDimension(child, availableCross, true);
-                case FIT_CONTENT -> widths[i] = readContentDimension(child, childContext, true);
-                case PERCENT -> widths[i] = clampDimension(child,
-                    (int) (Math.max(0, axis == Axis.HORIZONTAL ? availableForChildren : availableCross)
-                        * child.getPercentWidth()), true
-                );
-                default -> widths[i] = clampDimension(child, childContext.getRequestedRegion() != null
-                    ? childContext.getRequestedRegion().getWidth()
-                    : childContext.getCurrentRegion().getWidth(), true);
-            }
-
-            switch (heightPrefs[i]) {
-                case FILL -> heights[i] = axis == Axis.VERTICAL
-                    ? -1
-                    : clampDimension(child, availableCross, false);
-                case FIT_CONTENT -> heights[i] = readContentDimension(child, childContext, false);
-                case PERCENT -> heights[i] = clampDimension(child,
-                    (int) (Math.max(0, axis == Axis.VERTICAL ? availableForChildren : availableCross)
-                        * child.getPercentHeight()), false
-                );
-                default ->  heights[i] = clampDimension(child, childContext.getRequestedRegion() != null
-                    ? childContext.getRequestedRegion().getHeight()
-                    : childContext.getCurrentRegion().getHeight(), false);
-            }
+            widths[i] = resolveWidth(widthGrow[i], widthBasis[i], child, childContext, availableCross, axis, availableForChildren);
+            heights[i] = resolveHeight(heightGrow[i], heightBasis[i], child, childContext, availableCross, axis, availableForChildren);
 
             int primary = axis == Axis.VERTICAL ? heights[i] : widths[i];
             if (primary < 0) {
@@ -436,7 +410,39 @@ public class TerminalPanel extends TerminalGroupRegion {
         }
     }
 
+    /**
+     * Resolve a child's measured size from SizePreference (used in measureContent pre-pass).
+     * Used by measureContent to compute content dimensions before layout.
+     */
+    private int resolveMeasureSize(SizePreference pref, double percent, TerminalRegion child,
+            TerminalLayoutContext childContext, boolean isWidth) {
+        return switch (pref) {
+            case FIT_CONTENT -> clampDimension(child, readContentDimension(child, childContext, isWidth), isWidth);
+            case PERCENT, FILL -> isWidth ? child.getMinWidth() : child.getMinHeight();
+            case STATIC -> clampDimension(child, childContext.getRequestedRegion() != null
+                ? childContext.getRequestedRegion().getDimension(isWidth)
+                : childContext.getCurrentRegion().getDimension(isWidth), isWidth);
+            default -> isWidth ? child.getMinWidth() : child.getMinHeight();
+        };
+    }
+
     // ===== HELPERS =====
+
+    /**
+     * Map deprecated SizePreference.INHERIT to parent's Layout2D values.
+     * Direct SizePreference values (FILL, PERCENT, etc.) are mapped via
+     * the deprecated TerminalRegion bridge methods.
+     */
+    private static FlexGrow growFor(SizePreference pref, TerminalPanel parent) {
+        return switch (pref) {
+            case INHERIT -> parent.getWidthGrow();
+            case FILL -> FlexGrow.FULL;
+            default -> FlexGrow.NONE;
+        };
+    }
+
+
+
 
     private boolean isWithinParentBounds(int x, int y, int width, int height,
             TerminalRectangle parentRegion) {
@@ -444,6 +450,53 @@ public class TerminalPanel extends TerminalGroupRegion {
             y >= 0 &&
             x + width  <= parentRegion.getWidth() &&
             y + height <= parentRegion.getHeight();
+    }
+
+    /**
+     * Resolve a child's width from Layout2D enums. Maps to the old SizePreference
+     * behavior: FILL→-1 (grow), PERCENT→% of available, FIT_CONTENT→content, STATIC→requested.
+     */
+    private int resolveWidth(FlexGrow grow, FlexBasis basis, TerminalRegion child,
+            TerminalLayoutContext childContext, int availableCross, Axis axis, int availableForChildren) {
+        if (grow.isNonZero()) {
+            return axis == Axis.HORIZONTAL ? -1
+                : clampDimension(child, availableCross, true);
+        }
+        if (basis.isPercent()) {
+            return clampDimension(child,
+                (int) (Math.max(0, axis == Axis.HORIZONTAL ? availableForChildren : availableCross)
+                    * basis.getPercent()), true);
+        }
+        if (basis.isContent()) {
+            return readContentDimension(child, childContext, true);
+        }
+        // FlexBasis.pixels() or auto with no grow → use requested size
+        return clampDimension(child, childContext.getRequestedRegion() != null
+            ? childContext.getRequestedRegion().getWidth()
+            : childContext.getCurrentRegion().getWidth(), true);
+    }
+
+    /**
+     * Resolve a child's height from Layout2D enums. Maps to the old SizePreference
+     * behavior: FILL→-1 (grow), PERCENT→% of available, FIT_CONTENT→content, STATIC→requested.
+     */
+    private int resolveHeight(FlexGrow grow, FlexBasis basis, TerminalRegion child,
+            TerminalLayoutContext childContext, int availableCross, Axis axis, int availableForChildren) {
+        if (grow.isNonZero()) {
+            return axis == Axis.VERTICAL ? -1
+                : clampDimension(child, availableCross, false);
+        }
+        if (basis.isPercent()) {
+            return clampDimension(child,
+                (int) (Math.max(0, axis == Axis.VERTICAL ? availableForChildren : availableCross)
+                    * basis.getPercent()), false);
+        }
+        if (basis.isContent()) {
+            return readContentDimension(child, childContext, false);
+        }
+        return clampDimension(child, childContext.getRequestedRegion() != null
+            ? childContext.getRequestedRegion().getHeight()
+            : childContext.getCurrentRegion().getHeight(), false);
     }
 
 
@@ -466,7 +519,7 @@ public class TerminalPanel extends TerminalGroupRegion {
      * Parent-dependent children (FILL/PERCENT) contribute their minimum size
      * floor when no in-flight measurement is available.
      */
-    @Override
+   @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
         // Calculate content dimensions based on axis
         int totalPrimary = 0;  // sum for primary axis
@@ -475,63 +528,28 @@ public class TerminalPanel extends TerminalGroupRegion {
         // Count visible children
         int visibleCount = 0;
         for (TerminalRenderable child : getChildren()) {
-            if (canUnhide(child)) visibleCount++;
+            //TODO: count the children that are not hidden on the measred axis
+            visibleCount++;
         }
 
-        // Measure each child based on their SizePreference
+        // Measure each child based on Layout2D enums (mapped from SizePreference)
         for (int i = 0; i < childContexts.length; i++) {
             TerminalLayoutContext childContext = childContexts[i];
             TerminalRenderable renderable = childContext.getRenderable();
 
-            if (!canUnhide(renderable)) {
-                continue;
-            }
 
             TerminalRegion child = checkTerminalRegion(renderable);
 
-            // Get child's width preference (respecting INHERIT)
+            // Get child's Layout2D preferences (respecting INHERIT)
             SizePreference childWidthPref = child.getWidthPreference() == SizePreference.INHERIT
                 ? getWidthPreference()
                 : child.getWidthPreference();
-            int minWidth = child.getMinWidth();
-            int childWidth;
-            switch (childWidthPref) {
-                case FIT_CONTENT:
-                    childWidth = clampDimension(child, readContentDimension(child, childContext, true), true);
-                    break;
-                case PERCENT:
-                case FILL:
-                    childWidth = minWidth;
-                    break;
-                case STATIC:
-                default:
-                    childWidth = clampDimension(child, childContext.getRequestedRegion() != null
-                        ? childContext.getRequestedRegion().getWidth()
-                        : childContext.getCurrentRegion().getWidth(), true);
-                    break;
-            }
-
-            // Get child's height preference (respecting INHERIT)
             SizePreference childHeightPref = child.getHeightPreference() == SizePreference.INHERIT
                 ? getHeightPreference()
                 : child.getHeightPreference();
-            int minHeight = child.getMinHeight();
-            int childHeight;
-            switch (childHeightPref) {
-                case FIT_CONTENT:
-                    childHeight = clampDimension(child, readContentDimension(child, childContext, false), false);
-                    break;
-                case PERCENT:
-                case FILL:
-                    childHeight = minHeight;
-                    break;
-                case STATIC:
-                default:
-                    childHeight = Math.max(minHeight, childContext.getRequestedRegion() != null
-                        ? childContext.getRequestedRegion().getHeight()
-                        : childContext.getCurrentRegion().getHeight());
-                    break;
-            }
+
+            int childWidth = resolveMeasureSize(childWidthPref, child.getPercentWidth(), child, childContext, true);
+            int childHeight = resolveMeasureSize(childHeightPref, child.getPercentHeight(), child, childContext, false);
 
             // Accumulate based on axis
             if (axis == Axis.HORIZONTAL) {

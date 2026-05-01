@@ -1,9 +1,12 @@
 package io.netnotes.terminal.components;
 
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.FlexBasis;
+import io.netnotes.engine.ui.layout2d.FlexGrow;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.components.panels.TerminalGroupRegion;
+import io.netnotes.terminal.components.panels.TerminalPanel;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutCallback;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
@@ -65,6 +68,13 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     private SizePreference heightPreference = SizePreference.STATIC;
     private float percentWidth  = 0f;
     private float percentHeight = 0f;
+
+    // Layout2D fields — primary source of truth for layout containers
+    // Mapped from SizePreference during migration (Tier 1)
+    private FlexGrow widthGrow  = FlexGrow.NONE;
+    private FlexGrow heightGrow = FlexGrow.NONE;
+    private FlexBasis widthBasis  = FlexBasis.auto();
+    private FlexBasis heightBasis = FlexBasis.auto();
     private int minWidth  = 0;
     private int minHeight = 0;
     private int maxWidth  = Integer.MAX_VALUE;
@@ -133,20 +143,6 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
 
     // ── SizePreference ────────────────────────────────────────────────────────
 
-    @Override public SizePreference getWidthPreference()  { return widthPreference; }
-    @Override public SizePreference getHeightPreference() { return heightPreference; }
-
-    public void setWidthPreference(SizePreference widthPreference) {
-        SizePreference next = widthPreference != null ? widthPreference : SizePreference.STATIC;
-        this.widthPreference = next;
-        requestLayoutUpdate();
-    }
-
-    public void setHeightPreference(SizePreference heightPreference) {
-        SizePreference next = heightPreference != null ? heightPreference : SizePreference.STATIC;
-        this.heightPreference = next;
-        requestLayoutUpdate();
-    }
 
     @Override
     public SizePreference getSizePreference(int axis) {
@@ -158,7 +154,231 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
         };
     }
 
-    // ── Insets ────────────────────────────────────────────────────────────────
+    // ── Layout2D ──────────────────────────────────────────────────────────────
+
+    /**
+     * Get the flex-grow for the width axis.
+     * @return The FlexGrow for width
+     */
+    public FlexGrow getWidthGrow()  { return widthGrow; }
+
+    /**
+     * Get the flex-grow for the height axis.
+     * @return The FlexGrow for height
+     */
+    public FlexGrow getHeightGrow() { return heightGrow; }
+
+    /**
+     * Get the flex-basis for the width axis.
+     * @return The FlexBasis for width
+     */
+    public FlexBasis getWidthBasis()  { return widthBasis; }
+
+    /**
+     * Get the flex-basis for the height axis.
+     * @return The FlexBasis for height
+     */
+    public FlexBasis getHeightBasis() { return heightBasis; }
+
+    /**
+     * Set flex-grow for width axis.
+     * @param widthGrow The FlexGrow value
+     */
+    public void setWidthGrow(FlexGrow widthGrow) {
+        this.widthGrow = widthGrow != null ? widthGrow : FlexGrow.NONE;
+        requestLayoutUpdate();
+    }
+
+    /**
+     * Set flex-grow for height axis.
+     * @param heightGrow The FlexGrow value
+     */
+    public void setHeightGrow(FlexGrow heightGrow) {
+        this.heightGrow = heightGrow != null ? heightGrow : FlexGrow.NONE;
+        requestLayoutUpdate();
+    }
+
+    /**
+     * Set flex-basis for width axis.
+     * @param widthBasis The FlexBasis value
+     */
+    public void setWidthBasis(FlexBasis widthBasis) {
+        this.widthBasis = widthBasis != null ? widthBasis : FlexBasis.auto();
+        requestLayoutUpdate();
+    }
+
+    /**
+     * Set flex-basis for height axis.
+     * @param heightBasis The FlexBasis value
+     */
+    public void setHeightBasis(FlexBasis heightBasis) {
+        this.heightBasis = heightBasis != null ? heightBasis : FlexBasis.auto();
+        requestLayoutUpdate();
+    }
+
+    /**
+     * Get the Layout2D flex-grow for the given axis.
+     * @param axis AXIS_W or AXIS_H
+     * @return The FlexGrow for the axis
+     */
+    public FlexGrow getWidthGrow(int axis) {
+        return switch (axis) {
+            case AXIS_W -> widthGrow;
+            case AXIS_H -> heightGrow;
+            default -> throw new IllegalArgumentException(
+                "getWidthGrow TerminalRegion does not have axis: " + axis);
+        };
+    }
+
+    /**
+     * Get the Layout2D flex-basis for the given axis.
+     * @param axis AXIS_W or AXIS_H
+     * @return The FlexBasis for the axis
+     */
+    public FlexBasis getWidthBasis(int axis) {
+        return switch (axis) {
+            case AXIS_W -> widthBasis;
+            case AXIS_H -> heightBasis;
+            default -> throw new IllegalArgumentException(
+                "getWidthBasis TerminalRegion does not have axis: " + axis);
+        };
+    }
+
+    // ── Deprecated SizePreference bridge ──────────────────────────────────────
+    //
+    // Migration guide (SizePreference → Layout2D):
+    //   FILL        → FlexGrow.FULL + FlexBasis.auto()
+    //   PERCENT     → FlexGrow.NONE  + FlexBasis.percent(...)
+    //   INHERIT     → copied from parent's Layout2D enum at runtime
+    //   FIT_CONTENT → FlexGrow.NONE  + FlexBasis.content()
+    //   STATIC      → FlexGrow.NONE  + FlexBasis.pixels(...)
+    //
+    // These methods keep the old API working while Layout2D is the primary
+    // source of truth. New code should use getWidthGrow()/setWidthBasis().
+
+    /**
+     * @deprecated Use {@link #getWidthGrow()} or {@link #setWidthGrow(FlexGrow)} instead.
+     *   Migration: FILL → FlexGrow.FULL, PERCENT → FlexBasis.percent(),
+     *   FIT_CONTENT → FlexBasis.content(), STATIC → FlexBasis.pixels()
+     */
+    @Deprecated
+    public void setWidthPreference(SizePreference widthPreference) {
+        this.widthPreference = widthPreference;
+        applyWidthPreference(widthPreference);
+    }
+
+    /**
+     * @deprecated Use {@link #getHeightGrow()} or {@link #setHeightGrow(FlexGrow)} instead.
+     *   Migration: FILL → FlexGrow.FULL, PERCENT → FlexBasis.percent(),
+     *   FIT_CONTENT → FlexBasis.content(), STATIC → FlexBasis.pixels()
+     */
+    @Deprecated
+    public void setHeightPreference(SizePreference heightPreference) {
+        this.heightPreference = heightPreference;
+        applyHeightPreference(heightPreference);
+    }
+
+    /**
+     * @deprecated Use {@link #getWidthGrow()} or {@link #getWidthBasis()} instead.
+     */
+    @Deprecated
+    public SizePreference getWidthPreference() { return widthPreference; }
+
+    /**
+     * @deprecated Use {@link #getHeightGrow()} or {@link #getHeightBasis()} instead.
+     */
+    @Deprecated
+    public SizePreference getHeightPreference() { return heightPreference; }
+
+    /**
+     * Apply a SizePreference value to the Layout2D fields.
+     * Used by the deprecated setters to keep Layout2D in sync.
+     */
+    private void applyWidthPreference(SizePreference pref) {
+        applyWidthPreference(pref, percentWidth);
+    }
+
+    private void applyHeightPreference(SizePreference pref) {
+        applyHeightPreference(pref, percentHeight);
+    }
+
+    private void applyWidthPreference(SizePreference pref, float percent) {
+        switch (pref) {
+            case FILL:
+                this.widthGrow = FlexGrow.FULL;
+                this.widthBasis = FlexBasis.auto();
+                break;
+            case PERCENT:
+                this.widthGrow = FlexGrow.NONE;
+                this.widthBasis = FlexBasis.percent(percent);
+                break;
+            case FIT_CONTENT:
+                this.widthGrow = FlexGrow.NONE;
+                this.widthBasis = FlexBasis.content();
+                break;
+            case STATIC:
+                this.widthGrow = FlexGrow.NONE;
+                this.widthBasis = FlexBasis.pixels(getMinWidth());
+                break;
+            case INHERIT:
+                this.widthGrow = FlexGrow.NONE;
+                this.widthBasis = FlexBasis.auto();
+                break;
+        }
+    }
+
+    private void applyHeightPreference(SizePreference pref, float percent) {
+        switch (pref) {
+            case FILL:
+                this.heightGrow = FlexGrow.FULL;
+                this.heightBasis = FlexBasis.auto();
+                break;
+            case PERCENT:
+                this.heightGrow = FlexGrow.NONE;
+                this.heightBasis = FlexBasis.percent(percent);
+                break;
+            case FIT_CONTENT:
+                this.heightGrow = FlexGrow.NONE;
+                this.heightBasis = FlexBasis.content();
+                break;
+            case STATIC:
+                this.heightGrow = FlexGrow.NONE;
+                this.heightBasis = FlexBasis.pixels(getMinHeight());
+                break;
+            case INHERIT:
+                // INHERIT copies from parent at layout time — use NONE as default
+                this.heightGrow = FlexGrow.NONE;
+                this.heightBasis = FlexBasis.auto();
+                break;
+        }
+    }
+
+    protected FlexGrow growFor(SizePreference pref) {
+        return switch (pref) {
+            case FILL -> FlexGrow.FULL;
+            default -> FlexGrow.NONE;
+        };
+    }
+
+
+
+
+    public static FlexBasis basisFor(SizePreference pref, double percent, double fallback) {
+        return switch (pref) {
+            case INHERIT -> FlexBasis.auto(); // will be set from parent at layout time
+            case PERCENT -> FlexBasis.percent(percent);
+            case FIT_CONTENT -> FlexBasis.content();
+            default -> FlexBasis.auto();
+        };
+    }
+
+    public static FlexBasis basisFor(SizePreference pref, TerminalPanel parent) {
+        return switch (pref) {
+            case INHERIT -> parent.getWidthBasis();
+            case FIT_CONTENT -> FlexBasis.content();
+            default -> FlexBasis.auto();
+        };
+    }
 
     @Override public TerminalInsets getInsets() { return insets; }
 
@@ -215,8 +435,8 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     @Override
     public boolean isAxisParentDependent(int axis) {
         return switch (axis) {
-            case AXIS_W -> widthPreference.isParentDependent();
-            case AXIS_H -> heightPreference.isParentDependent();
+            case AXIS_W -> widthGrow.isNonZero() || widthBasis.isPercent();
+            case AXIS_H -> heightGrow.isNonZero() || heightBasis.isPercent();
             default     -> false;
         };
     }
@@ -224,8 +444,8 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     @Override
     public boolean isAxisContentDependent(int axis) {
         return switch (axis) {
-            case AXIS_W -> widthPreference.isContentDependent();
-            case AXIS_H -> heightPreference.isContentDependent();
+            case AXIS_W -> widthBasis.isContent();
+            case AXIS_H -> heightBasis.isContent();
             default     -> false;
         };
     }
@@ -238,18 +458,16 @@ public class TerminalRegion extends TerminalRenderable implements TerminalSizeab
     // committed geometry.
     @Override
     public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        //Because a terminalRegion should never have children we ignore the child contexts and just measure based on our own preferences and geometry.
-        return new TerminalRectangle(0, 0, 
-            this.widthPreference.isParentDependent() 
-                ? getMinWidth() 
-                : ( clampDimension(this, getRequestedRegion() != null
+        // TerminalRegion is empty-by-nature — measure based on Layout2D preferences.
+        return new TerminalRectangle(0, 0,
+            isAxisParentDependent(AXIS_W) ? getMinWidth()
+                : clampDimension(this, getRequestedRegion() != null
                     ? getRequestedRegion().getWidth()
-                    : getWidth(), true)),
-            this.heightPreference.isParentDependent()
-                ? getMinHeight() 
-                : (clampDimension(this, getRequestedRegion() != null
+                    : getWidth(), true),
+            isAxisParentDependent(AXIS_H) ? getMinHeight()
+                : clampDimension(this, getRequestedRegion() != null
                     ? getRequestedRegion().getHeight()
-                    : getHeight(), true)));
+                    : getHeight(), true));
     }
 
    

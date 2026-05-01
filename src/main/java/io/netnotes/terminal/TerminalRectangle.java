@@ -1004,6 +1004,10 @@ public boolean intersect(TerminalRectangle other, TerminalRectangle out) {
         return 2;
     }
 
+    public int getDimension(boolean isWidth){
+        return isWidth ? width : height;
+    }
+
     @Override
     public void zeroParentAbsolutePosition() {
         parentAbsoluteX = 0;
