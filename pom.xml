@@ -16,7 +16,7 @@
            <dependency>
                 <groupId>io.netnotes</groupId>
                 <artifactId>engine</artifactId>
-                <version>0.11.8</version>
+                <version>0.11.9</version>
             </dependency>
 
             <dependency>

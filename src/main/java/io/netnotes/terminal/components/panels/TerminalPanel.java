@@ -1,126 +1,652 @@
 package io.netnotes.terminal.components.panels;
 
-import java.util.ArrayList;
-import java.util.List;
 import java.util.Map;
 
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
+import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
+import io.netnotes.terminal.TextStyle;
+import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
 import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
+import io.netnotes.terminal.layout.TerminalSizeable;
 
 /**
- * TerminalFlexLayout — flexbox‑like layout container.
+ * TerminalPanel - Versatile single-axis layout container.
  *
- * <p>Supports:
- * <ul>
- *   <li>Direction: {@code ROW} (left‑to‑right) or {@code COLUMN} (top‑to‑bottom)</li>
- *   <li>Wrapping: enabled with {@link #setWrap(boolean)} – children flow onto
- *       multiple lines when the main‑axis space is exhausted.</li>
- *   <li>Main‑axis distribution: {@code JustifyContent START | CENTER | END |
- *       SPACE_BETWEEN | SPACE_AROUND | SPACE_EVENLY}</li>
- *   <li>Cross‑axis alignment: {@code AlignItems START | CENTER | END | STRETCH}
- *       (applies to each line individually when wrapping)</li>
- *   <li>Uniform gap between items (main‑axis and cross‑axis simultaneously)</li>
- *   <li>Child sizing: respect {@link SizePreference} (FILL = flex‑grow 1,
- *       FIT_CONTENT, STATIC, PERCENT) with min/max clamping</li>
- *   <li>Overflow: CLIP (default) or OVERFLOW per axis</li>
- * </ul>
+ * Supports HORIZONTAL and VERTICAL layout axes, optional wrapping,
+ * main-axis alignment, cross-axis alignment, border, title, fill style,
+ * padding, and configurable overflow handling.
  *
- * <p>Architecture mirrors {@link TerminalPanel}: extends {@link TerminalGroupRegion},
- * implements {@code measureContent()} for bottom‑up content sizing, and a
- * layout callback that places children.
+ * OVERFLOW STRATEGIES (applied to the main / primary axis):
+ * - CLIP (default)   : children that overflow are hidden
+ * - OVERFLOW         : children render outside the parent bounds without clipping
+ * - SHRINK_FILL      : FILL children receive exactly the available share (no min-size inflation)
+ * - SHRINK_ALL       : all children scale proportionally if total exceeds available
+ * - DISTRIBUTE_EQUAL : every visible child receives an equal share of available primary space
  */
 public class TerminalPanel extends TerminalGroupRegion {
 
-    // ── Enums ──────────────────────────────────────────────────────────────────
-    public enum FlexDirection { ROW, COLUMN }
-    public enum JustifyContent { START, CENTER, END, SPACE_BETWEEN, SPACE_AROUND, SPACE_EVENLY }
-    public enum AlignItems { START, CENTER, END, STRETCH }
+    public enum Axis {
+        VERTICAL,
+        HORIZONTAL
+    }
 
-    // ── State ──────────────────────────────────────────────────────────────────
-    private FlexDirection direction = FlexDirection.ROW;
+    public enum Alignment {
+        START,    // default
+        CENTER,
+        END,
+        STRETCH   // only affects positioning when child < available cross
+    }
+
+    // ── border / title ────────────────────────────────────────────────────────
+    private boolean drawBorder = false;
+    private TextStyle.LineStyle borderStyle = TextStyle.LineStyle.SINGLE;
+    private String title = null;
+    private Position titlePosition = Position.TOP_CENTER;
+    private TextStyle borderTextStyle = TextStyle.NORMAL;
+    private TextStyle focusedBorderTextStyle = TextStyle.FOCUSED;
+
+    // ── layout ────────────────────────────────────────────────────────────────
+    private final TerminalInsets padding = new TerminalInsets();
+    private final TerminalInsets borderInsets = new TerminalInsets();
+    private Axis axis = Axis.HORIZONTAL;
     private boolean wrap = false;
-    private JustifyContent justifyContent = JustifyContent.START;
-    private AlignItems alignItems = AlignItems.START;
-    private int gap = 0;
+    private int spacing = 0;
+    private Alignment crossAlignment = Alignment.START;
+    private Alignment alignment = Alignment.START;
     private LayoutOverflowStrategy overflowStrategy = LayoutOverflowStrategy.CLIP;
-    private TerminalInsets padding = new TerminalInsets();
 
-    // =========================================================================
-    // CONSTRUCTION
-    // =========================================================================
+    // ── size constraints ──────────────────────────────────────────────────────
+    private int maxWidth  = Integer.MAX_VALUE;
+    private int maxHeight = Integer.MAX_VALUE;
+
+    // ── rendering ─────────────────────────────────────────────────────────────
+    private TextStyle fillStyle = null;
+
+    // ── layout group ──────────────────────────────────────────────────────────
+
     public TerminalPanel(String name) {
-        super(name, "flex-");
-        setWidthPreference(SizePreference.FILL);
-        setHeightPreference(SizePreference.FILL);
-        padding.setOnChanged(insets -> requestLayoutUpdate());
+        super(name, "term-panel");
+
+        padding.setOnChanged(insets -> {
+            updateBorderInsets();
+            requestLayoutUpdate();
+        });
+        updateBorderInsets();
         syncOverflowClipPolicy();
     }
 
-    @Override
     protected TerminalLayoutGroupCallback createLayoutCallback() {
-        return this::layoutChildren;
+        return this::layoutAllChildren;
     }
 
-    // =========================================================================
-    // CONFIGURATION
-    // =========================================================================
-    public void setDirection(FlexDirection d) {
-        if (d != null && direction != d) { direction = d; requestLayoutUpdate(); }
-    }
-    public FlexDirection getDirection() { return direction; }
 
-    public void setWrap(boolean w) {
-        if (wrap != w) { wrap = w; requestLayoutUpdate(); }
+
+    // ===== CHILD MANAGEMENT =====
+
+
+    // ===== LAYOUT =====
+
+    private void layoutAllChildren(
+        TerminalLayoutContext[] contexts,
+        Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
+    ) {
+        if (contexts.length == 0) return;
+
+        TerminalRectangle parent = contexts[0].getParentRegion();
+        if (parent == null) return;
+
+        TerminalInsets ins   = getInsets();
+        int effectiveWidth   = parent.getWidth();
+        int effectiveHeight  = parent.getHeight();
+        int availableWidth   = effectiveWidth  - ins.getHorizontal();
+        int availableHeight  = effectiveHeight - ins.getVertical();
+        int availablePrimary = axis == Axis.VERTICAL ? availableHeight : availableWidth;
+        int availableCross   = axis == Axis.VERTICAL ? availableWidth  : availableHeight;
+        int startX           = ins.getLeft();
+        int startY           = ins.getTop();
+
+        int count = contexts.length;
+        int[] widths = new int[count];
+        int[] heights = new int[count];
+        SizePreference[] widthPrefs = new SizePreference[count];
+        SizePreference[] heightPrefs = new SizePreference[count];
+
+        boolean[] inFlow = new boolean[count];
+
+        int visibleCount = 0;
+
+        // ── Pass 1: collect metadata + inclusion rules ───────────────────────
+        for (int i = 0; i < count; i++) {
+            TerminalLayoutContext childContext = contexts[i];
+            TerminalRenderable child = childContext.getRenderable();
+      
+
+            if (!canUnhide(child)) {
+                widths[i] = 0;
+                heights[i] = 0;
+                dataInterfaces.get(child.getName())
+                    .setLayoutData(TerminalLayoutData.getBuilder().build());
+                continue;
+            }
+
+            inFlow[i] = true;
+            visibleCount++;
+
+            if (child instanceof TerminalSizeable sizeable) {
+                widthPrefs[i] = sizeable.getWidthPreference() == SizePreference.INHERIT
+                    ? getWidthPreference()
+                    : sizeable.getWidthPreference();
+                heightPrefs[i] = sizeable.getHeightPreference() == SizePreference.INHERIT
+                    ? getHeightPreference()
+                    : sizeable.getHeightPreference();
+            } else {
+                widthPrefs[i] = SizePreference.STATIC;
+                heightPrefs[i] = SizePreference.STATIC;
+            }
+        }
+
+        if (visibleCount == 0) {
+            return;
+        }
+
+        int gapTotal = visibleCount > 1 ? (visibleCount - 1) * spacing : 0;
+        int availableForChildren = availablePrimary - gapTotal;
+
+        // ── Pass 2: resolve raw sizes once ────────────────────────────────────
+        int totalResolvedPrimary = 0;
+        int fillPrimaryCount = 0;
+
+        for (int i = 0; i < count; i++) {
+            if (!inFlow[i]) continue;
+
+            TerminalLayoutContext childContext = contexts[i];
+            TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
+       
+
+            int minWidth = child.getMinWidth();
+            int minHeight = child.getMinHeight();
+
+            switch (widthPrefs[i]) {
+                case FILL -> widths[i] = axis == Axis.HORIZONTAL
+                    ? -1
+                    : clampDimension(child, availableCross, true);
+                case FIT_CONTENT -> widths[i] = readContentDimension(child, childContext, true);
+                case PERCENT -> widths[i] = clampDimension(child,
+                    (int) (Math.max(0, axis == Axis.HORIZONTAL ? availableForChildren : availableCross)
+                        * child.getPercentWidth()), true
+                );
+                default -> widths[i] = clampDimension(child, childContext.getRequestedRegion() != null
+                    ? childContext.getRequestedRegion().getWidth()
+                    : childContext.getCurrentRegion().getWidth(), true);
+            }
+
+            switch (heightPrefs[i]) {
+                case FILL -> heights[i] = axis == Axis.VERTICAL
+                    ? -1
+                    : clampDimension(child, availableCross, false);
+                case FIT_CONTENT -> heights[i] = readContentDimension(child, childContext, false);
+                case PERCENT -> heights[i] = clampDimension(child,
+                    (int) (Math.max(0, axis == Axis.VERTICAL ? availableForChildren : availableCross)
+                        * child.getPercentHeight()), false
+                );
+                default ->  heights[i] = clampDimension(child, childContext.getRequestedRegion() != null
+                    ? childContext.getRequestedRegion().getHeight()
+                    : childContext.getCurrentRegion().getHeight(), false);
+            }
+
+            int primary = axis == Axis.VERTICAL ? heights[i] : widths[i];
+            if (primary < 0) {
+                fillPrimaryCount++;
+            } else {
+                totalResolvedPrimary += primary;
+            }
+        }
+
+        int rawFillPrimary = fillPrimaryCount > 0
+            ? Math.max(0, (availableForChildren - totalResolvedPrimary) / fillPrimaryCount)
+            : 0;
+
+        // ── Pass 3: resolve main-axis FILL from the chosen overflow policy ───
+        int totalPrimaryUsed = 0;
+
+        switch (overflowStrategy) {
+
+            case SHRINK_FILL -> {
+                for (int i = 0; i < count; i++) {
+                    if (!inFlow[i]) continue;
+                    if (axis == Axis.VERTICAL) {
+                        if (heights[i] < 0) {
+                            TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
+                            heights[i] = clampDimension(child, rawFillPrimary, false);
+                        }
+                        totalPrimaryUsed += heights[i];
+                    } else {
+                        if (widths[i] < 0) {
+                            TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
+                            widths[i] = clampDimension(child, rawFillPrimary, true);
+                        }
+                        totalPrimaryUsed += widths[i];
+                    }
+                }
+            }
+
+            case SHRINK_ALL -> {
+                for (int i = 0; i < count; i++) {
+                    if (!inFlow[i]) continue;
+
+                    TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
+
+                    if (axis == Axis.VERTICAL) {
+                        if (heights[i] < 0) {
+                            heights[i] = readContentDimension(child, contexts[i], false);
+                        }
+                        totalPrimaryUsed += heights[i];
+                    } else {
+                        if (widths[i] < 0) {
+                            widths[i] = readContentDimension(child, contexts[i], true);
+                        }
+                        totalPrimaryUsed += widths[i];
+                    }
+                }
+
+                if (totalPrimaryUsed > availableForChildren && totalPrimaryUsed > 0) {
+                    float scale = (float) Math.max(0, availableForChildren) / totalPrimaryUsed;
+                    totalPrimaryUsed = 0;
+
+                    for (int i = 0; i < count; i++) {
+                        if (!inFlow[i]) continue;
+
+                        TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
+
+                        if (axis == Axis.VERTICAL) {
+                            heights[i] = clampDimension(child, (int) (heights[i] * scale), false);
+                            totalPrimaryUsed += heights[i];
+                        } else {
+                            widths[i] = clampDimension(child, (int) (widths[i] * scale), true);
+                            totalPrimaryUsed += widths[i];
+                        }
+                    }
+                }
+            }
+
+            case DISTRIBUTE_EQUAL -> {
+                int equalShare = visibleCount > 0
+                    ? Math.max(0, availableForChildren / visibleCount)
+                    : 0;
+
+                for (int i = 0; i < count; i++) {
+                    if (!inFlow[i]) continue;
+
+                    TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
+
+                    if (axis == Axis.VERTICAL) {
+                        heights[i] = clampDimension(child, equalShare, false);
+                        totalPrimaryUsed += heights[i];
+                    } else {
+                        widths[i] = clampDimension(child, equalShare, true);
+                        totalPrimaryUsed += widths[i];
+                    }
+                }
+            }
+
+            default -> {
+                for (int i = 0; i < count; i++) {
+                    if (!inFlow[i]) continue;
+
+                    TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
+
+                    if (axis == Axis.VERTICAL) {
+                        if (heights[i] < 0) {
+                            heights[i] = clampDimension(child, rawFillPrimary, false);
+                        }
+                        totalPrimaryUsed += heights[i];
+                    } else {
+                        if (widths[i] < 0) {
+                            widths[i] = clampDimension(child, rawFillPrimary, true);
+                        }
+                        totalPrimaryUsed += widths[i];
+                    }
+                }
+            }
+        }
+
+        if (visibleCount > 1) {
+            totalPrimaryUsed += gapTotal;
+        }
+
+        int primaryOffset = switch (alignment) {
+            case CENTER -> Math.max(0, (availablePrimary - totalPrimaryUsed) / 2);
+            case END -> Math.max(0, availablePrimary - totalPrimaryUsed);
+            default -> 0;
+        };
+
+        // ── Pass 4: place once and apply overflow rules only here ─────────────
+        int cursorX = startX + (axis == Axis.HORIZONTAL ? primaryOffset : 0);
+        int cursorY = startY + (axis == Axis.VERTICAL ? primaryOffset : 0);
+        int lineCrossExtent = 0;
+        int wrapPrimaryLimit = axis == Axis.VERTICAL
+            ? startY + Math.max(0, availableHeight)
+            : startX + Math.max(0, availableWidth);
+
+        for (int i = 0; i < count; i++) {
+            if (!inFlow[i]) continue;
+
+            TerminalRenderable child = contexts[i].getRenderable();
+            int width = widths[i];
+            int height = heights[i];
+
+            if (wrap) {
+                int nextPrimary = axis == Axis.VERTICAL ? cursorY + height : cursorX + width;
+                if (lineCrossExtent > 0 && nextPrimary > wrapPrimaryLimit) {
+                    if (axis == Axis.VERTICAL) {
+                        cursorY = startY + primaryOffset;
+                        cursorX += lineCrossExtent;
+                    } else {
+                        cursorX = startX + primaryOffset;
+                        cursorY += lineCrossExtent;
+                    }
+                    lineCrossExtent = 0;
+                }
+            }
+
+            int x = cursorX;
+            int y = cursorY;
+            int availableCrossAtCursor = axis == Axis.VERTICAL
+                ? Math.max(0, effectiveWidth - ins.getRight() - cursorX)
+                : Math.max(0, effectiveHeight - ins.getBottom() - cursorY);
+
+            if (crossAlignment == Alignment.STRETCH) {
+                if (axis == Axis.VERTICAL) width = availableCrossAtCursor;
+                else height = availableCrossAtCursor;
+            }
+
+            int freeCross = availableCrossAtCursor - (axis == Axis.VERTICAL ? width : height);
+            if (freeCross > 0) {
+                switch (crossAlignment) {
+                    case CENTER -> {
+                        if (axis == Axis.VERTICAL) x += freeCross / 2;
+                        else y += freeCross / 2;
+                    }
+                    case END -> {
+                        if (axis == Axis.VERTICAL) x += freeCross;
+                        else y += freeCross;
+                    }
+                    default -> {}
+                }
+            }
+
+            int remainingWidth = Math.max(0, effectiveWidth - ins.getRight() - x);
+            int remainingHeight = Math.max(0, effectiveHeight - ins.getBottom() - y);
+
+            int allocatedWidth;
+            int allocatedHeight;
+            boolean inBounds;
+
+            if (overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
+                allocatedWidth = axis == Axis.HORIZONTAL
+                    ? Math.max(0, width)
+                    : Math.min(Math.max(0, width), remainingWidth);
+                allocatedHeight = axis == Axis.VERTICAL
+                    ? Math.max(0, height)
+                    : Math.min(Math.max(0, height), remainingHeight);
+
+                boolean hasSpace = allocatedWidth > 0 && allocatedHeight > 0;
+                inBounds = hasSpace && (axis == Axis.VERTICAL
+                    ? x >= 0 && x + allocatedWidth <= parent.getWidth()
+                    : y >= 0 && y + allocatedHeight <= parent.getHeight());
+            } else {
+                allocatedWidth = Math.min(Math.max(0, width), remainingWidth);
+                allocatedHeight = Math.min(Math.max(0, height), remainingHeight);
+
+                boolean hasSpace = allocatedWidth > 0 && allocatedHeight > 0;
+                inBounds = hasSpace && isWithinParentBounds(
+                    x, y, allocatedWidth, allocatedHeight, parent);
+            }
+
+            TerminalLayoutData.TerminalLayoutDataBuilder builder = TerminalLayoutData.getBuilder()
+                .setX(x)
+                .setY(y)
+                .setWidth(Math.max(0, allocatedWidth))
+                .setHeight(Math.max(0, allocatedHeight));
+
+            if (!inBounds) {
+                builder.hidden(overflowStrategy != LayoutOverflowStrategy.OVERFLOW);
+            } else {
+                builder.hidden(false);
+            }
+
+            dataInterfaces.get(child.getName()).setLayoutData(builder.build());
+
+            if (axis == Axis.VERTICAL) {
+                cursorY += Math.max(0, allocatedHeight) + spacing;
+                lineCrossExtent = Math.max(lineCrossExtent, allocatedWidth);
+            } else {
+                cursorX += Math.max(0, allocatedWidth) + spacing;
+                lineCrossExtent = Math.max(lineCrossExtent, allocatedHeight);
+            }
+        }
     }
+
+    // ===== HELPERS =====
+
+    private boolean isWithinParentBounds(int x, int y, int width, int height,
+            TerminalRectangle parentRegion) {
+        return x >= 0 &&
+            y >= 0 &&
+            x + width  <= parentRegion.getWidth() &&
+            y + height <= parentRegion.getHeight();
+    }
+
+
+
+    // ===== MEASURE CONTENT (pre-pass for FIT_CONTENT sizing) =====
+
+    /**
+     * Pre-pass that runs before the layout callback. Computes the panel's own
+     * content dimensions from child contexts so that a parent whose panel has
+     * FIT_CONTENT sizing can read back the correct size via
+     * {@link TerminalLayoutContext#getMeasuredContentBounds()}.
+     *
+     * <p>Width/height contributions depend on the panel's axis:
+     * <ul>
+     *   <li>HORIZONTAL panel: width = sum of FIT/STATIC child widths + gaps;
+     *       height = max of FIT/STATIC child heights.</li>
+     *   <li>VERTICAL panel:   width = max of FIT/STATIC child widths;
+     *       height = sum of FIT/STATIC child heights + gaps.</li>
+     * </ul>
+     * Parent-dependent children (FILL/PERCENT) contribute their minimum size
+     * floor when no in-flight measurement is available.
+     */
+    @Override
+    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
+        // Calculate content dimensions based on axis
+        int totalPrimary = 0;  // sum for primary axis
+        int maxCross = 0;       // max for cross axis
+
+        // Count visible children
+        int visibleCount = 0;
+        for (TerminalRenderable child : getChildren()) {
+            if (canUnhide(child)) visibleCount++;
+        }
+
+        // Measure each child based on their SizePreference
+        for (int i = 0; i < childContexts.length; i++) {
+            TerminalLayoutContext childContext = childContexts[i];
+            TerminalRenderable renderable = childContext.getRenderable();
+
+            if (!canUnhide(renderable)) {
+                continue;
+            }
+
+            TerminalRegion child = checkTerminalRegion(renderable);
+
+            // Get child's width preference (respecting INHERIT)
+            SizePreference childWidthPref = child.getWidthPreference() == SizePreference.INHERIT
+                ? getWidthPreference()
+                : child.getWidthPreference();
+            int minWidth = child.getMinWidth();
+            int childWidth;
+            switch (childWidthPref) {
+                case FIT_CONTENT:
+                    childWidth = clampDimension(child, readContentDimension(child, childContext, true), true);
+                    break;
+                case PERCENT:
+                case FILL:
+                    childWidth = minWidth;
+                    break;
+                case STATIC:
+                default:
+                    childWidth = clampDimension(child, childContext.getRequestedRegion() != null
+                        ? childContext.getRequestedRegion().getWidth()
+                        : childContext.getCurrentRegion().getWidth(), true);
+                    break;
+            }
+
+            // Get child's height preference (respecting INHERIT)
+            SizePreference childHeightPref = child.getHeightPreference() == SizePreference.INHERIT
+                ? getHeightPreference()
+                : child.getHeightPreference();
+            int minHeight = child.getMinHeight();
+            int childHeight;
+            switch (childHeightPref) {
+                case FIT_CONTENT:
+                    childHeight = clampDimension(child, readContentDimension(child, childContext, false), false);
+                    break;
+                case PERCENT:
+                case FILL:
+                    childHeight = minHeight;
+                    break;
+                case STATIC:
+                default:
+                    childHeight = Math.max(minHeight, childContext.getRequestedRegion() != null
+                        ? childContext.getRequestedRegion().getHeight()
+                        : childContext.getCurrentRegion().getHeight());
+                    break;
+            }
+
+            // Accumulate based on axis
+            if (axis == Axis.HORIZONTAL) {
+                totalPrimary += childWidth;
+                maxCross = Math.max(maxCross, childHeight);
+            } else {
+                totalPrimary += childHeight;
+                maxCross = Math.max(maxCross, childWidth);
+            }
+        }
+
+        // Add spacing for multiple children
+        if (visibleCount > 1) {
+            totalPrimary += (visibleCount - 1) * spacing;
+        }
+
+        // Calculate final dimensions
+        int contentW = axis == Axis.HORIZONTAL ? totalPrimary : maxCross;
+        int contentH = axis == Axis.VERTICAL ? totalPrimary : maxCross;
+
+        SizePreference ownWidthPref = getWidthPreference();
+        SizePreference ownHeightPref = getHeightPreference();
+
+        TerminalInsets ins = getInsets();
+
+        int w = switch (ownWidthPref) {
+            case STATIC      -> region.getWidth();
+            case FIT_CONTENT -> Math.min(maxWidth, Math.max(getMinWidth(), contentW + ins.getHorizontal()));
+            default          -> Math.min(maxWidth, getMinWidth());
+        };
+        int h = switch (ownHeightPref) {
+            case STATIC      -> region.getHeight();
+            case FIT_CONTENT -> Math.min(maxHeight, Math.max(getMinHeight(), contentH + ins.getVertical()));
+            default          -> Math.min(maxHeight, getMinHeight());
+        };
+
+        TerminalRectangle measured = getRegionPool().obtain();
+        measured.set(0, 0, w, h);
+        return measured;
+    }
+
+
+    // ===== RENDERING =====
+
+    @Override
+    protected void renderSelf(TerminalBatchBuilder batch) {
+        int width  = getWidth();
+        int height = getHeight();
+
+        if (fillStyle != null) {
+            fillRegion(batch, 0, 0, width, height, ' ', fillStyle);
+        }
+
+        if (drawBorder || title != null) {
+            TextStyle style = hasFocus() ? focusedBorderTextStyle : borderTextStyle;
+            drawBox(batch, 0, 0, width, height, title, titlePosition, borderStyle, style);
+        }
+    }
+
+    // ===== CONFIGURATION GETTERS / SETTERS =====
+
+    public Axis getAxis() { return axis; }
+
+    public void setAxis(Axis axis) {
+        if (this.axis != axis) {
+            this.axis = axis;
+            requestLayoutUpdate();
+        }
+    }
+
     public boolean isWrap() { return wrap; }
 
-    public void setJustifyContent(JustifyContent jc) {
-        if (jc != null && justifyContent != jc) { justifyContent = jc; requestLayoutUpdate(); }
-    }
-    public JustifyContent getJustifyContent() { return justifyContent; }
-
-    public void setAlignItems(AlignItems ai) {
-        if (ai != null && alignItems != ai) { alignItems = ai; requestLayoutUpdate(); }
-    }
-    public AlignItems getAlignItems() { return alignItems; }
-
-    public void setSpacing(int s){
-        setGap(s);
+    public void setWrap(boolean wrap) {
+        if (this.wrap != wrap) {
+            this.wrap = wrap;
+            requestLayoutUpdate();
+        }
     }
 
-    public void setGap(int g) {
-        int clamped = Math.max(0, g);
-        if (gap != clamped) { gap = clamped; requestLayoutUpdate(); }
-    }
-    public int getGap() { return gap; }
+    public int getSpacing() { return spacing; }
 
-    public void setOverflowStrategy(LayoutOverflowStrategy s) {
-        if (s != null && overflowStrategy != s) { overflowStrategy = s; syncOverflowClipPolicy(); requestLayoutUpdate(); }
+    public void setSpacing(int spacing) {
+        if (this.spacing != spacing) {
+            this.spacing = spacing;
+            requestLayoutUpdate();
+        }
     }
+
+    public Alignment getAlignment() { return alignment; }
+
+    public void setAlignment(Alignment alignment) {
+        if (this.alignment != alignment) {
+            this.alignment = alignment;
+            requestLayoutUpdate();
+        }
+    }
+
+    public Alignment getCrossAlignment() { return crossAlignment; }
+
+    public void setCrossAlignment(Alignment crossAlignment) {
+        if (this.crossAlignment != crossAlignment) {
+            this.crossAlignment = crossAlignment;
+            requestLayoutUpdate();
+        }
+    }
+
     public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy; }
 
-    public void setPadding(int all) {
-        int c = Math.max(0, all);
-        if (padding.getTop() != c || padding.getRight() != c || padding.getBottom() != c || padding.getLeft() != c) {
-            padding.setAll(c);
+    public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
+        if (strategy != null && this.overflowStrategy != strategy) {
+            this.overflowStrategy = strategy;
+            syncOverflowClipPolicy();
+            requestLayoutUpdate();
         }
     }
-    public void setPadding(int vertical, int horizontal) {
-        if (padding.getTop() != vertical || padding.getRight() != horizontal ||
-            padding.getBottom() != vertical || padding.getLeft() != horizontal) {
-            padding.set(vertical, horizontal, vertical, horizontal);
-        }
-    }
-    @Override public TerminalInsets getInsets() { return padding; }
 
     private void syncOverflowClipPolicy() {
         setOverflowClipPolicy(
@@ -130,458 +656,124 @@ public class TerminalPanel extends TerminalGroupRegion {
         );
     }
 
+    public int getMaxWidth() { return maxWidth; }
 
-    // =========================================================================
-    // LAYOUT CALLBACK
-    // =========================================================================
-    private void layoutChildren(
-        TerminalLayoutContext[] contexts,
-        Map<String, LayoutDataInterface<TerminalLayoutData>> dataInterfaces
-    ) {
-        if (contexts.length == 0) return;
-        TerminalRectangle parent = contexts[0].getParentRegion();
-        if (parent == null) return;
+    public void setMaxWidth(int maxWidth) {
+        this.maxWidth = maxWidth;
+        requestLayoutUpdate();
+    }
 
-        TerminalInsets ins = getInsets();
-        // available main-axis and cross-axis dimensions
-        int availMain, availCross;
-        if (direction == FlexDirection.ROW) {
-            availMain = parent.getWidth() - ins.getHorizontal();
-            availCross = parent.getHeight() - ins.getVertical();
-        } else {
-            availMain = parent.getHeight() - ins.getVertical();
-            availCross = parent.getWidth() - ins.getHorizontal();
-        }
+    public int getMaxHeight() { return maxHeight; }
 
-        // ── gather visible children & measure each axis independently ────────
-        List<ChildInfo> children = new ArrayList<>();
-        for (int i = 0; i < contexts.length; i++) {
-            TerminalRenderable r = contexts[i].getRenderable();
-            if (!canUnhide(r)) continue;
-            TerminalRegion child = checkTerminalRegion(r);
-            TerminalLayoutContext ctx = contexts[i];
+    public void setMaxHeight(int maxHeight) {
+        this.maxHeight = maxHeight;
+        requestLayoutUpdate();
+    }
 
-            SizePreference mainPref = childSizePref(child, true);
-            SizePreference crossPref = childSizePref(child, false);
+    public TextStyle getFillStyle() { return fillStyle; }
 
-            // raw sizes (may be -1 for FILL)
-            int rawMain = resolveChildSize(child, ctx, true, availMain);
-            int rawCross = resolveChildSize(child, ctx, false, availCross);
-
-            // min/max clamping using the actual width/height values
-            int minMain, maxMain, minCross, maxCross;
-            if (direction == FlexDirection.ROW) {
-                minMain = child.getMinWidth();
-                maxMain = child.getMaxWidth();
-                minCross = child.getMinHeight();
-                maxCross = child.getMaxHeight();
-            } else {
-                minMain = child.getMinHeight();
-                maxMain = child.getMaxHeight();
-                minCross = child.getMinWidth();
-                maxCross = child.getMaxWidth();
-            }
-
-            int mainSize = (rawMain < 0) ? rawMain : clampDimension(child, rawMain, direction == FlexDirection.ROW ? true : false);
-            int crossSize = clampDimension(child, rawCross, direction == FlexDirection.ROW ? false : true);
-
-            children.add(new ChildInfo(child, ctx, mainPref, crossPref, mainSize, crossSize, minMain, maxMain, minCross, maxCross));
-        }
-
-        if (children.isEmpty()) return;
-
-        // ── wrap into lines ──────────────────────────────────────────────────
-        List<List<ChildInfo>> lines;
-        if (!wrap) {
-            lines = List.of(children);
-        } else {
-            lines = wrapIntoLines(children, availMain, gap);
-        }
-
-        boolean isMainClipped = overflowStrategy != LayoutOverflowStrategy.OVERFLOW
-            && (direction == FlexDirection.ROW ? getWidthPreference() != SizePreference.FIT_CONTENT
-                                               : getHeightPreference() != SizePreference.FIT_CONTENT);
-
-        // ── compute line cross sizes and total cross extent ──────────────────
-        List<Integer> lineCrossSizes = new ArrayList<>();
-        int totalCrossExtent = 0;
-        for (int li = 0; li < lines.size(); li++) {
-            List<ChildInfo> line = lines.get(li);
-            int lineCross = 0;
-            for (ChildInfo c : line) {
-                lineCross = Math.max(lineCross, c.crossSize);
-            }
-            lineCrossSizes.add(lineCross);
-            totalCrossExtent += lineCross;
-            if (li < lines.size() - 1) totalCrossExtent += gap;
-        }
-
-        // cross‑axis offset (layout of the whole flex container inside its content box)
-        int crossStart = ins.getTop(); // for ROW; for COLUMN it's ins.getLeft()
-        if (direction == FlexDirection.COLUMN) crossStart = ins.getLeft();
-        int crossSpace = availCross - totalCrossExtent;
-        int crossOffset = crossStart;
-        if (crossSpace > 0) {
-            // treat AlignItems as overall line‑alignment on the cross axis (simplified: center/end the block)
-            if (alignItems == AlignItems.CENTER || alignItems == AlignItems.START || alignItems == AlignItems.END) {
-                if (alignItems == AlignItems.CENTER) crossOffset += crossSpace / 2;
-                else if (alignItems == AlignItems.END) crossOffset += crossSpace;
-            }
-        }
-
-        int crossCursor = crossOffset;
-
-        // ── layout each line ─────────────────────────────────────────────────
-        for (int li = 0; li < lines.size(); li++) {
-            List<ChildInfo> line = lines.get(li);
-            int lineCrossSize = lineCrossSizes.get(li);
-
-            // resolve FILL children in main axis (jsut after line break)
-            int usedFixedMain = 0;
-            int fillCount = 0;
-            for (ChildInfo c : line) {
-                if (c.mainSize >= 0) usedFixedMain += c.mainSize;
-                else fillCount++;
-            }
-            int totalGapsMain = (line.size() - 1) * gap;
-            int freeMain = availMain - usedFixedMain - totalGapsMain;
-            int fillSize = 0;
-            if (fillCount > 0 && freeMain > 0 && justifyContent != JustifyContent.SPACE_BETWEEN
-                    && justifyContent != JustifyContent.SPACE_AROUND && justifyContent != JustifyContent.SPACE_EVENLY) {
-                fillSize = freeMain / fillCount;
-            } else if (fillCount > 0) {
-                fillSize = 0; // space distributions don't expand FILL items
-            }
-
-            for (ChildInfo c : line) {
-                if (c.mainSize < 0) {
-                    c.finalMain = isMainClipped ? Math.max(0, fillSize) : Math.max(0, c.minMain);
-                } else {
-                    c.finalMain = c.mainSize;
-                }
-                c.finalMain = clampDimension(c.child, c.finalMain, direction == FlexDirection.ROW ? true : false);
-            }
-
-            // stretch cross size if needed
-            for (ChildInfo c : line) {
-                if (alignItems == AlignItems.STRETCH && c.crossPref == SizePreference.FILL) {
-                    c.finalCross = lineCrossSize;
-                } else {
-                    c.finalCross = c.crossSize;
-                }
-                c.finalCross = clampDimension(c.child, c.finalCross, direction == FlexDirection.ROW ? false : true);
-            }
-
-            // main‑axis distribution
-            int totalMain = 0;
-            for (ChildInfo c : line) totalMain += c.finalMain;
-            totalMain += totalGapsMain;
-
-            int mainStartOffset = ins.getLeft(); // for ROW; for COLUMN it's ins.getTop()
-            if (direction == FlexDirection.COLUMN) mainStartOffset = ins.getTop();
-
-            int remainingMain = availMain - totalMain;
-            int mainCursor = mainStartOffset;
-            int between = 0, around = 0, evenly = 0;
-
-            if (justifyContent == JustifyContent.CENTER) {
-                mainCursor += remainingMain / 2;
-            } else if (justifyContent == JustifyContent.END) {
-                mainCursor += remainingMain;
-            } else if (justifyContent == JustifyContent.SPACE_BETWEEN && line.size() > 1) {
-                between = remainingMain / (line.size() - 1);
-            } else if (justifyContent == JustifyContent.SPACE_AROUND) {
-                around = remainingMain / line.size();
-                mainCursor += around / 2;
-            } else if (justifyContent == JustifyContent.SPACE_EVENLY) {
-                evenly = remainingMain / (line.size() + 1);
-                mainCursor += evenly;
-            }
-
-            for (int ci = 0; ci < line.size(); ci++) {
-                ChildInfo c = line.get(ci);
-                int childMain = c.finalMain;
-                int childCross = c.finalCross;
-
-                // cross‑position within line
-                int crossPos = crossCursor;
-                if (alignItems == AlignItems.CENTER) crossPos += (lineCrossSize - childCross) / 2;
-                else if (alignItems == AlignItems.END) crossPos += lineCrossSize - childCross;
-                // START/STRETCH stay at crossCursor
-
-                int x, y, w, h;
-                if (direction == FlexDirection.ROW) {
-                    x = mainCursor;
-                    y = crossPos;
-                    w = childMain;
-                    h = childCross;
-                } else {
-                    x = crossPos;
-                    y = mainCursor;
-                    w = childCross;
-                    h = childMain;
-                }
-
-                boolean inBounds = isWithinParentBounds(x, y, w, h, parent);
-                boolean hidden = false;
-                if (overflowStrategy != LayoutOverflowStrategy.OVERFLOW && !inBounds) {
-                    hidden = true;
-                } else if (w <= 0 || h <= 0) {
-                    hidden = true;
-                }
-
-                dataInterfaces.get(c.child.getName()).setLayoutData(
-                    TerminalLayoutData.getBuilder()
-                        .setX(x)
-                        .setY(y)
-                        .setWidth(Math.max(0, w))
-                        .setHeight(Math.max(0, h))
-                        .hidden(hidden)
-                        .build()
-                );
-
-                // advance main cursor
-                if (ci < line.size() - 1) {
-                    int space = 0;
-                    if (justifyContent == JustifyContent.SPACE_BETWEEN) space = between;
-                    else if (justifyContent == JustifyContent.SPACE_AROUND) space = around;
-                    else if (justifyContent == JustifyContent.SPACE_EVENLY) space = evenly;
-                    mainCursor += childMain + gap + space;
-                } else {
-                    mainCursor += childMain;
-                }
-            }
-            crossCursor += lineCrossSize + gap;
+    public void setFillStyle(TextStyle fillStyle) {
+        if (this.fillStyle != fillStyle) {
+            this.fillStyle = fillStyle;
+            invalidate();
         }
     }
 
-    // ── measurement pre‑pass ──────────────────────────────────────────────────
-  
+    // ── padding / insets ──────────────────────────────────────────────────────
+
+    public void setPadding(int all) {
+        if (!padding.equals(all)) {
+            padding.set(all, all, all, all);
+        }
+    }
+
+    public void setPadding(int vertical, int horizontal) {
+        if (padding.getTop() != vertical ||
+            padding.getRight() != horizontal ||
+            padding.getBottom() != vertical ||
+            padding.getLeft() != horizontal) {
+            padding.set(vertical, horizontal, vertical, horizontal);
+        }
+    }
+
+    /**
+     * Set insets from a TerminalInsets instance (all four sides independently).
+     */
+    public void setInsets(TerminalInsets newInsets) {
+        if (newInsets == null) {
+            if (!padding.isZero()) {
+                padding.clear();
+            }
+            return;
+        }
+        if (!padding.equals(newInsets)) {
+            padding.copyFrom(newInsets);
+        }
+    }
+
     @Override
-    public TerminalRectangle measureContent(TerminalLayoutContext[] childContexts) {
-        SizePreference ownMainPref = (direction == FlexDirection.ROW) ? getWidthPreference() : getHeightPreference();
-        SizePreference ownCrossPref = (direction == FlexDirection.ROW) ? getHeightPreference() : getWidthPreference();
-        TerminalInsets ins = getInsets();
-
-        int contentMain = 0;
-        int contentCross = 0;
-
-        // Only perform intrinsic calculation if the container is content-dependent on at least one axis.
-        if (ownMainPref == SizePreference.FIT_CONTENT || ownCrossPref == SizePreference.FIT_CONTENT) {
-
-            List<ChildInfo> participating = new ArrayList<>();
-            for (int i = 0; i < childContexts.length; i++) {
-                TerminalLayoutContext ctx = childContexts[i];
-                TerminalRenderable child = ctx.getRenderable();
-
-                // Force‑hidden children are completely excluded.
-                if (!canUnhide(child)) continue;
-
-                // Determine if the child should be counted for measurement.
-                // It counts if:
-                //  - the container is FIT_CONTENT on the main axis (will grow) or OVERFLOW allows overflow → all unhidden children fit
-                //  - otherwise, only count children that are currently visible (not hidden).
-                boolean include = false;
-                if (ownMainPref == SizePreference.FIT_CONTENT || overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
-                    include = true;   // container will resize/overflow → child will be shown eventually
-                } else {
-                    include = !child.isHidden();
-                }
-
-                if (include) {
-                    TerminalRegion tr = checkTerminalRegion(child);
-                    int mainSize = resolveChildMeasureSize(tr, ctx, true);
-                    int crossSize = resolveChildMeasureSize(tr, ctx, false);
-                    participating.add(new ChildInfo(tr, ctx, null, null, mainSize, crossSize, 0, 0, 0, 0));
-                }
-            }
-
-            if (!participating.isEmpty()) {
-                if (wrap) {
-                    int maxLineMain = 0;
-                    int curLineMain = 0;
-                    int curLineCross = 0;
-                    int totalCross = 0;
-                    boolean firstInLine = true;
-
-                    for (ChildInfo c : participating) {
-                        int needed = c.mainSize + (firstInLine ? 0 : gap);
-                        curLineMain += needed;
-                        curLineCross = Math.max(curLineCross, c.crossSize);
-                        firstInLine = false;
-                    }
-                    maxLineMain = curLineMain;
-                    totalCross = curLineCross;
-
-                    if (direction == FlexDirection.ROW) {
-                        contentMain = maxLineMain;
-                        contentCross = totalCross;
-                    } else {
-                        contentCross = maxLineMain;
-                        contentMain = totalCross;
-                    }
-                } else {
-                    // Unwrapped: sum main sizes, max cross.
-                    int sumMain = 0;
-                    int maxCross = 0;
-                    for (int i = 0; i < participating.size(); i++) {
-                        if (i > 0) sumMain += gap;
-                        sumMain += participating.get(i).mainSize;
-                        maxCross = Math.max(maxCross, participating.get(i).crossSize);
-                    }
-                    if (direction == FlexDirection.ROW) {
-                        contentMain = sumMain;
-                        contentCross = maxCross;
-                    } else {
-                        contentCross = sumMain;
-                        contentMain = maxCross;
-                    }
-                }
-
-                contentMain = clampDimension(this, contentMain + (direction == FlexDirection.ROW ? ins.getHorizontal() : ins.getVertical()), direction == FlexDirection.ROW);
-                contentCross = clampDimension(this, contentCross + (direction == FlexDirection.ROW ? ins.getVertical() : ins.getHorizontal()), direction == FlexDirection.COLUMN);
-            }
-        }
-
-        int finalW, finalH;
-        if (direction == FlexDirection.ROW) {
-            finalW = switch (getWidthPreference()) {
-                case STATIC      -> region.getWidth();
-                case FIT_CONTENT -> Math.max(getMinWidth(), contentMain);
-                default          -> getMinWidth();
-            };
-            finalH = switch (getHeightPreference()) {
-                case STATIC      -> region.getHeight();
-                case FIT_CONTENT -> Math.max(getMinHeight(), contentCross);
-                default          -> getMinHeight();
-            };
-        } else {
-            finalW = switch (getWidthPreference()) {
-                case STATIC      -> region.getWidth();
-                case FIT_CONTENT -> Math.max(getMinWidth(), contentCross);
-                default          -> getMinWidth();
-            };
-            finalH = switch (getHeightPreference()) {
-                case STATIC      -> region.getHeight();
-                case FIT_CONTENT -> Math.max(getMinHeight(), contentMain);
-                default          -> getMinHeight();
-            };
-        }
-
-        TerminalRectangle measured = getRegionPool().obtain();
-        measured.set(0, 0, finalW, finalH);
-        return measured;
+    public TerminalInsets getInsets() {
+        return drawBorder ? borderInsets : padding;
     }
 
-    // ── HELPERS ───────────────────────────────────────────────────────────────
+    // ── border / title ────────────────────────────────────────────────────────
 
-    private List<List<ChildInfo>> wrapIntoLines(List<ChildInfo> children, int availMain, int gap) {
-        List<List<ChildInfo>> lines = new ArrayList<>();
-        List<ChildInfo> curLine = new ArrayList<>();
-        int curMain = 0;
-        for (ChildInfo c : children) {
-            int need = c.mainSize + (curLine.isEmpty() ? 0 : gap);
-            if (!curLine.isEmpty() && curMain + need > availMain) {
-                lines.add(curLine);
-                curLine = new ArrayList<>();
-                curMain = 0;
-            }
-            curLine.add(c);
-            curMain += c.mainSize + (curLine.size() > 1 ? gap : 0);
-        }
-        if (!curLine.isEmpty()) lines.add(curLine);
-        return lines;
-    }
-
-
-    private SizePreference childSizePref(TerminalRegion child, boolean mainAxis) {
-        SizePreference pref;
-        if (direction == FlexDirection.ROW) {
-            pref = mainAxis ? child.getWidthPreference() : child.getHeightPreference();
-        } else {
-            pref = mainAxis ? child.getHeightPreference() : child.getWidthPreference();
-        }
-        if (pref == SizePreference.INHERIT) {
-            pref = mainAxis ? (direction == FlexDirection.ROW ? getWidthPreference() : getHeightPreference())
-                            : (direction == FlexDirection.ROW ? getHeightPreference() : getWidthPreference());
-        }
-        return pref;
-    }
-
-
-    private int resolveChildSize(TerminalRegion child, TerminalLayoutContext ctx, boolean mainAxis, int avail) {
-        SizePreference pref = childSizePref(child, mainAxis);
-        boolean isWidth = (direction == FlexDirection.ROW) ? mainAxis : !mainAxis; // true if this axis maps to width
-        switch (pref) {
-            case FILL: return -1;
-            case FIT_CONTENT: return readContentDimension(child, ctx, isWidth);
-            case PERCENT:
-                double pc = child.getPercent(isWidth ? TerminalRegion.AXIS_W : TerminalRegion.AXIS_H);
-                return (int)(avail * pc);
-            default: // STATIC
-                return readContentDimension(child, ctx, isWidth);
+    public void setEnableBorder(boolean enabled) {
+        if (this.drawBorder != enabled) {
+            this.drawBorder = enabled;
+            updateBorderInsets();
+            requestLayoutUpdate();
+            invalidate();
         }
     }
 
-    // For measurement (no parent avail)
-    private int resolveChildMeasureSize(TerminalRegion child, TerminalLayoutContext ctx, boolean mainAxis) {
-        SizePreference pref = childSizePref(child, mainAxis);
-        boolean isWidth = (direction == FlexDirection.ROW) ? mainAxis : !mainAxis;
-        if (pref == SizePreference.FILL) {
-            // return min size as floor
-            return isWidth ? child.getMinWidth() : child.getMinHeight();
-        } else if (pref == SizePreference.FIT_CONTENT || pref == SizePreference.STATIC) {
-            return readContentDimension(child, ctx, isWidth);
-        } else if (pref == SizePreference.PERCENT) {
-            // percent needs parent; return 0 (will be ignored in content measurement)
-            return 0;
-        }
-        return 0;
+    private void updateBorderInsets() {
+        borderInsets.set(
+            Math.max(1, padding.getTop()),
+            Math.max(1, padding.getRight()),
+            Math.max(1, padding.getBottom()),
+            Math.max(1, padding.getLeft())
+        );
     }
 
-
-
-    // isWithinParentBounds
-    private boolean isWithinParentBounds(int x, int y, int w, int h, TerminalRectangle parent) {
-        return x >= 0 && y >= 0 && x + w <= parent.getWidth() && y + h <= parent.getHeight();
+    public void setBorderStyle(LineStyle style) {
+        if (this.borderStyle != style) {
+            this.borderStyle = style;
+            invalidate();
+        }
     }
 
-    
-
-
-    // Override getMaxWidth/Height to use TerminalRegion's getMaxWidth?
-    // Not needed, we can directly access max via child.getMaxWidth().
-    // For clampDimension, we need the child and value.
-    // We'll use TerminalRegion.clampDimension(child, value, isWidth).
-
-    // ── inner class for info ──────────────────────────────────────────────────
-    private static class ChildInfo {
-            final TerminalRegion child;
-            final TerminalLayoutContext ctx;
-            SizePreference mainPref, crossPref;
-            int mainSize, crossSize;           // raw sizes (may be negative for FILL)
-            int minMain, maxMain, minCross, maxCross;
-            int finalMain, finalCross;
-
-            ChildInfo(TerminalRegion child, TerminalLayoutContext ctx,
-                    SizePreference mainPref, SizePreference crossPref,
-                    int mainSize, int crossSize, int minMain, int maxMain,
-                    int minCross, int maxCross) {
-                this.child = child;
-                this.ctx = ctx;
-                this.mainPref = mainPref;
-                this.crossPref = crossPref;
-                this.mainSize = mainSize;
-                this.crossSize = crossSize;
-                this.minMain = minMain;
-                this.maxMain = maxMain;
-                this.minCross = minCross;
-                this.maxCross = maxCross;
-            }
+    public void setTitle(String title) {
+        if ((this.title == null && title != null) ||
+            (this.title != null && !this.title.equals(title))) {
+            this.title = title;
+            invalidate();
         }
+    }
 
-    // =========================================================================
-    // RENDERING (nothing for now)
-    // =========================================================================
-    @Override protected void renderSelf(TerminalBatchBuilder batch) { }
+    public String getTitle() { return title; }
+
+    public Position getTitlePosition() { return titlePosition; }
+
+    public void setTitlePosition(Position titlePosition) {
+        if (this.titlePosition != titlePosition) {
+            this.titlePosition = titlePosition;
+            invalidate();
+        }
+    }
+
+    public TextStyle getBorderTextStyle() { return borderTextStyle; }
+
+    public void setBorderTextStyle(TextStyle textStyle) {
+        this.borderTextStyle = textStyle;
+        invalidate();
+    }
+
+    public TextStyle getFocusedBorderTextStyle() { return focusedBorderTextStyle; }
+
+    public void setFocusedBorderTextStyle(TextStyle focusedTextStyle) {
+        this.focusedBorderTextStyle = focusedTextStyle;
+        invalidate();
+    }
+
 }

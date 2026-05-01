@@ -1,9 +1,8 @@
 {
   "profile": "openai",
   "env": {
-    "OPENAI_BASE_URL": "https://openrouter.ai/api/v1",
-    "OPENAI_MODEL": "tencent/hy3-preview:free",
-    "OPENAI_API_KEY": "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"
+    "OPENAI_BASE_URL": "http://192.168.2.91:8001/v1",
+    "OPENAI_MODEL": "qwen3.6-35b-a3b"
   },
-  "createdAt": "2026-04-30T04:27:45.021Z"
+  "createdAt": "2026-05-01T00:59:58.758Z"
 }
