@@ -19,6 +19,7 @@ import io.netnotes.terminal.components.panels.TerminalDivider;
 import io.netnotes.terminal.components.panels.TerminalVStack;
 import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
 
 /**
  * TerminalInstallWizard - Component-based installation progress wizard.
@@ -181,7 +182,7 @@ public class TerminalInstallWizard extends TerminalVStack {
 
         // ── step list ─────────────────────────────────────────────────────────
         stepListStack.setSpacing(0);
-        stepListStack.setVAlignment(VAlignment.TOP);
+        stepListStack.setVAlignment(AlignSelf.FLEX_START);
         stepListStack.setWidthPreference(SizePreference.FILL);
         stepListStack.setHeightPreference(SizePreference.FIT_CONTENT);
 

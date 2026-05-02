@@ -1,7 +1,7 @@
 package io.netnotes.terminal.layout;
 
-import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.components.TerminalRegion;
@@ -26,7 +26,7 @@ class OverflowClipPolicyRenderTest {
     void clipStrategyClipsChildToContainerBounds() {
         ClipProbe probe = new ClipProbe("probe");
         TerminalPanel root = new TerminalPanel("root");
-        TerminalStackPanel stack = createStack("clip-stack", LayoutOverflowStrategy.CLIP, probe);
+        TerminalStackPanel stack = createStack("clip-stack", Overflow.HIDDEN, probe);
 
         TerminalLayoutTestHarness harness = new TerminalLayoutTestHarness(W, H);
         harness.attach(root);
@@ -47,7 +47,7 @@ class OverflowClipPolicyRenderTest {
     void overflowStrategyLetsChildUseParentClip() {
         ClipProbe probe = new ClipProbe("probe");
         TerminalPanel root = new TerminalPanel("root");
-        TerminalStackPanel stack = createStack("overflow-stack", LayoutOverflowStrategy.OVERFLOW, probe);
+        TerminalStackPanel stack = createStack("overflow-stack", Overflow.VISIBLE, probe);
 
         TerminalLayoutTestHarness harness = new TerminalLayoutTestHarness(W, H);
         harness.attach(root);
@@ -66,7 +66,7 @@ class OverflowClipPolicyRenderTest {
 
     private static TerminalStackPanel createStack(
         String name,
-        LayoutOverflowStrategy overflowStrategy,
+        Overflow overflowStrategy,
         ClipProbe probe
     ) {
         TerminalStackPanel stack = new TerminalStackPanel(name);

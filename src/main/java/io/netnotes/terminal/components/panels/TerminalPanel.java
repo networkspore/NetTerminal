@@ -10,6 +10,7 @@ import io.netnotes.engine.ui.layout2d.FlexBasis;
 import io.netnotes.engine.ui.layout2d.FlexDirection;
 import io.netnotes.engine.ui.layout2d.FlexGrow;
 import io.netnotes.engine.ui.layout2d.FlexShrink;
+import io.netnotes.engine.ui.layout2d.JustifyContent;
 import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
@@ -46,23 +47,6 @@ public class TerminalPanel extends TerminalGroupRegion {
     /**
      * @deprecated Use {@link FlexDirection} instead.
      */
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public enum Axis {
-        VERTICAL,
-        HORIZONTAL
-    }
-
-    /**
-     * @deprecated Use {@link AlignContent} instead.
-     */
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public enum Alignment {
-        START,    // default
-        CENTER,
-        END,
-        STRETCH   // only affects positioning when child < available cross
-    }
-
     // ── border / title ────────────────────────────────────────────────────────
     private boolean drawBorder = false;
     private TextStyle.LineStyle borderStyle = TextStyle.LineStyle.SINGLE;
@@ -79,6 +63,7 @@ public class TerminalPanel extends TerminalGroupRegion {
     private int spacing = 0;
     private AlignSelf crossAlignment = AlignSelf.AUTO;
     private AlignContent alignment = AlignContent.FLEX_START;
+    private JustifyContent justifyContent = JustifyContent.FLEX_START;
     private Overflow overflowStrategy = Overflow.HIDDEN;
 
     // ── size constraints ──────────────────────────────────────────────────────
@@ -206,9 +191,9 @@ public class TerminalPanel extends TerminalGroupRegion {
         // ── Pass 3: resolve main-axis FILL from the chosen overflow policy ───
         int totalPrimaryUsed = 0;
 
-        switch (overflowStrategy) {
+        switch (justifyContent) {
 
-            case SHRINK_FILL -> {
+            case SPACE_BETWEEN -> {  // Approximation for SHRINK_FILL
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
                     if (axis == FlexDirection.COLUMN) {
@@ -227,7 +212,7 @@ public class TerminalPanel extends TerminalGroupRegion {
                 }
             }
 
-            case SHRINK_ALL -> {
+            case SPACE_AROUND -> {  // Approximation for SHRINK_ALL
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
 
@@ -266,7 +251,7 @@ public class TerminalPanel extends TerminalGroupRegion {
                 }
             }
 
-            case DISTRIBUTE_EQUAL -> {
+            case SPACE_EVENLY -> {  // Approximation for DISTRIBUTE_EQUAL
                 int equalShare = visibleCount > 0
                     ? Math.max(0, availableForChildren / visibleCount)
                     : 0;
@@ -286,6 +271,7 @@ public class TerminalPanel extends TerminalGroupRegion {
                 }
             }
 
+            // FLEX_START (default) - standard clip behavior
             default -> {
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
@@ -312,7 +298,7 @@ public class TerminalPanel extends TerminalGroupRegion {
         }
 
         int primaryOffset = switch (alignment) {
-            case FLEX_CENTER -> Math.max(0, (availablePrimary - totalPrimaryUsed) / 2);
+            case CENTER -> Math.max(0, (availablePrimary - totalPrimaryUsed) / 2);
             case FLEX_END -> Math.max(0, availablePrimary - totalPrimaryUsed);
             default -> 0;
         };
@@ -364,7 +350,7 @@ public class TerminalPanel extends TerminalGroupRegion {
                         if (axis == FlexDirection.COLUMN) x += freeCross / 2;
                         else y += freeCross / 2;
                     }
-                    case END -> {
+                    case FLEX_END -> {
                         if (axis == FlexDirection.COLUMN) x += freeCross;
                         else y += freeCross;
                     }
@@ -471,7 +457,7 @@ public class TerminalPanel extends TerminalGroupRegion {
      * behavior: FILL→-1 (grow), PERCENT→% of available, FIT_CONTENT→content, STATIC→requested.
      */
     private int resolveWidth(FlexGrow grow, FlexBasis basis, TerminalRegion child,
-            TerminalLayoutContext childContext, int availableCross, Axis axis, int availableForChildren) {
+            TerminalLayoutContext childContext, int availableCross, FlexDirection axis, int availableForChildren) {
         if (grow.isNonZero()) {
             return axis == FlexDirection.ROW ? -1
                 : clampDimension(child, availableCross, true);
@@ -495,7 +481,7 @@ public class TerminalPanel extends TerminalGroupRegion {
      * behavior: FILL→-1 (grow), PERCENT→% of available, FIT_CONTENT→content, STATIC→requested.
      */
     private int resolveHeight(FlexGrow grow, FlexBasis basis, TerminalRegion child,
-            TerminalLayoutContext childContext, int availableCross, Axis axis, int availableForChildren) {
+            TerminalLayoutContext childContext, int availableCross, FlexDirection axis, int availableForChildren) {
         if (grow.isNonZero()) {
             return axis == FlexDirection.COLUMN ? -1
                 : clampDimension(child, availableCross, false);
@@ -625,13 +611,15 @@ public class TerminalPanel extends TerminalGroupRegion {
 
     // ===== CONFIGURATION GETTERS / SETTERS =====
 
-    public Axis getAxis() {
-        return axis == FlexDirection.ROW ? Axis.HORIZONTAL : Axis.VERTICAL;
+    public FlexDirection getAxis() {
+        return axis;
     }
 
-    public void setAxis(Axis axis) {
-        this.axis = axis == Axis.HORIZONTAL ? FlexDirection.ROW : FlexDirection.COLUMN;
-        requestLayoutUpdate();
+    public void setAxis(FlexDirection axis) {
+        if (axis != null && this.axis != axis) {
+            this.axis = axis;
+            requestLayoutUpdate();
+        }
     }
 
     public boolean isWrap() { return wrap; }
@@ -652,53 +640,43 @@ public class TerminalPanel extends TerminalGroupRegion {
         }
     }
 
-    public Alignment getAlignment() {
-        return switch (alignment) {
-            case FLEX_START -> Alignment.START;
-            case FLEX_CENTER -> Alignment.CENTER;
-            case FLEX_END -> Alignment.END;
-            case STRETCH -> Alignment.STRETCH;
-            default -> Alignment.START;
-        };
+    public AlignContent getAlignment() {
+        return alignment;
     }
 
-    public void setAlignment(Alignment alignment) {
-        this.alignment = switch (alignment) {
-            case START -> AlignContent.FLEX_START;
-            case CENTER -> AlignContent.FLEX_CENTER;
-            case END -> AlignContent.FLEX_END;
-            case STRETCH -> AlignContent.STRETCH;
-        };
-        requestLayoutUpdate();
-    }
-
-    public Alignment getCrossAlignment() {
-        return switch (crossAlignment) {
-            case START, AUTO -> Alignment.START;
-            case CENTER -> Alignment.CENTER;
-            case END -> Alignment.END;
-            case STRETCH -> Alignment.STRETCH;
-            default -> Alignment.START;
-        };
-    }
-
-    public void setCrossAlignment(Alignment crossAlignment) {
-        this.crossAlignment = switch (crossAlignment) {
-            case START -> AlignSelf.FLEX_START;
-            case CENTER -> AlignSelf.CENTER;
-            case END -> AlignSelf.FLEX_END;
-            case STRETCH -> AlignSelf.STRETCH;
-        };
-        requestLayoutUpdate();
+    public void setAlignment(AlignContent alignment) {
+        if (alignment != null && this.alignment != alignment) {
+            this.alignment = alignment;
+            requestLayoutUpdate();
         }
     }
 
-    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy.toLayoutOverflowStrategy(); }
+    public AlignSelf getCrossAlignment() {
+        return crossAlignment;
+    }
 
-    public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
-        if (strategy != null) {
-            this.overflowStrategy = strategy.toLayout2DOverflow();
+    public void setCrossAlignment(AlignSelf crossAlignment) {
+        if (crossAlignment != null && this.crossAlignment != crossAlignment) {
+            this.crossAlignment = crossAlignment;
+            requestLayoutUpdate();
+        }
+    }
+
+    public Overflow getOverflowStrategy() { return overflowStrategy; }
+
+    public void setOverflowStrategy(Overflow strategy) {
+        if (strategy != null && this.overflowStrategy != strategy) {
+            this.overflowStrategy = strategy;
             syncOverflowClipPolicy();
+            requestLayoutUpdate();
+        }
+    }
+
+    public JustifyContent getJustifyContent() { return justifyContent; }
+
+    public void setJustifyContent(JustifyContent justifyContent) {
+        if (justifyContent != null && this.justifyContent != justifyContent) {
+            this.justifyContent = justifyContent;
             requestLayoutUpdate();
         }
     }

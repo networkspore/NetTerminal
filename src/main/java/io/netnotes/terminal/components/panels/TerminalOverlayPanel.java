@@ -155,9 +155,9 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
     // OVERFLOW
     // =========================================================================
 
-    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy; }
+    public Overflow getOverflowStrategy() { return overflowStrategy; }
 
-    public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
+    public void setOverflowStrategy(Overflow strategy) {
         if (strategy != null && this.overflowStrategy != strategy) {
             this.overflowStrategy = strategy;
             syncOverflowClipPolicy();

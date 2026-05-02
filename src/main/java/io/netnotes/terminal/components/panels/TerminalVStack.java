@@ -7,6 +7,7 @@ import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
 import io.netnotes.engine.ui.layout2d.Overflow;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
@@ -69,8 +70,8 @@ public class TerminalVStack extends TerminalAbstractStack {
             "vstack",
             SizePreference.FILL,        // default child-width  → children fill width
             SizePreference.FIT_CONTENT, // default child-height → children use intrinsic height
-            VAlignment.TOP,
-            HAlignment.CENTER
+            AlignSelf.FLEX_START,       // vertical alignment: top
+            AlignSelf.CENTER            // horizontal alignment: center
         );
         // Own sizing defaults: the stack itself fills width, fits its content height.
         setWidthPreference(SizePreference.FILL);
@@ -200,9 +201,9 @@ public class TerminalVStack extends TerminalAbstractStack {
         // ── resolve per-strategy final heights and totalHeight ────────────────────
         int totalHeight = totalGapHeight;
 
-        switch (overflowStrategy) {
+        switch (justifyContent) {
 
-            case SHRINK_FILL -> {
+            case SPACE_BETWEEN -> {  // Approximation for SHRINK_FILL
                 // FILL children get exactly the available share, no minHeight inflation.
                 for (int i = 0; i < layoutCount; i++) {
                     if (heights[i] == -1) {
@@ -213,7 +214,7 @@ public class TerminalVStack extends TerminalAbstractStack {
                 }
             }
 
-            case SHRINK_ALL -> {
+            case SPACE_AROUND -> {  // Approximation for SHRINK_ALL
                 // Resolve FILL children at their content/min size first, then scale
                 // everyone proportionally if the total exceeds the available space.
                 for (int i = 0; i < layoutCount; i++) {
@@ -235,7 +236,7 @@ public class TerminalVStack extends TerminalAbstractStack {
                 }
             }
 
-            case DISTRIBUTE_EQUAL -> {
+            case SPACE_EVENLY -> {  // Approximation for DISTRIBUTE_EQUAL
                 // Every child gets an equal share of the available height.
                 int share = Math.max(0, availableForChildren / layoutCount);
                 for (int i = 0; i < layoutCount; i++) {
@@ -245,6 +246,7 @@ public class TerminalVStack extends TerminalAbstractStack {
                 }
             }
 
+            // FLEX_START (default) - standard clip behavior
             default -> {
                 // CLIP, OVERFLOW, SCROLL (not yet implemented), FIT_CONTENT:
                 // FILL children get fillHeight (0 for non-clipping stacks → minHeight).

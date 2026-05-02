@@ -12,8 +12,8 @@ import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
-import io.netnotes.terminal.components.panels.TerminalAbstractStack.HAlignment;
-import io.netnotes.terminal.components.panels.TerminalAbstractStack.VAlignment;
+import io.netnotes.terminal.components.panels.TerminalAbstractStack;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
 import io.netnotes.terminal.layout.TerminalInsets;
 import io.netnotes.terminal.layout.TerminalLayoutContext;
 import io.netnotes.terminal.layout.TerminalLayoutData;
@@ -184,15 +184,15 @@ public class TerminalSetupFlow extends TerminalGroupRegion {
 
     private void buildLayout() {
         rootStack.setSpacing(0);
-        rootStack.setVAlignment(VAlignment.TOP);
-        rootStack.setHAlignment(HAlignment.LEFT);
+        rootStack.setVAlignment(AlignSelf.FLEX_START);
+        rootStack.setHAlignment(AlignSelf.FLEX_START);
 
         headerDivider.setLineStyle(borderStyle);
         headerDivider.setLineTextStyle(styleBorder);
 
         bodySlot.setWidthPreference(SizePreference.FILL);
         bodySlot.setHeightPreference(SizePreference.FIT_CONTENT);
-        bodySlot.setHAlignment(HAlignment.LEFT);
+        bodySlot.setHAlignment(AlignSelf.FLEX_START);
         bodySlot.setSpacing(0);
 
         footerDivider.setLineStyle(borderStyle);

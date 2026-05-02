@@ -11,6 +11,7 @@ import io.netnotes.engine.ui.layout2d.FlexDirection;
 import io.netnotes.engine.ui.layout2d.FlexGrow;
 import io.netnotes.engine.ui.layout2d.FlexShrink;
 import io.netnotes.engine.ui.layout2d.FlexWrap;
+import io.netnotes.engine.ui.layout2d.JustifyContent;
 import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
@@ -39,14 +40,24 @@ import io.netnotes.terminal.layout.TerminalSizeable;
  */
 public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
-    // ── alignment enums (deprecated — use Layout2D AlignSelf/FlexDirection) ──
+    // ── layout state ─────────────────────────────────────────────────────────
 
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public enum VAlignment { TOP, CENTER, BOTTOM }
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public enum HAlignment { LEFT, CENTER, RIGHT }
+    protected int             spacing            = 0;
+    protected Overflow        overflowStrategy   = Overflow.HIDDEN;
+    protected FlexDirection   direction          = FlexDirection.ROW;
+    protected AlignSelf       vAlignment         = AlignSelf.AUTO;
+    protected AlignSelf       hAlignment         = AlignSelf.AUTO;
+    protected FlexWrap        wrap               = FlexWrap.NOWRAP;
+    protected AlignContent    alignItems         = AlignContent.FLEX_START;
+    protected JustifyContent  justifyContent    = JustifyContent.FLEX_START;
+    protected FlexGrow        defaultWidthGrow   = FlexGrow.NONE;
+    protected FlexShrink      defaultWidthShrink = FlexShrink.NONE;
+    protected FlexBasis       defaultWidthBasis  = FlexBasis.CONTENT;
+    protected FlexGrow        defaultHeightGrow  = FlexGrow.NONE;
+    protected FlexShrink      defaultHeightShrink = FlexShrink.NONE;
+    protected FlexBasis       defaultHeightBasis = FlexBasis.CONTENT;
 
-    // ── padding / border insets ───────────────────────────────────────────────
+    // ── padding / border insets ─────────────────────────────────────────
 
     /**
      * Raw padding set by the caller. Always read via getInsets() so that
@@ -61,28 +72,12 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
      */
     protected final TerminalInsets borderInsets = new TerminalInsets();
 
-    // ── border / separator state ──────────────────────────────────────────────
+    // ── border / separator state ──────────────────────────────────────────
 
     protected boolean   drawBorder     = false;
     protected boolean   drawSeparators = false;
     protected LineStyle borderStyle    = LineStyle.SINGLE;
     protected TextStyle borderTextStyle = TextStyle.NORMAL;
-
-    // ── layout state ─────────────────────────────────────────────────────────
-
-    protected int             spacing            = 0;
-    protected Overflow        overflowStrategy   = Overflow.HIDDEN;
-    protected FlexDirection   direction          = FlexDirection.ROW;
-    protected AlignSelf       vAlignment         = AlignSelf.AUTO;
-    protected AlignSelf       hAlignment         = AlignSelf.AUTO;
-    protected FlexWrap        wrap               = FlexWrap.NOWRAP;
-    protected AlignContent    alignItems         = AlignContent.FLEX_START;
-    protected FlexGrow        defaultWidthGrow   = FlexGrow.NONE;
-    protected FlexShrink      defaultWidthShrink = FlexShrink.NONE;
-    protected FlexBasis       defaultWidthBasis  = FlexBasis.CONTENT;
-    protected FlexGrow        defaultHeightGrow  = FlexGrow.NONE;
-    protected FlexShrink      defaultHeightShrink = FlexShrink.NONE;
-    protected FlexBasis       defaultHeightBasis = FlexBasis.CONTENT;
 
     // ── layout group identity ─────────────────────────────────────────────────
 
@@ -104,15 +99,15 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
         String groupPrefix,
         SizePreference defaultWidth,
         SizePreference defaultHeight,
-        VAlignment defaultVAlign,
-        HAlignment defaultHAlign
+        AlignSelf defaultVAlign,
+        AlignSelf defaultHAlign
     ) {
         super(name, groupPrefix);
 
         this.setWidthPreference(defaultWidth);
         this.setHeightPreference(defaultHeight);
-        this.vAlignment              = defaultVAlign;
-        this.hAlignment              = defaultHAlign;
+        this.vAlignment              = defaultVAlign != null ? defaultVAlign : AlignSelf.AUTO;
+        this.hAlignment              = defaultHAlign != null ? defaultHAlign : AlignSelf.AUTO;
 
         // Wire the padding callback so any mutation triggers inset recalc + layout.
         this.padding.setOnChanged(this::onPaddingChanged);
@@ -246,7 +241,7 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
     public int getSpacing() { return spacing; }
 
-    public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
+    public void setOverflowStrategy(Overflow strategy) {
         if (strategy != null && this.overflowStrategy != strategy) {
             this.overflowStrategy = strategy;
             syncOverflowClipPolicy();
@@ -254,7 +249,16 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
         }
     }
 
-    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy.toLayoutOverflowStrategy(); }
+    public Overflow getOverflowStrategy() { return overflowStrategy; }
+
+    public void setJustifyContent(JustifyContent justifyContent) {
+        if (justifyContent != null && this.justifyContent != justifyContent) {
+            this.justifyContent = justifyContent;
+            requestLayoutUpdate();
+        }
+    }
+
+    public JustifyContent getJustifyContent() { return justifyContent; }
 
     protected void syncOverflowClipPolicy() {
         setOverflowClipPolicy(
@@ -266,49 +270,26 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
    // ── alignment (deprecated wrappers) ─────────────────────────────────────
 
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public void setVAlignment(VAlignment vAlignment) {
-        if (vAlignment != null) {
-            this.vAlignment = switch (vAlignment) {
-                case TOP -> AlignSelf.FLEX_START;
-                case CENTER -> AlignSelf.CENTER;
-                case BOTTOM -> AlignSelf.FLEX_END;
-            };
+    public AlignSelf getVAlignment() { return vAlignment; }
+
+    public void setVAlignment(AlignSelf vAlignment) {
+        if (vAlignment != null && this.vAlignment != vAlignment) {
+            this.vAlignment = vAlignment;
             requestLayoutUpdate();
         }
     }
 
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public VAlignment getVAlignment() {
-        return switch (vAlignment) {
-            case FLEX_START -> VAlignment.TOP;
-            case CENTER -> VAlignment.CENTER;
-            case FLEX_END -> VAlignment.BOTTOM;
-            default -> VAlignment.TOP;
-        };
-    }
+    public AlignSelf getHAlignment() { return hAlignment; }
 
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public void setHAlignment(HAlignment hAlignment) {
-        if (hAlignment != null) {
-            this.hAlignment = switch (hAlignment) {
-                case LEFT -> AlignSelf.FLEX_START;
-                case CENTER -> AlignSelf.CENTER;
-                case RIGHT -> AlignSelf.FLEX_END;
-            };
+    public void setHAlignment(AlignSelf hAlignment) {
+        if (hAlignment != null && this.hAlignment != hAlignment) {
+            this.hAlignment = hAlignment;
             requestLayoutUpdate();
         }
     }
 
-    @Deprecated(since = "0.12.0", forRemoval = true)
-    public HAlignment getHAlignment() {
-        return switch (hAlignment) {
-            case FLEX_START -> HAlignment.LEFT;
-            case CENTER -> HAlignment.CENTER;
-            case FLEX_END -> HAlignment.RIGHT;
-            default -> HAlignment.LEFT;
-        };
-    }
+    // ── deprecated VAlignment/HAlignment wrappers (breadcrumb for migration) ──
+    // TODO: Remove after migration complete. Use setVAlignment(AlignSelf) instead.
 
 
     // =========================================================================

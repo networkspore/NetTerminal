@@ -8,6 +8,8 @@ import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.Orientation;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
@@ -70,8 +72,8 @@ public class TerminalHStack extends TerminalAbstractStack {
             "hstack",
             SizePreference.FIT_CONTENT, // default child-width  → children use intrinsic width
             SizePreference.FILL,        // default child-height → children fill height
-            VAlignment.CENTER,
-            HAlignment.LEFT
+            AlignSelf.CENTER,           // vertical alignment: center
+            AlignSelf.FLEX_START        // horizontal alignment: left
         );
         // Own sizing defaults: the stack itself fits its content width, fills height.
         setWidthPreference(SizePreference.FIT_CONTENT);
@@ -220,9 +222,9 @@ public class TerminalHStack extends TerminalAbstractStack {
 
         int totalWidth = totalGapWidth;
 
-        switch (overflowStrategy) {
+        switch (justifyContent) {
 
-            case SHRINK_FILL -> {
+            case SPACE_BETWEEN -> {  // Approximation for SHRINK_FILL
                 // Give FILL children exactly the available share; do not inflate
                 // to minWidth, so a space-starved stack shrinks gracefully.
                 for (int i = 0; i < layoutCount; i++) {
@@ -234,7 +236,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                 }
             }
 
-            case SHRINK_ALL -> {
+            case SPACE_AROUND -> {  // Approximation for SHRINK_ALL
                 // Use each child's hint width, then scale everyone down
                 // proportionally if the total exceeds the available space.
                 for (int i = 0; i < layoutCount; i++) {
@@ -257,7 +259,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                 }
             }
 
-            case DISTRIBUTE_EQUAL -> {
+            case SPACE_EVENLY -> {  // Approximation for DISTRIBUTE_EQUAL
                 int equalShare = layoutCount > 0
                     ? Math.max(0, availableForChildren / layoutCount) : 0;
                 for (int i = 0; i < layoutCount; i++) {
@@ -267,7 +269,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                 }
             }
 
-            // SCROLL falls through to CLIP until scroll support is implemented.
+            // FLEX_START (default) - standard clip behavior
             default -> {
                 for (int i = 0; i < layoutCount; i++) {
                     if (widths[i] == -1) {

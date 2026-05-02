@@ -9,8 +9,9 @@ import io.netnotes.terminal.TextStyle;
 import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.terminal.components.TerminalRegion;
 import io.netnotes.terminal.components.panels.TerminalVStack;
-import io.netnotes.terminal.components.panels.TerminalAbstractStack.HAlignment;
+import io.netnotes.terminal.components.panels.TerminalAbstractStack;
 import io.netnotes.terminal.components.panels.TerminalDivider;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
 import io.netnotes.terminal.components.panels.TerminalGroupRegion;
 import io.netnotes.terminal.components.panels.TerminalSetupFlow;
 import io.netnotes.terminal.components.text.TerminalLabel;
@@ -157,7 +158,7 @@ public class TerminalDialog extends TerminalGroupRegion {
 
     private void buildLayout() {
         rootStack.setSpacing(0);
-        rootStack.setHAlignment(HAlignment.LEFT);
+        rootStack.setHAlignment(AlignSelf.FLEX_START);
 
         titleLabel.setWidthPreference(SizePreference.FIT_CONTENT);
         titleLabel.setHeightPreference(SizePreference.FIT_CONTENT);
@@ -167,7 +168,7 @@ public class TerminalDialog extends TerminalGroupRegion {
 
         bodyWrapper.setWidthPreference(SizePreference.FILL);
         bodyWrapper.setHeightPreference(SizePreference.FILL);
-        bodyWrapper.setHAlignment(HAlignment.LEFT);
+        bodyWrapper.setHAlignment(AlignSelf.FLEX_START);
         bodyWrapper.setSpacing(0);
 
         footerDivider.setLineStyle(borderStyle);
