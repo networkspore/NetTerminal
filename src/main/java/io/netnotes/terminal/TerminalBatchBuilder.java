@@ -3,7 +3,6 @@ import io.netnotes.terminal.TextStyle.LineStyle;
 import io.netnotes.noteBytes.NoteBytes;
 import io.netnotes.noteBytes.NoteBytesObject;
 import io.netnotes.noteBytes.collections.NoteBytesMap;
-import io.netnotes.debug.BatchTraceAspect;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.TextAlignment;
 import io.netnotes.engine.ui.renderer.BatchBuilder;

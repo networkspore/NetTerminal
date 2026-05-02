@@ -281,9 +281,10 @@ public class TerminalHStack extends TerminalAbstractStack {
 
         // ── starting X (horizontal alignment) ─────────────────────────────────
         int startX = switch (hAlignment) {
-            case LEFT   -> ins.getLeft();
-            case CENTER -> ins.getLeft() + Math.max(0, (availableWidth - totalWidth) / 2);
-            case RIGHT  -> ins.getLeft() + Math.max(0, availableWidth - totalWidth);
+            case FLEX_START -> ins.getLeft();
+            case CENTER     -> ins.getLeft() + Math.max(0, (availableWidth - totalWidth) / 2);
+            case FLEX_END   -> ins.getLeft() + Math.max(0, availableWidth - totalWidth);
+            default         -> ins.getLeft();
         };
 
         // ── pass 2: place + record junction positions ──────────────────────────
@@ -302,9 +303,10 @@ public class TerminalHStack extends TerminalAbstractStack {
             } else {
                 int remaining = Math.max(0, availableHeight - heights[index]);
                 y = switch (vAlignment) {
-                    case TOP    -> ins.getTop();
-                    case BOTTOM -> ins.getTop() + remaining;
-                    default     -> ins.getTop() + (remaining / 2);
+                    case FLEX_START -> ins.getTop();
+                    case FLEX_END   -> ins.getTop() + remaining;
+                    case CENTER     -> ins.getTop() + (remaining / 2);
+                    default         -> ins.getTop() + (remaining / 2);
                 };
             }
 
@@ -328,7 +330,7 @@ public class TerminalHStack extends TerminalAbstractStack {
                 final int childY      = y;
                 final int childWidth  = allocatedWidth;
                 final int childHeight = allocatedHeight;
-                if (overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
+                if (overflowStrategy == Overflow.VISIBLE) {
                     builder.hidden(false);
                 } else {
                     RenderDiagnostics.logRenderBlocker(

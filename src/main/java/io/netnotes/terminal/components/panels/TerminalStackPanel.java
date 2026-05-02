@@ -18,6 +18,7 @@ import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
@@ -57,7 +58,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
     private int scrollOffsetX = 0;
     private int scrollOffsetY = 0;
 
-    private LayoutOverflowStrategy overflowStrategy = LayoutOverflowStrategy.CLIP;
+    private Overflow overflowStrategy = Overflow.HIDDEN;
 
     // ── layout group ──────────────────────────────────────────────────────────
 
@@ -109,11 +110,11 @@ public class TerminalStackPanel extends TerminalGroupRegion {
     // OVERFLOW
     // =========================================================================
 
-    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy; }
+    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy.toLayoutOverflowStrategy(); }
 
     public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
-        if (strategy != null && this.overflowStrategy != strategy) {
-            this.overflowStrategy = strategy;
+        if (strategy != null) {
+            this.overflowStrategy = strategy.toLayout2DOverflow();
             syncOverflowClipPolicy();
             requestLayoutUpdate();
         }
@@ -121,7 +122,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
 
     private void syncOverflowClipPolicy() {
         setOverflowClipPolicy(
-            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+            overflowStrategy == Overflow.VISIBLE
                 ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
                 : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
         );
@@ -418,7 +419,7 @@ public class TerminalStackPanel extends TerminalGroupRegion {
             int x = ins.getLeft() - scrollOffsetX;
             int y = ins.getTop()  - scrollOffsetY;
 
-            boolean outOfBounds = overflowStrategy != LayoutOverflowStrategy.OVERFLOW
+            boolean outOfBounds = overflowStrategy != Overflow.VISIBLE
                 && ((x + contentWidth  <= 0) || (x >= parentPanel.getWidth())
                  || (y + contentHeight <= 0) || (y >= parentPanel.getHeight()));
 

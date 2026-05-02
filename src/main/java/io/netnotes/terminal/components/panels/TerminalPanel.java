@@ -2,11 +2,15 @@ package io.netnotes.terminal.components.panels;
 
 import java.util.Map;
 
-import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.Position;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.AlignContent;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
 import io.netnotes.engine.ui.layout2d.FlexBasis;
+import io.netnotes.engine.ui.layout2d.FlexDirection;
 import io.netnotes.engine.ui.layout2d.FlexGrow;
+import io.netnotes.engine.ui.layout2d.FlexShrink;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
@@ -36,11 +40,22 @@ import io.netnotes.terminal.layout.TerminalSizeable;
  */
 public class TerminalPanel extends TerminalGroupRegion {
 
+    // ── Deprecated internal enums (kept for backward compatibility) ──────────
+    // These are thin wrappers around Layout2D types. Internal code uses Layout2D directly.
+
+    /**
+     * @deprecated Use {@link FlexDirection} instead.
+     */
+    @Deprecated(since = "0.12.0", forRemoval = true)
     public enum Axis {
         VERTICAL,
         HORIZONTAL
     }
 
+    /**
+     * @deprecated Use {@link AlignContent} instead.
+     */
+    @Deprecated(since = "0.12.0", forRemoval = true)
     public enum Alignment {
         START,    // default
         CENTER,
@@ -59,12 +74,12 @@ public class TerminalPanel extends TerminalGroupRegion {
     // ── layout ────────────────────────────────────────────────────────────────
     private final TerminalInsets padding = new TerminalInsets();
     private final TerminalInsets borderInsets = new TerminalInsets();
-    private Axis axis = Axis.HORIZONTAL;
+    private FlexDirection axis = FlexDirection.ROW;
     private boolean wrap = false;
     private int spacing = 0;
-    private Alignment crossAlignment = Alignment.START;
-    private Alignment alignment = Alignment.START;
-    private LayoutOverflowStrategy overflowStrategy = LayoutOverflowStrategy.CLIP;
+    private AlignSelf crossAlignment = AlignSelf.AUTO;
+    private AlignContent alignment = AlignContent.FLEX_START;
+    private Overflow overflowStrategy = Overflow.HIDDEN;
 
     // ── size constraints ──────────────────────────────────────────────────────
     private int maxWidth  = Integer.MAX_VALUE;
@@ -111,8 +126,8 @@ public class TerminalPanel extends TerminalGroupRegion {
         int effectiveHeight  = parent.getHeight();
         int availableWidth   = effectiveWidth  - ins.getHorizontal();
         int availableHeight  = effectiveHeight - ins.getVertical();
-        int availablePrimary = axis == Axis.VERTICAL ? availableHeight : availableWidth;
-        int availableCross   = axis == Axis.VERTICAL ? availableWidth  : availableHeight;
+        int availablePrimary = axis == FlexDirection.COLUMN ? availableHeight : availableWidth;
+        int availableCross   = axis == FlexDirection.COLUMN ? availableWidth  : availableHeight;
         int startX           = ins.getLeft();
         int startY           = ins.getTop();
 
@@ -129,7 +144,6 @@ public class TerminalPanel extends TerminalGroupRegion {
         int visibleCount = 0;
 
         // ── Pass 1: collect Layout2D metadata + inclusion rules ──────────────
-        // TIER1 NOT SUPPORTED: flex-shrink (FlexShrink enum not wired)
         for (int i = 0; i < count; i++) {
             TerminalLayoutContext childContext = contexts[i];
             TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
@@ -177,7 +191,7 @@ public class TerminalPanel extends TerminalGroupRegion {
             widths[i] = resolveWidth(widthGrow[i], widthBasis[i], child, childContext, availableCross, axis, availableForChildren);
             heights[i] = resolveHeight(heightGrow[i], heightBasis[i], child, childContext, availableCross, axis, availableForChildren);
 
-            int primary = axis == Axis.VERTICAL ? heights[i] : widths[i];
+            int primary = axis == FlexDirection.COLUMN ? heights[i] : widths[i];
             if (primary < 0) {
                 fillPrimaryCount++;
             } else {
@@ -197,7 +211,7 @@ public class TerminalPanel extends TerminalGroupRegion {
             case SHRINK_FILL -> {
                 for (int i = 0; i < count; i++) {
                     if (!inFlow[i]) continue;
-                    if (axis == Axis.VERTICAL) {
+                    if (axis == FlexDirection.COLUMN) {
                         if (heights[i] < 0) {
                             TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
                             heights[i] = clampDimension(child, rawFillPrimary, false);
@@ -219,7 +233,7 @@ public class TerminalPanel extends TerminalGroupRegion {
 
                     TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
 
-                    if (axis == Axis.VERTICAL) {
+                    if (axis == FlexDirection.COLUMN) {
                         if (heights[i] < 0) {
                             heights[i] = readContentDimension(child, contexts[i], false);
                         }
@@ -241,7 +255,7 @@ public class TerminalPanel extends TerminalGroupRegion {
 
                         TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
 
-                        if (axis == Axis.VERTICAL) {
+                        if (axis == FlexDirection.COLUMN) {
                             heights[i] = clampDimension(child, (int) (heights[i] * scale), false);
                             totalPrimaryUsed += heights[i];
                         } else {
@@ -262,7 +276,7 @@ public class TerminalPanel extends TerminalGroupRegion {
 
                     TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
 
-                    if (axis == Axis.VERTICAL) {
+                    if (axis == FlexDirection.COLUMN) {
                         heights[i] = clampDimension(child, equalShare, false);
                         totalPrimaryUsed += heights[i];
                     } else {
@@ -278,7 +292,7 @@ public class TerminalPanel extends TerminalGroupRegion {
 
                     TerminalRegion child = checkTerminalRegion(contexts[i].getRenderable());
 
-                    if (axis == Axis.VERTICAL) {
+                    if (axis == FlexDirection.COLUMN) {
                         if (heights[i] < 0) {
                             heights[i] = clampDimension(child, rawFillPrimary, false);
                         }
@@ -298,16 +312,16 @@ public class TerminalPanel extends TerminalGroupRegion {
         }
 
         int primaryOffset = switch (alignment) {
-            case CENTER -> Math.max(0, (availablePrimary - totalPrimaryUsed) / 2);
-            case END -> Math.max(0, availablePrimary - totalPrimaryUsed);
+            case FLEX_CENTER -> Math.max(0, (availablePrimary - totalPrimaryUsed) / 2);
+            case FLEX_END -> Math.max(0, availablePrimary - totalPrimaryUsed);
             default -> 0;
         };
 
         // ── Pass 4: place once and apply overflow rules only here ─────────────
-        int cursorX = startX + (axis == Axis.HORIZONTAL ? primaryOffset : 0);
-        int cursorY = startY + (axis == Axis.VERTICAL ? primaryOffset : 0);
+        int cursorX = startX + (axis == FlexDirection.ROW ? primaryOffset : 0);
+        int cursorY = startY + (axis == FlexDirection.COLUMN ? primaryOffset : 0);
         int lineCrossExtent = 0;
-        int wrapPrimaryLimit = axis == Axis.VERTICAL
+        int wrapPrimaryLimit = axis == FlexDirection.COLUMN
             ? startY + Math.max(0, availableHeight)
             : startX + Math.max(0, availableWidth);
 
@@ -319,9 +333,9 @@ public class TerminalPanel extends TerminalGroupRegion {
             int height = heights[i];
 
             if (wrap) {
-                int nextPrimary = axis == Axis.VERTICAL ? cursorY + height : cursorX + width;
+                int nextPrimary = axis == FlexDirection.COLUMN ? cursorY + height : cursorX + width;
                 if (lineCrossExtent > 0 && nextPrimary > wrapPrimaryLimit) {
-                    if (axis == Axis.VERTICAL) {
+                    if (axis == FlexDirection.COLUMN) {
                         cursorY = startY + primaryOffset;
                         cursorX += lineCrossExtent;
                     } else {
@@ -334,24 +348,24 @@ public class TerminalPanel extends TerminalGroupRegion {
 
             int x = cursorX;
             int y = cursorY;
-            int availableCrossAtCursor = axis == Axis.VERTICAL
+            int availableCrossAtCursor = axis == FlexDirection.COLUMN
                 ? Math.max(0, effectiveWidth - ins.getRight() - cursorX)
                 : Math.max(0, effectiveHeight - ins.getBottom() - cursorY);
 
-            if (crossAlignment == Alignment.STRETCH) {
-                if (axis == Axis.VERTICAL) width = availableCrossAtCursor;
+            if (crossAlignment == AlignSelf.STRETCH) {
+                if (axis == FlexDirection.COLUMN) width = availableCrossAtCursor;
                 else height = availableCrossAtCursor;
             }
 
-            int freeCross = availableCrossAtCursor - (axis == Axis.VERTICAL ? width : height);
+            int freeCross = availableCrossAtCursor - (axis == FlexDirection.COLUMN ? width : height);
             if (freeCross > 0) {
                 switch (crossAlignment) {
                     case CENTER -> {
-                        if (axis == Axis.VERTICAL) x += freeCross / 2;
+                        if (axis == FlexDirection.COLUMN) x += freeCross / 2;
                         else y += freeCross / 2;
                     }
                     case END -> {
-                        if (axis == Axis.VERTICAL) x += freeCross;
+                        if (axis == FlexDirection.COLUMN) x += freeCross;
                         else y += freeCross;
                     }
                     default -> {}
@@ -365,16 +379,16 @@ public class TerminalPanel extends TerminalGroupRegion {
             int allocatedHeight;
             boolean inBounds;
 
-            if (overflowStrategy == LayoutOverflowStrategy.OVERFLOW) {
-                allocatedWidth = axis == Axis.HORIZONTAL
+            if (overflowStrategy == Overflow.VISIBLE) {
+                allocatedWidth = axis == FlexDirection.ROW
                     ? Math.max(0, width)
                     : Math.min(Math.max(0, width), remainingWidth);
-                allocatedHeight = axis == Axis.VERTICAL
+                allocatedHeight = axis == FlexDirection.COLUMN
                     ? Math.max(0, height)
                     : Math.min(Math.max(0, height), remainingHeight);
 
                 boolean hasSpace = allocatedWidth > 0 && allocatedHeight > 0;
-                inBounds = hasSpace && (axis == Axis.VERTICAL
+                inBounds = hasSpace && (axis == FlexDirection.COLUMN
                     ? x >= 0 && x + allocatedWidth <= parent.getWidth()
                     : y >= 0 && y + allocatedHeight <= parent.getHeight());
             } else {
@@ -393,14 +407,14 @@ public class TerminalPanel extends TerminalGroupRegion {
                 .setHeight(Math.max(0, allocatedHeight));
 
             if (!inBounds) {
-                builder.hidden(overflowStrategy != LayoutOverflowStrategy.OVERFLOW);
+                builder.hidden(overflowStrategy != Overflow.VISIBLE);
             } else {
                 builder.hidden(false);
             }
 
             dataInterfaces.get(child.getName()).setLayoutData(builder.build());
 
-            if (axis == Axis.VERTICAL) {
+            if (axis == FlexDirection.COLUMN) {
                 cursorY += Math.max(0, allocatedHeight) + spacing;
                 lineCrossExtent = Math.max(lineCrossExtent, allocatedWidth);
             } else {
@@ -459,12 +473,12 @@ public class TerminalPanel extends TerminalGroupRegion {
     private int resolveWidth(FlexGrow grow, FlexBasis basis, TerminalRegion child,
             TerminalLayoutContext childContext, int availableCross, Axis axis, int availableForChildren) {
         if (grow.isNonZero()) {
-            return axis == Axis.HORIZONTAL ? -1
+            return axis == FlexDirection.ROW ? -1
                 : clampDimension(child, availableCross, true);
         }
         if (basis.isPercent()) {
             return clampDimension(child,
-                (int) (Math.max(0, axis == Axis.HORIZONTAL ? availableForChildren : availableCross)
+                (int) (Math.max(0, axis == FlexDirection.ROW ? availableForChildren : availableCross)
                     * basis.getPercent()), true);
         }
         if (basis.isContent()) {
@@ -483,12 +497,12 @@ public class TerminalPanel extends TerminalGroupRegion {
     private int resolveHeight(FlexGrow grow, FlexBasis basis, TerminalRegion child,
             TerminalLayoutContext childContext, int availableCross, Axis axis, int availableForChildren) {
         if (grow.isNonZero()) {
-            return axis == Axis.VERTICAL ? -1
+            return axis == FlexDirection.COLUMN ? -1
                 : clampDimension(child, availableCross, false);
         }
         if (basis.isPercent()) {
             return clampDimension(child,
-                (int) (Math.max(0, axis == Axis.VERTICAL ? availableForChildren : availableCross)
+                (int) (Math.max(0, axis == FlexDirection.COLUMN ? availableForChildren : availableCross)
                     * basis.getPercent()), false);
         }
         if (basis.isContent()) {
@@ -552,7 +566,7 @@ public class TerminalPanel extends TerminalGroupRegion {
             int childHeight = resolveMeasureSize(childHeightPref, child.getPercentHeight(), child, childContext, false);
 
             // Accumulate based on axis
-            if (axis == Axis.HORIZONTAL) {
+            if (axis == FlexDirection.ROW) {
                 totalPrimary += childWidth;
                 maxCross = Math.max(maxCross, childHeight);
             } else {
@@ -567,8 +581,8 @@ public class TerminalPanel extends TerminalGroupRegion {
         }
 
         // Calculate final dimensions
-        int contentW = axis == Axis.HORIZONTAL ? totalPrimary : maxCross;
-        int contentH = axis == Axis.VERTICAL ? totalPrimary : maxCross;
+        int contentW = axis == FlexDirection.ROW ? totalPrimary : maxCross;
+        int contentH = axis == FlexDirection.COLUMN ? totalPrimary : maxCross;
 
         SizePreference ownWidthPref = getWidthPreference();
         SizePreference ownHeightPref = getHeightPreference();
@@ -611,13 +625,13 @@ public class TerminalPanel extends TerminalGroupRegion {
 
     // ===== CONFIGURATION GETTERS / SETTERS =====
 
-    public Axis getAxis() { return axis; }
+    public Axis getAxis() {
+        return axis == FlexDirection.ROW ? Axis.HORIZONTAL : Axis.VERTICAL;
+    }
 
     public void setAxis(Axis axis) {
-        if (this.axis != axis) {
-            this.axis = axis;
-            requestLayoutUpdate();
-        }
+        this.axis = axis == Axis.HORIZONTAL ? FlexDirection.ROW : FlexDirection.COLUMN;
+        requestLayoutUpdate();
     }
 
     public boolean isWrap() { return wrap; }
@@ -638,29 +652,52 @@ public class TerminalPanel extends TerminalGroupRegion {
         }
     }
 
-    public Alignment getAlignment() { return alignment; }
+    public Alignment getAlignment() {
+        return switch (alignment) {
+            case FLEX_START -> Alignment.START;
+            case FLEX_CENTER -> Alignment.CENTER;
+            case FLEX_END -> Alignment.END;
+            case STRETCH -> Alignment.STRETCH;
+            default -> Alignment.START;
+        };
+    }
 
     public void setAlignment(Alignment alignment) {
-        if (this.alignment != alignment) {
-            this.alignment = alignment;
-            requestLayoutUpdate();
-        }
+        this.alignment = switch (alignment) {
+            case START -> AlignContent.FLEX_START;
+            case CENTER -> AlignContent.FLEX_CENTER;
+            case END -> AlignContent.FLEX_END;
+            case STRETCH -> AlignContent.STRETCH;
+        };
+        requestLayoutUpdate();
     }
 
-    public Alignment getCrossAlignment() { return crossAlignment; }
+    public Alignment getCrossAlignment() {
+        return switch (crossAlignment) {
+            case START, AUTO -> Alignment.START;
+            case CENTER -> Alignment.CENTER;
+            case END -> Alignment.END;
+            case STRETCH -> Alignment.STRETCH;
+            default -> Alignment.START;
+        };
+    }
 
     public void setCrossAlignment(Alignment crossAlignment) {
-        if (this.crossAlignment != crossAlignment) {
-            this.crossAlignment = crossAlignment;
-            requestLayoutUpdate();
+        this.crossAlignment = switch (crossAlignment) {
+            case START -> AlignSelf.FLEX_START;
+            case CENTER -> AlignSelf.CENTER;
+            case END -> AlignSelf.FLEX_END;
+            case STRETCH -> AlignSelf.STRETCH;
+        };
+        requestLayoutUpdate();
         }
     }
 
-    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy; }
+    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy.toLayoutOverflowStrategy(); }
 
     public void setOverflowStrategy(LayoutOverflowStrategy strategy) {
-        if (strategy != null && this.overflowStrategy != strategy) {
-            this.overflowStrategy = strategy;
+        if (strategy != null) {
+            this.overflowStrategy = strategy.toLayout2DOverflow();
             syncOverflowClipPolicy();
             requestLayoutUpdate();
         }
@@ -668,7 +705,7 @@ public class TerminalPanel extends TerminalGroupRegion {
 
     private void syncOverflowClipPolicy() {
         setOverflowClipPolicy(
-            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+            overflowStrategy == Overflow.VISIBLE
                 ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
                 : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
         );

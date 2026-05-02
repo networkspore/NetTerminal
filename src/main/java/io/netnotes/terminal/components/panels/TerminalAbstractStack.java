@@ -4,6 +4,14 @@ import java.util.Arrays;
 
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.AlignContent;
+import io.netnotes.engine.ui.layout2d.AlignSelf;
+import io.netnotes.engine.ui.layout2d.FlexBasis;
+import io.netnotes.engine.ui.layout2d.FlexDirection;
+import io.netnotes.engine.ui.layout2d.FlexGrow;
+import io.netnotes.engine.ui.layout2d.FlexShrink;
+import io.netnotes.engine.ui.layout2d.FlexWrap;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.terminal.TerminalRectangle;
 import io.netnotes.terminal.TerminalRenderable;
 import io.netnotes.terminal.TextStyle;
@@ -31,9 +39,11 @@ import io.netnotes.terminal.layout.TerminalSizeable;
  */
 public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
-    // ── alignment enums ───────────────────────────────────────────────────────
+    // ── alignment enums (deprecated — use Layout2D AlignSelf/FlexDirection) ──
 
+    @Deprecated(since = "0.12.0", forRemoval = true)
     public enum VAlignment { TOP, CENTER, BOTTOM }
+    @Deprecated(since = "0.12.0", forRemoval = true)
     public enum HAlignment { LEFT, CENTER, RIGHT }
 
     // ── padding / border insets ───────────────────────────────────────────────
@@ -60,12 +70,19 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
 
     // ── layout state ─────────────────────────────────────────────────────────
 
-    protected int                    spacing            = 0;
-    protected LayoutOverflowStrategy overflowStrategy   = LayoutOverflowStrategy.CLIP;
-
-
-    protected VAlignment vAlignment;
-    protected HAlignment hAlignment;
+    protected int             spacing            = 0;
+    protected Overflow        overflowStrategy   = Overflow.HIDDEN;
+    protected FlexDirection   direction          = FlexDirection.ROW;
+    protected AlignSelf       vAlignment         = AlignSelf.AUTO;
+    protected AlignSelf       hAlignment         = AlignSelf.AUTO;
+    protected FlexWrap        wrap               = FlexWrap.NOWRAP;
+    protected AlignContent    alignItems         = AlignContent.FLEX_START;
+    protected FlexGrow        defaultWidthGrow   = FlexGrow.NONE;
+    protected FlexShrink      defaultWidthShrink = FlexShrink.NONE;
+    protected FlexBasis       defaultWidthBasis  = FlexBasis.CONTENT;
+    protected FlexGrow        defaultHeightGrow  = FlexGrow.NONE;
+    protected FlexShrink      defaultHeightShrink = FlexShrink.NONE;
+    protected FlexBasis       defaultHeightBasis = FlexBasis.CONTENT;
 
     // ── layout group identity ─────────────────────────────────────────────────
 
@@ -237,35 +254,61 @@ public abstract class TerminalAbstractStack extends TerminalGroupRegion {
         }
     }
 
-    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy; }
+    public LayoutOverflowStrategy getOverflowStrategy() { return overflowStrategy.toLayoutOverflowStrategy(); }
 
     protected void syncOverflowClipPolicy() {
         setOverflowClipPolicy(
-            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+            overflowStrategy == Overflow.VISIBLE
                 ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
                 : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
         );
     }
 
-    // ── alignment ─────────────────────────────────────────────────────────────
+   // ── alignment (deprecated wrappers) ─────────────────────────────────────
 
+    @Deprecated(since = "0.12.0", forRemoval = true)
     public void setVAlignment(VAlignment vAlignment) {
-        if (this.vAlignment != vAlignment && vAlignment != null) {
-            this.vAlignment = vAlignment;
+        if (vAlignment != null) {
+            this.vAlignment = switch (vAlignment) {
+                case TOP -> AlignSelf.FLEX_START;
+                case CENTER -> AlignSelf.CENTER;
+                case BOTTOM -> AlignSelf.FLEX_END;
+            };
             requestLayoutUpdate();
         }
     }
 
-    public VAlignment getVAlignment() { return vAlignment; }
+    @Deprecated(since = "0.12.0", forRemoval = true)
+    public VAlignment getVAlignment() {
+        return switch (vAlignment) {
+            case FLEX_START -> VAlignment.TOP;
+            case CENTER -> VAlignment.CENTER;
+            case FLEX_END -> VAlignment.BOTTOM;
+            default -> VAlignment.TOP;
+        };
+    }
 
+    @Deprecated(since = "0.12.0", forRemoval = true)
     public void setHAlignment(HAlignment hAlignment) {
-        if (this.hAlignment != hAlignment && hAlignment != null) {
-            this.hAlignment = hAlignment;
+        if (hAlignment != null) {
+            this.hAlignment = switch (hAlignment) {
+                case LEFT -> AlignSelf.FLEX_START;
+                case CENTER -> AlignSelf.CENTER;
+                case RIGHT -> AlignSelf.FLEX_END;
+            };
             requestLayoutUpdate();
         }
     }
 
-    public HAlignment getHAlignment() { return hAlignment; }
+    @Deprecated(since = "0.12.0", forRemoval = true)
+    public HAlignment getHAlignment() {
+        return switch (hAlignment) {
+            case FLEX_START -> HAlignment.LEFT;
+            case CENTER -> HAlignment.CENTER;
+            case FLEX_END -> HAlignment.RIGHT;
+            default -> HAlignment.LEFT;
+        };
+    }
 
 
     // =========================================================================

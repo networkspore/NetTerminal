@@ -18,7 +18,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OverflowClipPolicyRenderTest {
-
+ 
     private static final int W = 20;
     private static final int H = 6;
 

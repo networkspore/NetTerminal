@@ -86,13 +86,16 @@ public class TerminalInstallStepRow extends TerminalVStack {
         super(name);
         if (step == null) throw new IllegalArgumentException("step must not be null");
         this.step = step;
+ 
 
-        setWidthPreference(SizePreference.FILL);
+         setWidthPreference(SizePreference.FILL);
         setHeightPreference(SizePreference.FIT_CONTENT);
+       
         // Keep the row itself non-zero during early measurement so parent fit-content
         // stacks do not collapse before child layout has stabilized.
         setMinHeight(1);
         setSpacing(0);
+
 
         // ── main row ──────────────────────────────────────────────────────────
         mainRow = new TerminalHStack(name + "-row");

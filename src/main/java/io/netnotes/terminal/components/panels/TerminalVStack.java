@@ -6,6 +6,7 @@ import java.util.Map;
 import io.netnotes.debug.RenderDiagnostics;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.terminal.TerminalBatchBuilder;
 import io.netnotes.terminal.TerminalRectangle;
@@ -109,7 +110,7 @@ public class TerminalVStack extends TerminalAbstractStack {
         // FIT_CONTENT and OVERFLOW never hide — FIT_CONTENT because the stack grows
         // to fit its children, OVERFLOW because children intentionally exceed bounds.
         boolean clipsChildren = getHeightPreference() != SizePreference.FIT_CONTENT
-                            && overflowStrategy != LayoutOverflowStrategy.OVERFLOW;
+                            && overflowStrategy != Overflow.VISIBLE;
 
         // ── separate participating children from layout-hidden ones ───────────────
         // Layout-hidden children (isHidden()) need another pass to become visible.
@@ -259,9 +260,10 @@ public class TerminalVStack extends TerminalAbstractStack {
 
         // ── starting Y (vertical alignment) ───────────────────────────────────────
         int startY = switch (vAlignment) {
-            case TOP    -> ins.getTop();
-            case CENTER -> ins.getTop() + Math.max(0, (availableHeight - totalHeight) / 2);
-            case BOTTOM -> ins.getTop() + Math.max(0, availableHeight - totalHeight);
+            case FLEX_START -> ins.getTop();
+            case CENTER     -> ins.getTop() + Math.max(0, (availableHeight - totalHeight) / 2);
+            case FLEX_END   -> ins.getTop() + Math.max(0, availableHeight - totalHeight);
+            default         -> ins.getTop();
         };
 
         // ── pass 2: place children ─────────────────────────────────────────────────
@@ -276,9 +278,10 @@ public class TerminalVStack extends TerminalAbstractStack {
             int x = widthPrefs[i] == SizePreference.FILL
                 ? ins.getLeft()
                 : ins.getLeft() + switch (hAlignment) {
-                    case LEFT  -> 0;
-                    case RIGHT -> Math.max(0, availableWidth - widths[i]);
-                    default    -> Math.max(0, availableWidth - widths[i]) / 2;
+                    case FLEX_START   -> 0;
+                    case FLEX_END     -> Math.max(0, availableWidth - widths[i]);
+                    case CENTER       -> Math.max(0, availableWidth - widths[i]) / 2;
+                    default           -> Math.max(0, availableWidth - widths[i]) / 2;
                 };
 
             // For clipping stacks, clamp to remaining space so a child never
@@ -407,7 +410,7 @@ public class TerminalVStack extends TerminalAbstractStack {
             
             TerminalRegion child = checkTerminalRegion(childContext.getRenderable());
 
-            if(ownHeightPref == SizePreference.FIT_CONTENT || overflowStrategy == LayoutOverflowStrategy.OVERFLOW){
+            if(ownHeightPref == SizePreference.FIT_CONTENT || overflowStrategy == Overflow.VISIBLE){
                 visibleCount++;
             }else if(!child.isHidden()){
                 visibleCount++;

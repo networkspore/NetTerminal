@@ -342,5 +342,6 @@ public class VisibilityContentSizeLayoutTest {
             if (failure instanceof AssertionError a) throw a;
             if (failure != null) throw new AssertionError("Test step failed", failure);
         }
+        
     }
 }

@@ -17,6 +17,7 @@ import io.netnotes.terminal.layout.TerminalLayoutGroupCallback;
 import io.netnotes.terminal.layout.TerminalSizeable;
 import io.netnotes.engine.ui.LayoutOverflowStrategy;
 import io.netnotes.engine.ui.SizePreference;
+import io.netnotes.engine.ui.layout2d.Overflow;
 import io.netnotes.engine.ui.renderer.LayoutGroup.LayoutDataInterface;
 import io.netnotes.engine.utils.LoggingHelpers.Log;
 
@@ -81,7 +82,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
     private int scrollOffsetX = 0;
     private int scrollOffsetY = 0;
     private final TerminalInsets padding = new TerminalInsets();
-    private LayoutOverflowStrategy overflowStrategy = LayoutOverflowStrategy.CLIP;
+    private Overflow overflowStrategy = Overflow.HIDDEN;
 
 
     // =========================================================================
@@ -166,7 +167,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
 
     private void syncOverflowClipPolicy() {
         setOverflowClipPolicy(
-            overflowStrategy == LayoutOverflowStrategy.OVERFLOW
+            overflowStrategy == Overflow.VISIBLE
                 ? TerminalRenderable.OverflowClipPolicy.INHERIT_PARENT_CLIP
                 : TerminalRenderable.OverflowClipPolicy.CLIP_TO_SELF_BOUNDS
         );
@@ -447,7 +448,7 @@ public class TerminalOverlayPanel extends TerminalGroupRegion {
             int childWidth  = resolveChildDimension(child, context, viewportWidth,  true);
             int childHeight = resolveChildDimension(child, context, viewportHeight, false);
 
-            boolean outOfBounds = overflowStrategy != LayoutOverflowStrategy.OVERFLOW
+            boolean outOfBounds = overflowStrategy != Overflow.VISIBLE
                 && ((x + childWidth  <= 0) || (x >= parentPanel.getWidth())
                  || (y + childHeight <= 0) || (y >= parentPanel.getHeight()));
 
